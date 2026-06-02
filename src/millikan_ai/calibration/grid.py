@@ -51,7 +51,7 @@ class GridCalibration:
 
 
 def default_voltage_roi(width: int, height: int) -> Roi:
-    return Roi(int(width * 0.56), 0, int(width * 0.30), int(height * 0.20))
+    return Roi(int(width * 0.62), 0, int(width * 0.24), int(height * 0.10))
 
 
 def auto_microscope_roi(frame: np.ndarray) -> Roi:

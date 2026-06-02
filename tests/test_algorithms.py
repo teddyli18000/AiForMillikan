@@ -5,7 +5,7 @@ import pandas as pd
 from millikan_ai.calibration.grid import detect_horizontal_grid_lines
 from millikan_ai.config import load_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
-from millikan_ai.ocr.voltage import read_voltage_from_image
+from millikan_ai.ocr.voltage import find_voltage_roi, read_voltage_from_image
 from millikan_ai.physics.charge import compute_drop_result
 from millikan_ai.segments.fitting import fit_line
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
@@ -26,6 +26,19 @@ def test_template_voltage_ocr_on_synthetic_digits():
     reading = read_voltage_from_image(image)
     assert reading.voltage_V == 100
     assert reading.confidence > 0.2
+
+
+def test_find_voltage_roi_uses_text_line_not_fixed_position():
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    for x in [560, 760, 980]:
+        cv2.line(image, (x, 40), (x, 680), (150, 120, 255), 2)
+    for y in [110, 230, 350, 470, 590]:
+        cv2.line(image, (250, y), (1000, y), (150, 120, 255), 2)
+    cv2.putText(image, "+240V", (820, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (180, 160, 255), 2, cv2.LINE_AA)
+    roi = find_voltage_roi(image)
+    assert roi.x < 820
+    assert roi.x + roi.w > 940
+    assert roi.y < 80
 
 
 def test_segment_voltage_platforms_groups_stable_values():
@@ -72,4 +85,3 @@ def test_elementary_charge_estimator_on_integer_multiples():
     result = estimate_elementary_charge(drops, config)
     assert result["valid"] is True
     assert abs(result["elementary_charge"]["e_hat_C"] - e) < 0.03e-19
-

@@ -57,11 +57,73 @@ TEMPLATES = _make_templates()
 
 
 def preprocess_voltage_roi(image: np.ndarray) -> np.ndarray:
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    if image.ndim == 3:
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        # The instrument digits and grid are blue-purple; this mask suppresses warm reflections.
+        color_mask = cv2.inRange(hsv, (95, 30, 45), (155, 255, 255))
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        if cv2.countNonZero(color_mask) > max(10, image.shape[0] * image.shape[1] * 0.002):
+            gray = cv2.bitwise_and(gray, gray, mask=color_mask)
+    else:
+        gray = image
     gray = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return binary
+
+
+def find_voltage_roi(frame: np.ndarray) -> Roi:
+    height, width = frame.shape[:2]
+    # Search the upper-right screen area. The camera position changes, so this is broad by design.
+    sx0, sy0 = int(width * 0.45), 0
+    sx1, sy1 = int(width * 0.95), int(height * 0.28)
+    search = frame[sy0:sy1, sx0:sx1]
+    hsv = cv2.cvtColor(search, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (95, 25, 45), (160, 255, 255))
+    # Remove long grid lines; seven-segment digits are short broken components.
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (45, 3))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 35))
+    grid_like = cv2.morphologyEx(mask, cv2.MORPH_OPEN, horizontal_kernel) | cv2.morphologyEx(mask, cv2.MORPH_OPEN, vertical_kernel)
+    mask = cv2.subtract(mask, grid_like)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    projection = mask.mean(axis=1)
+    active = np.where(projection > max(2.0, projection.max(initial=0) * 0.12))[0]
+    if len(active) == 0:
+        return Roi(int(width * 0.55), 0, int(width * 0.32), int(height * 0.12))
+    groups: list[list[int]] = [[int(active[0])]]
+    for row in active[1:]:
+        if int(row) - groups[-1][-1] <= 8:
+            groups[-1].append(int(row))
+        else:
+            groups.append([int(row)])
+    groups = [group for group in groups if len(group) >= 5]
+    if not groups:
+        return Roi(int(width * 0.55), 0, int(width * 0.32), int(height * 0.12))
+    # Voltage is the first text line above the timer.
+    group = min(groups, key=lambda g: sum(g) / len(g))
+    y0, y1 = max(0, group[0] - 12), min(search.shape[0], group[-1] + 14)
+    line_mask = mask[y0:y1, :]
+    contours, _ = cv2.findContours(line_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    boxes = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        area = cv2.contourArea(contour)
+        if area < 2 or h < 3 or w < 2:
+            continue
+        if w > 45 or h > 45:
+            continue
+        boxes.append((x, y, w, h))
+    if boxes:
+        xs = [x for x, _, _, _ in boxes] + [x + w for x, _, w, _ in boxes]
+        x0, x1 = max(0, min(xs) - 18), min(search.shape[1], max(xs) + 22)
+    else:
+        cols = np.where(line_mask.mean(axis=0) > max(1.5, line_mask.mean(axis=0).max(initial=0) * 0.08))[0]
+        if len(cols) == 0:
+            x0, x1 = int(search.shape[1] * 0.25), int(search.shape[1] * 0.95)
+        else:
+            x0, x1 = max(0, int(cols[0]) - 18), min(search.shape[1], int(cols[-1]) + 22)
+    return Roi(sx0 + x0, sy0 + y0, x1 - x0, y1 - y0)
 
 
 def _first_text_line(binary: np.ndarray) -> np.ndarray:

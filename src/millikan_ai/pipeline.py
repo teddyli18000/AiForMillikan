@@ -7,10 +7,10 @@ from pathlib import Path
 import cv2
 import pandas as pd
 
-from millikan_ai.calibration.grid import Roi, calibrate_grid, default_voltage_roi
+from millikan_ai.calibration.grid import Roi, calibrate_grid
 from millikan_ai.config import load_config, save_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
-from millikan_ai.ocr.voltage import read_voltage_from_frame
+from millikan_ai.ocr.voltage import find_voltage_roi, read_voltage_from_frame
 from millikan_ai.outputs.schemas import (
     BEST_TRACK_COLUMNS,
     CANDIDATE_SUMMARY_COLUMNS,
@@ -95,7 +95,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     save_diagnostic_frame(video_path, diagnostics_dir / "first_frame.jpg", 0)
     first_frame = read_frame(video_path, 0)
     microscope_roi = Roi.from_config(config["roi"].get("microscope_roi"))
-    voltage_roi = Roi.from_config(config["roi"].get("voltage_roi")) or default_voltage_roi(meta.width, meta.height)
+    voltage_roi = Roi.from_config(config["roi"].get("voltage_roi")) or find_voltage_roi(first_frame)
     grid = calibrate_grid(
         first_frame,
         microscope_roi,
