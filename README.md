@@ -125,4 +125,6 @@ r = sqrt(9 * eta_eff(r) * alpha / (2 * rho * g))
 q = 6 * pi * eta_eff(r) * r * beta
 ```
 
+Within each voltage platform, the backend fits the best stable sub-window after dropping the transient interval. It does not blindly fit the whole platform when early motion is unstable.
+
 For a single oil drop, elementary-charge blind estimation is intentionally reported as underdetermined because it needs multiple independent `q_i` values.

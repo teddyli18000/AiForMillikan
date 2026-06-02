@@ -43,3 +43,4 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - Do not silently output physical results when fewer than two usable voltage platforms exist.
 - `analysis_report.md` is the user-facing single-drop report; CSV/JSON/MP4 files remain the machine-readable contract.
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
+- Platform velocity fitting should use the best stable sub-window inside each voltage platform, not blindly fit the whole platform.
