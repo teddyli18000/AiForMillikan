@@ -36,6 +36,7 @@ def test_analyze_generates_markdown_report_with_real_q(tmp_path: Path):
     config["segment"]["transient_drop_s"] = 0.1
     config["segment"]["min_valid_points"] = 20
     config["segment"]["min_fit_r2"] = 0.75
+    config["segment"]["min_motion_displacement_px"] = 4
     config_path = tmp_path / "config.yaml"
     save_config(config, config_path)
 

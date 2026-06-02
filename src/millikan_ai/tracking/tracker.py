@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from millikan_ai.calibration.grid import Roi
-from millikan_ai.segments.fitting import fit_line
+from millikan_ai.segments.fitting import fit_line, select_stable_window
 from millikan_ai.tracking.detector import Blob, detect_blobs
 from millikan_ai.video.reader import inspect_video
 
@@ -22,8 +22,10 @@ def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, 
         return 0, 0.0, 0.0
     frame = pd.DataFrame(rows)
     transient = float(config["segment"]["transient_drop_s"])
+    min_duration = float(config["segment"]["stable_min_duration_s"])
     min_points = int(config["segment"]["min_valid_points"])
     min_r2 = float(config["segment"]["min_fit_r2"])
+    min_displacement = float(config["segment"].get("min_motion_displacement_px", 0))
     usable = 0
     r2_values = []
     vx_values = []
@@ -33,8 +35,12 @@ def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, 
         segment = frame[(frame["time_s"] >= start) & (frame["time_s"] <= end) & (frame["is_valid_detection"].astype(bool))]
         if len(segment) < max(2, min_points):
             continue
+        segment = select_stable_window(segment, min_duration, min_points)
         y_fit = fit_line(segment["time_s"].to_numpy(float), segment["y_px"].to_numpy(float))
         x_fit = fit_line(segment["time_s"].to_numpy(float), segment["x_px"].to_numpy(float))
+        duration = float(segment["time_s"].max() - segment["time_s"].min())
+        if abs(y_fit["slope"]) * duration < min_displacement:
+            continue
         r2_values.append(max(0.0, min(1.0, y_fit["r2"])))
         vx_values.append(abs(x_fit["slope"]))
         if y_fit["r2"] >= min_r2:

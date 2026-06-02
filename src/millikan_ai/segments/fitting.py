@@ -57,6 +57,7 @@ def fit_track_segments(
     min_duration = float(config["segment"]["stable_min_duration_s"])
     min_points = int(config["segment"]["min_valid_points"])
     min_r2 = float(config["segment"]["min_fit_r2"])
+    min_displacement = float(config["segment"].get("min_motion_displacement_px", 0))
     for platform in platforms.to_dict("records"):
         start = float(platform["start_time_s"]) + transient
         end = float(platform["end_time_s"])
@@ -80,6 +81,9 @@ def fit_track_segments(
         else:
             y_fit = {"slope": 0.0, "r2": 0.0, "rmse": math.inf, "sigma_slope": math.inf}
             x_fit = {"slope": 0.0}
+        displacement = abs(float(y_fit["slope"])) * duration
+        if displacement < min_displacement:
+            flags.append("low_motion_displacement")
         if y_fit["r2"] < min_r2 and abs(y_fit["slope"]) > 0.5:
             flags.append("low_r2")
         stable = not flags
