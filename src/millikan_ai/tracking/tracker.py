@@ -8,12 +8,41 @@ import numpy as np
 import pandas as pd
 
 from millikan_ai.calibration.grid import Roi
+from millikan_ai.segments.fitting import fit_line
 from millikan_ai.tracking.detector import Blob, detect_blobs
 from millikan_ai.video.reader import inspect_video
 
 
 def _distance(a: Blob, b: Blob) -> float:
     return math.hypot(a.x_px - b.x_px, a.y_px - b.y_px)
+
+
+def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, config: dict) -> tuple[int, float, float]:
+    if not rows or platforms.empty:
+        return 0, 0.0, 0.0
+    frame = pd.DataFrame(rows)
+    transient = float(config["segment"]["transient_drop_s"])
+    min_points = int(config["segment"]["min_valid_points"])
+    min_r2 = float(config["segment"]["min_fit_r2"])
+    usable = 0
+    r2_values = []
+    vx_values = []
+    for platform in platforms.to_dict("records"):
+        start = float(platform["start_time_s"]) + transient
+        end = float(platform["end_time_s"])
+        segment = frame[(frame["time_s"] >= start) & (frame["time_s"] <= end) & (frame["is_valid_detection"].astype(bool))]
+        if len(segment) < max(2, min_points):
+            continue
+        y_fit = fit_line(segment["time_s"].to_numpy(float), segment["y_px"].to_numpy(float))
+        x_fit = fit_line(segment["time_s"].to_numpy(float), segment["x_px"].to_numpy(float))
+        r2_values.append(max(0.0, min(1.0, y_fit["r2"])))
+        vx_values.append(abs(x_fit["slope"]))
+        if y_fit["r2"] >= min_r2:
+            usable += 1
+    mean_r2 = float(np.mean(r2_values)) if r2_values else 0.0
+    mean_abs_vx = float(np.mean(vx_values)) if vx_values else 0.0
+    drift_score = 1.0 / (1.0 + mean_abs_vx / 3.0)
+    return usable, mean_r2, drift_score
 
 
 def track_best_candidate(
@@ -87,7 +116,11 @@ def track_best_candidate(
         missing_ratio = missing / max(len(rows), 1)
         total_duration = rows[-1]["time_s"] - rows[0]["time_s"] if len(rows) > 1 else 0.0
         platform_count = len({row["platform_id"] for row in rows if row["platform_id"]})
-        score = max(0.0, min(1.0, (1 - missing_ratio) * (0.4 + 0.2 * platform_count)))
+        fit_usable_count, mean_r2, drift_score = _platform_fit_score(rows, platforms, config)
+        coverage_basis = fit_usable_count if not platforms.empty else platform_count
+        coverage_score = min(1.0, coverage_basis / max(len(platforms), 1)) if not platforms.empty else 0.0
+        continuity_score = 1 - missing_ratio
+        score = max(0.0, min(1.0, 0.35 * continuity_score + 0.35 * coverage_score + 0.20 * mean_r2 + 0.10 * drift_score))
         tracks.append(rows)
         summaries.append(
             {
@@ -96,8 +129,11 @@ def track_best_candidate(
                 "total_duration_s": total_duration,
                 "missing_ratio": missing_ratio,
                 "score_total": score,
+                "fit_usable_platform_count": fit_usable_count,
+                "mean_speed_fit_r2": mean_r2,
+                "drift_score": drift_score,
                 "rank": 0,
-                "reject_reason": "" if score > 0 else "tracking_failed",
+                "reject_reason": "" if fit_usable_count >= min(2, len(platforms)) or platforms.empty else "insufficient_stable_platform_fits",
             }
         )
     cap.release()
@@ -107,4 +143,3 @@ def track_best_candidate(
     best_id = summaries[0]["candidate_id"]
     best_rows = next(rows for rows in tracks if rows and rows[0]["track_id"] == best_id)
     return pd.DataFrame(best_rows), pd.DataFrame(summaries)
-

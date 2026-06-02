@@ -7,7 +7,7 @@ from millikan_ai.config import load_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
 from millikan_ai.ocr.voltage import find_voltage_roi, read_voltage_from_image
 from millikan_ai.physics.charge import compute_drop_result
-from millikan_ai.segments.fitting import fit_line
+from millikan_ai.segments.fitting import fit_line, select_stable_window
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
 
 
@@ -56,6 +56,17 @@ def test_fit_line_recovers_velocity():
     fit = fit_line(t, y)
     assert abs(fit["slope"] - 4.0) < 1e-9
     assert fit["r2"] > 0.999
+
+
+def test_select_stable_window_skips_noisy_platform_prefix():
+    t = np.arange(0, 5, 0.1)
+    y = 2.0 * t + 4.0
+    y[:20] += np.sin(np.arange(20)) * 8
+    frame = pd.DataFrame({"time_s": t, "y_px": y, "x_px": np.zeros_like(t), "is_valid_detection": True})
+    stable = select_stable_window(frame, min_duration_s=1.5, min_points=15)
+    fit = fit_line(stable["time_s"].to_numpy(float), stable["y_px"].to_numpy(float))
+    assert stable["time_s"].min() >= 1.0
+    assert fit["r2"] > 0.95
 
 
 def test_compute_drop_result_for_synthetic_segments():

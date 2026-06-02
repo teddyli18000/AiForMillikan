@@ -10,13 +10,14 @@ from millikan_ai.pipeline import run_pipeline
 
 def _make_two_platform_video(path: Path) -> None:
     writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (360, 260))
+    drop_y = 45.0
     for idx in range(180):
         frame = np.zeros((260, 360, 3), dtype=np.uint8)
-        for y in [25, 65, 105, 145, 185, 225]:
-            cv2.line(frame, (35, y), (260, y), (255, 255, 255), 2)
+        for grid_y in [25, 65, 105, 145, 185, 225]:
+            cv2.line(frame, (35, grid_y), (260, grid_y), (255, 255, 255), 2)
         cv2.putText(frame, "100V" if idx < 90 else "250V", (235, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (230, 230, 230), 2, cv2.LINE_AA)
-        y = 45 + idx * (0.22 if idx < 90 else 0.55)
-        cv2.circle(frame, (115, int(y)), 4, (255, 255, 255), -1)
+        drop_y += 0.22 if idx < 90 else 0.55
+        cv2.circle(frame, (115, int(drop_y)), 4, (255, 255, 255), -1)
         writer.write(frame)
     writer.release()
 
@@ -71,4 +72,3 @@ def test_single_platform_report_is_invalid(tmp_path: Path):
     assert drop["valid"] is False
     assert "insufficient_stable_platforms" in report
     assert "视频是否合法: false" in report
-

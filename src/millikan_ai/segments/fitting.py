@@ -22,6 +22,30 @@ def fit_line(time_s: np.ndarray, values: np.ndarray) -> dict[str, float]:
     return {"slope": slope, "intercept": intercept, "r2": r2, "rmse": rmse, "sigma_slope": sigma_slope}
 
 
+def select_stable_window(valid: pd.DataFrame, min_duration_s: float, min_points: int) -> pd.DataFrame:
+    if len(valid) <= min_points:
+        return valid
+    valid = valid.sort_values("time_s").reset_index(drop=True)
+    best: tuple[float, int, int] | None = None
+    times = valid["time_s"].to_numpy(float)
+    for start_idx in range(0, len(valid) - min_points + 1):
+        for end_idx in range(start_idx + min_points - 1, len(valid)):
+            duration = times[end_idx] - times[start_idx]
+            if duration < min_duration_s:
+                continue
+            # Prefer longer windows when fit quality is comparable.
+            window = valid.iloc[start_idx : end_idx + 1]
+            y_fit = fit_line(window["time_s"].to_numpy(float), window["y_px"].to_numpy(float))
+            score = max(0.0, y_fit["r2"]) + min(0.1, duration / 100.0)
+            if best is None or score > best[0]:
+                best = (score, start_idx, end_idx)
+            break
+    if best is None:
+        return valid
+    _, start_idx, end_idx = best
+    return valid.iloc[start_idx : end_idx + 1].copy()
+
+
 def fit_track_segments(
     track: pd.DataFrame,
     platforms: pd.DataFrame,
@@ -44,6 +68,12 @@ def fit_track_segments(
             flags.append("too_short")
         if len(valid) < min_points:
             flags.append("too_few_points")
+        if len(valid) >= min_points and duration >= min_duration:
+            valid = select_stable_window(valid, min_duration, min_points)
+            if not valid.empty:
+                start = float(valid["time_s"].min())
+                end = float(valid["time_s"].max())
+                duration = max(0.0, end - start)
         if len(valid) >= 2:
             y_fit = fit_line(valid["time_s"].to_numpy(float), valid["y_px"].to_numpy(float))
             x_fit = fit_line(valid["time_s"].to_numpy(float), valid["x_px"].to_numpy(float))
@@ -74,4 +104,3 @@ def fit_track_segments(
             }
         )
     return pd.DataFrame(rows)
-
