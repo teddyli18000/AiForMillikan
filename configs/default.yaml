@@ -37,6 +37,7 @@ tracking:
   best_track_min_score: 0.45
 
 physics:
+  voltage_sign: 1
   plate_distance_m: 0.005
   oil_density_kg_m3: 981.0
   air_viscosity_Pa_s: 0.0000181
@@ -55,6 +56,7 @@ elementary:
   random_seed: 42
 
 output:
+  voltage_samples_csv: voltage_samples.csv
   platforms_csv: platforms.csv
   best_track_csv: best_track.csv
   best_track_segments_csv: best_track_segments.csv
@@ -65,3 +67,4 @@ output:
   elementary_charge_result_json: elementary_charge_result.json
   overlay_mp4: overlay_best_track.mp4
   summary_txt: summary.txt
+  analysis_report_md: analysis_report.md

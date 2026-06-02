@@ -16,9 +16,11 @@ from millikan_ai.outputs.schemas import (
     CANDIDATE_SUMMARY_COLUMNS,
     PLATFORMS_COLUMNS,
     SEGMENT_COLUMNS,
+    VOLTAGE_SAMPLE_COLUMNS,
     validate_columns,
 )
 from millikan_ai.physics.charge import compute_drop_result
+from millikan_ai.reporting.markdown import write_analysis_report
 from millikan_ai.segments.fitting import fit_track_segments
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
 from millikan_ai.tracking.overlay import render_overlay
@@ -41,22 +43,44 @@ def _load_manual_platforms(config: dict) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=PLATFORMS_COLUMNS) if rows else pd.DataFrame(columns=PLATFORMS_COLUMNS)
 
 
-def _sample_voltage_series(video_path: Path, roi: Roi, config: dict, max_voltage: float = 1000.0) -> list[VoltageSample]:
+def _sample_voltage_series(video_path: Path, roi: Roi, config: dict, max_voltage: float = 1000.0) -> tuple[list[VoltageSample], pd.DataFrame]:
     meta = inspect_video(video_path)
     every = int(config["ocr"]["sample_every_n_frames"])
     samples: list[VoltageSample] = []
+    rows: list[dict[str, object]] = []
     for frame_idx in range(0, meta.frame_count, max(1, every)):
         frame = read_frame(video_path, frame_idx)
         reading = read_voltage_from_frame(frame, roi)
         voltage = reading.voltage_V
         source = reading.source
         confidence = reading.confidence
+        accepted = True
+        reject_reason = ""
         if voltage is None or abs(voltage) > max_voltage or reading.confidence < float(config["ocr"]["min_confidence"]):
             voltage = None
             source = "template_ocr_rejected"
             confidence = min(confidence, 0.2)
+            accepted = False
+            if reading.voltage_V is None:
+                reject_reason = "no_voltage_value"
+            elif abs(reading.voltage_V) > max_voltage:
+                reject_reason = "voltage_out_of_range"
+            else:
+                reject_reason = "low_confidence"
         samples.append(VoltageSample(frame_idx, frame_idx / meta.fps if meta.fps else 0.0, voltage, confidence, source))
-    return samples
+        rows.append(
+            {
+                "frame_idx": frame_idx,
+                "time_s": frame_idx / meta.fps if meta.fps else 0.0,
+                "voltage_V": voltage,
+                "confidence": confidence,
+                "source": source,
+                "raw_text": reading.text,
+                "accepted": accepted,
+                "reject_reason": reject_reason,
+            }
+        )
+    return samples, pd.DataFrame(rows, columns=VOLTAGE_SAMPLE_COLUMNS)
 
 
 def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path | None = None) -> Path:
@@ -79,10 +103,11 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         int(config["calibration"]["min_grid_lines"]),
     )
     manual_platforms = _load_manual_platforms(config)
+    voltage_samples = pd.DataFrame(columns=VOLTAGE_SAMPLE_COLUMNS)
     if not manual_platforms.empty:
         platforms = manual_platforms
     else:
-        samples = _sample_voltage_series(video_path, voltage_roi, config)
+        samples, voltage_samples = _sample_voltage_series(video_path, voltage_roi, config)
         platforms = segment_voltage_platforms(
             samples,
             float(config["ocr"]["voltage_tolerance_V"]),
@@ -90,6 +115,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         )
     if platforms.empty:
         platforms = pd.DataFrame(columns=PLATFORMS_COLUMNS)
+    voltage_samples.to_csv(target / output_cfg.get("voltage_samples_csv", "voltage_samples.csv"), index=False)
     platforms.to_csv(target / output_cfg["platforms_csv"], index=False)
     best_track, candidate_summary = track_best_candidate(video_path, video_path.stem, grid.roi, platforms, config)
     if best_track.empty:
@@ -110,8 +136,11 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     _write_json(target / output_cfg["drop_results_json"], drop_result)
     quality_scores = {
         "implemented": "non_ml_hard_rule_summary",
+        "ml_training": False,
         "best_candidate": candidate_summary.head(1).to_dict("records"),
         "ml_filtering": "not_in_scope",
+        "drop_valid": bool(drop_result.get("valid")),
+        "drop_flags": drop_result.get("flags", []),
     }
     _write_json(target / output_cfg["quality_scores_json"], quality_scores)
     elementary = estimate_elementary_charge([drop_result], config)
@@ -124,6 +153,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         "track_rows": int(len(best_track)),
         "segment_rows": int(len(segments)),
         "overlay_written": overlay_written,
+        "time_source": "opencv_fps_frame_index",
         "flags": [],
     }
     if platforms.empty:
@@ -132,6 +162,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         diagnostics["flags"].append("requires_manual_grid_calibration")
     _write_json(target / output_cfg["diagnostics_json"], diagnostics)
     write_summary(target, config)
+    write_analysis_report(target, config)
     return target
 
 
@@ -140,6 +171,7 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
     root = Path(run_dir)
     output = config["output"]
     errors: list[str] = []
+    errors.extend(validate_columns(root / output.get("voltage_samples_csv", "voltage_samples.csv"), VOLTAGE_SAMPLE_COLUMNS))
     errors.extend(validate_columns(root / output["platforms_csv"], PLATFORMS_COLUMNS))
     errors.extend(validate_columns(root / output["best_track_csv"], BEST_TRACK_COLUMNS))
     errors.extend(validate_columns(root / output["best_track_segments_csv"], SEGMENT_COLUMNS))
@@ -153,6 +185,8 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
                 json.loads(path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
                 errors.append(f"invalid json {path.name}: {exc}")
+    if not (root / output.get("analysis_report_md", "analysis_report.md")).exists():
+        errors.append("missing file: analysis_report.md")
     return errors
 
 

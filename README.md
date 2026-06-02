@@ -48,6 +48,12 @@ Run the backend pipeline:
 .venv\Scripts\python -m millikan_ai.cli run --video raw_data\2u.mp4 --config configs\default.yaml --non-interactive
 ```
 
+Generate the user-facing single-drop analysis report:
+
+```powershell
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml
+```
+
 Validate and summarize a run:
 
 ```powershell
@@ -60,6 +66,7 @@ Validate and summarize a run:
 Each run directory writes:
 
 - `run_config.yaml`
+- `voltage_samples.csv`
 - `platforms.csv`
 - `best_track.csv`
 - `best_track_segments.csv`
@@ -70,6 +77,7 @@ Each run directory writes:
 - `elementary_charge_result.json`
 - `overlay_best_track.mp4`
 - `summary.txt`
+- `analysis_report.md`
 
 If automatic voltage OCR cannot produce reliable platform voltages, `diagnostics.json` includes `requires_manual_platforms`. The run still records video metadata, grid calibration, candidate tracking, overlay, and validation-safe output files.
 
@@ -101,5 +109,18 @@ The backend records `source=manual` in `platforms.csv`; it does not pretend manu
 
 ## Current Raw Video Behavior
 
-`raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay, but voltage OCR is rejected as low confidence, so physical charge output is invalid until manual platforms are supplied. This is intentional safety behavior.
+`raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md`, but voltage OCR is rejected as low confidence, so physical charge output is invalid until manual platforms are supplied. This is intentional safety behavior.
 
+With reliable platform data, the single-drop calculation uses:
+
+```text
+time_s = frame_idx / fps
+v_y_m_s = v_y_px_s * scale_y_m_per_px
+E = voltage_sign * U / d
+v = alpha + beta * E
+eta_eff(r) = eta / (1 + b / (p * r))
+r = sqrt(9 * eta_eff(r) * alpha / (2 * rho * g))
+q = 6 * pi * eta_eff(r) * r * beta
+```
+
+For a single oil drop, elementary-charge blind estimation is intentionally reported as underdetermined because it needs multiple independent `q_i` values.

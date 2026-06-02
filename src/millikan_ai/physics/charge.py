@@ -48,7 +48,8 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
         }
     constants = config["physics"]
     d = float(constants["plate_distance_m"])
-    e_field = stable["voltage_V"].to_numpy(float) / d
+    voltage_sign = float(constants.get("voltage_sign", 1.0))
+    e_field = voltage_sign * stable["voltage_V"].to_numpy(float) / d
     velocity = stable["vy_m_s"].to_numpy(float)
     if len(set(np.round(e_field, 6))) < 2:
         flags.append("insufficient_distinct_voltages")
@@ -88,4 +89,3 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
         "quality_score": 0.8 if valid else 0.45,
         "flags": flags,
     }
-

@@ -29,6 +29,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    run_dir = run_pipeline(args.video, args.config, args.run_dir)
+    report = Path(run_dir) / "analysis_report.md"
+    print(f"run_dir={run_dir}")
+    print(f"analysis_report={report}")
+    errors = validate_run(run_dir, args.config)
+    if errors:
+        print("validation_errors=" + json.dumps(errors, ensure_ascii=False))
+        return 2
+    return 0
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     errors = validate_run(args.run_dir, args.config)
     if errors:
@@ -57,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--run-dir")
     run.add_argument("--non-interactive", action="store_true")
     run.set_defaults(func=_cmd_run)
+    analyze = sub.add_parser("analyze")
+    analyze.add_argument("--video", required=True)
+    analyze.add_argument("--config", default="configs/default.yaml")
+    analyze.add_argument("--run-dir")
+    analyze.set_defaults(func=_cmd_analyze)
     validate = sub.add_parser("validate")
     validate.add_argument("--run-dir", required=True)
     validate.add_argument("--config", default="configs/default.yaml")
@@ -76,4 +93,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

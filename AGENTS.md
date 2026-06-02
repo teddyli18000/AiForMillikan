@@ -30,7 +30,7 @@ Use the local virtual environment:
 ```powershell
 .venv\Scripts\python -m pytest tests
 .venv\Scripts\python -m millikan_ai.cli inspect raw_data\single.mp4
-.venv\Scripts\python -m millikan_ai.cli run --video raw_data\2u.mp4 --config configs\default.yaml --non-interactive
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml
 ```
 
 ## Current Implementation Rules
@@ -39,4 +39,5 @@ Use the local virtual environment:
 - If OCR, ROI detection, or tracking confidence is low, write explicit flags and allow manual/config-driven correction.
 - Do not claim ML-based trajectory filtering is implemented in this stage.
 - Do not silently output physical results when fewer than two usable voltage platforms exist.
-
+- `analysis_report.md` is the user-facing single-drop report; CSV/JSON/MP4 files remain the machine-readable contract.
+- Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.

@@ -12,6 +12,14 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
         for drop in drop_results
         if drop.get("valid") and drop.get("result", {}).get("charge_abs_C") and drop.get("result", {}).get("sigma_charge_C")
     ]
+    if len(valid) == 1:
+        return {
+            "valid": False,
+            "flags": ["insufficient_independent_drops"],
+            "num_total_drops": len(drop_results),
+            "num_used_drops": 1,
+            "reason": "Blind elementary-charge estimation requires multiple independent q_i values.",
+        }
     if len(valid) < int(cfg["min_drops"]):
         return {
             "valid": False,

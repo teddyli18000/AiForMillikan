@@ -16,6 +16,17 @@ PLATFORMS_COLUMNS = [
     "source",
 ]
 
+VOLTAGE_SAMPLE_COLUMNS = [
+    "frame_idx",
+    "time_s",
+    "voltage_V",
+    "confidence",
+    "source",
+    "raw_text",
+    "accepted",
+    "reject_reason",
+]
+
 BEST_TRACK_COLUMNS = [
     "video_id",
     "track_id",
@@ -72,4 +83,3 @@ def validate_columns(path: str | Path, required_columns: list[str]) -> list[str]
         return [f"failed to read {csv_path.name}: {exc}"]
     missing = [column for column in required_columns if column not in frame.columns]
     return [f"{csv_path.name} missing column: {column}" for column in missing]
-
