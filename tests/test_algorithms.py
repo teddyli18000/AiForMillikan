@@ -1,0 +1,75 @@
+import cv2
+import numpy as np
+import pandas as pd
+
+from millikan_ai.calibration.grid import detect_horizontal_grid_lines
+from millikan_ai.config import load_config
+from millikan_ai.elementary.estimate import estimate_elementary_charge
+from millikan_ai.ocr.voltage import read_voltage_from_image
+from millikan_ai.physics.charge import compute_drop_result
+from millikan_ai.segments.fitting import fit_line
+from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
+
+
+def test_detect_horizontal_grid_lines_on_synthetic_image():
+    image = np.zeros((240, 320, 3), dtype=np.uint8)
+    for y in [30, 70, 110, 150, 190]:
+        cv2.line(image, (20, y), (300, y), (255, 255, 255), 2)
+    lines = detect_horizontal_grid_lines(image)
+    assert len(lines) == 5
+    assert abs(lines[1] - 70) <= 2
+
+
+def test_template_voltage_ocr_on_synthetic_digits():
+    image = np.zeros((80, 220, 3), dtype=np.uint8)
+    cv2.putText(image, "+100V", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (210, 210, 210), 2, cv2.LINE_AA)
+    reading = read_voltage_from_image(image)
+    assert reading.voltage_V == 100
+    assert reading.confidence > 0.2
+
+
+def test_segment_voltage_platforms_groups_stable_values():
+    samples = [
+        VoltageSample(i * 10, i / 3, 100 if i < 6 else 180, 0.9, "template_ocr")
+        for i in range(12)
+    ]
+    platforms = segment_voltage_platforms(samples, voltage_tolerance_V=5, min_duration_s=1.0)
+    assert list(platforms["voltage_V"]) == [100, 180]
+
+
+def test_fit_line_recovers_velocity():
+    t = np.arange(0, 5, 0.1)
+    y = 4.0 * t + 7.0
+    fit = fit_line(t, y)
+    assert abs(fit["slope"] - 4.0) < 1e-9
+    assert fit["r2"] > 0.999
+
+
+def test_compute_drop_result_for_synthetic_segments():
+    config = load_config("configs/default.yaml")
+    rows = []
+    for voltage, velocity in [(0.0, 2.0e-4), (200.0, 1.0e-4), (400.0, -0.5e-4)]:
+        rows.append(
+            {
+                "platform_id": f"P{len(rows)+1:03d}",
+                "voltage_V": voltage,
+                "vy_m_s": velocity,
+                "stable": True,
+            }
+        )
+    result = compute_drop_result(pd.DataFrame(rows), config)
+    assert result["result"]["radius_m"] > 0
+    assert result["result"]["charge_abs_C"] > 0
+
+
+def test_elementary_charge_estimator_on_integer_multiples():
+    config = load_config("configs/default.yaml")
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.04e-19}}
+        for i, n in enumerate([2, 3, 5, 7, 8])
+    ]
+    result = estimate_elementary_charge(drops, config)
+    assert result["valid"] is True
+    assert abs(result["elementary_charge"]["e_hat_C"] - e) < 0.03e-19
+

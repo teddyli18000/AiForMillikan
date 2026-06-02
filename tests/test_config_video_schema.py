@@ -1,0 +1,30 @@
+from pathlib import Path
+
+import pandas as pd
+
+from millikan_ai.config import load_config
+from millikan_ai.outputs.schemas import PLATFORMS_COLUMNS, validate_columns
+from millikan_ai.video.reader import inspect_video
+
+
+def test_default_config_loads():
+    config = load_config("configs/default.yaml")
+    assert config["physics"]["plate_distance_m"] == 0.005
+    assert config["segment"]["stable_min_duration_s"] > 0
+
+
+def test_raw_video_inspect_reads_metadata():
+    meta = inspect_video("raw_data/single.mp4")
+    assert meta.readable is True
+    assert meta.width == 1280
+    assert meta.height == 720
+    assert meta.frame_count > 0
+    assert meta.fps > 0
+
+
+def test_schema_validator_reports_missing_columns(tmp_path: Path):
+    path = tmp_path / "platforms.csv"
+    pd.DataFrame({"platform_id": ["P001"]}).to_csv(path, index=False)
+    errors = validate_columns(path, PLATFORMS_COLUMNS)
+    assert "platforms.csv missing column: start_frame" in errors
+
