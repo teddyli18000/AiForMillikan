@@ -28,9 +28,10 @@ This project analyzes Millikan oil drop experiment videos. The current backend i
 Use the local virtual environment:
 
 ```powershell
-.venv\Scripts\python -m pytest tests
+.venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp -o cache_dir=runs\pytest_cache
 .venv\Scripts\python -m millikan_ai.cli inspect raw_data\single.mp4
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
 ```
 
 All project dependencies must stay inside the project-local `.venv/`. Do not install Python packages globally or into the user's base Conda environment.
@@ -44,3 +45,5 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - `analysis_report.md` is the user-facing single-drop report; CSV/JSON/MP4 files remain the machine-readable contract.
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
 - Platform velocity fitting should use the best stable sub-window inside each voltage platform, not blindly fit the whole platform.
+- Candidate tracking and segment validation must reject stationary grid/bright-spot candidates using `segment.min_motion_displacement_px`.
+- CLI manual platform inputs use `--platform START_FRAME:END_FRAME:VOLTAGE`; generated configs are written under `runs/manual_configs/` and platforms use `source=manual_cli`.

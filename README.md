@@ -31,7 +31,7 @@ Do not install dependencies globally or into the base Conda environment. Use `.v
 ## Test
 
 ```powershell
-.venv\Scripts\python -m pytest tests -q
+.venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp -o cache_dir=runs\pytest_cache
 ```
 
 The test suite uses synthetic images/videos for deterministic OCR, grid, platform, tracking, velocity, charge, elementary-charge, and CLI behavior.
@@ -87,6 +87,20 @@ If automatic voltage OCR cannot produce reliable platform voltages, `diagnostics
 
 For reliable physical `q` calculation, add `manual_platforms` to a config file when OCR confidence is low:
 
+For quick CLI testing, pass frame ranges directly. The format is `START_FRAME:END_FRAME:VOLTAGE`, and the CLI writes a reproducible config under `runs\manual_configs\`.
+
+```powershell
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
+```
+
+For guided input, use:
+
+```powershell
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --interactive-platforms
+```
+
+You can also add `manual_platforms` to a config file:
+
 ```yaml
 manual_platforms:
   - platform_id: P001
@@ -107,11 +121,11 @@ manual_platforms:
     source: manual
 ```
 
-The backend records `source=manual` in `platforms.csv`; it does not pretend manual corrections came from OCR.
+The backend records `source=manual` or `source=manual_cli` in `platforms.csv`; it does not pretend manual corrections came from OCR.
 
 ## Current Raw Video Behavior
 
-`raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md`, but voltage OCR is rejected as low confidence, so physical charge output is invalid until manual platforms are supplied. This is intentional safety behavior.
+`raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md`, but voltage OCR is rejected as low confidence, so physical charge output is invalid until manual platforms are supplied. With CLI manual platforms, the backend can select a stable single droplet and compute a real physics-based `q`. This OCR rejection is intentional safety behavior.
 
 With reliable platform data, the single-drop calculation uses:
 
