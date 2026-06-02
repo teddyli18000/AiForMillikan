@@ -13,8 +13,7 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     meta = inspect_video(args.video)
     print(json.dumps(meta.to_dict(), indent=2, ensure_ascii=False))
     if args.save_frame:
-        target = Path(args.save_frame)
-        save_diagnostic_frame(args.video, target)
+        target = save_diagnostic_frame(args.video, Path(args.save_frame))
         print(f"diagnostic_frame={target}")
     return 0 if meta.readable else 1
 

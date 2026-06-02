@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ def _read_csv(path: Path) -> pd.DataFrame:
 
 def _fmt(value: Any) -> str:
     if value is None:
+        return ""
+    if isinstance(value, float) and math.isnan(value):
         return ""
     if isinstance(value, float):
         if abs(value) >= 1e4 or (value != 0 and abs(value) < 1e-3):
@@ -159,4 +162,3 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
     target = root / output.get("analysis_report_md", "analysis_report.md")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return target
-

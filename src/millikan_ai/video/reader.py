@@ -5,6 +5,8 @@ from pathlib import Path
 
 import cv2
 
+SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+
 
 @dataclass(frozen=True)
 class VideoMetadata:
@@ -67,7 +69,10 @@ def read_frame(video_path: str | Path, frame_idx: int):
 def save_diagnostic_frame(video_path: str | Path, output_path: str | Path, frame_idx: int = 0) -> Path:
     frame = read_frame(video_path, frame_idx)
     target = Path(output_path)
+    if target.suffix.lower() not in SUPPORTED_IMAGE_SUFFIXES:
+        target = target.with_suffix(".jpg")
     target.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(target), frame)
+    ok = cv2.imwrite(str(target), frame)
+    if not ok:
+        raise RuntimeError(f"Failed to write diagnostic frame: {target}")
     return target
-

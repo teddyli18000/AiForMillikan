@@ -33,6 +33,8 @@ Use the local virtual environment:
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml
 ```
 
+All project dependencies must stay inside the project-local `.venv/`. Do not install Python packages globally or into the user's base Conda environment.
+
 ## Current Implementation Rules
 
 - All thresholds and physical constants should come from `configs/default.yaml`.

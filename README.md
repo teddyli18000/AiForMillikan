@@ -26,6 +26,8 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -e . pytest
 ```
 
+Do not install dependencies globally or into the base Conda environment. Use `.venv\Scripts\python -m pip ...` from this project directory.
+
 ## Test
 
 ```powershell
