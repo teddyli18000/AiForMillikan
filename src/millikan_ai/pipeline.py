@@ -43,14 +43,21 @@ def _load_manual_platforms(config: dict) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=PLATFORMS_COLUMNS) if rows else pd.DataFrame(columns=PLATFORMS_COLUMNS)
 
 
-def _sample_voltage_series(video_path: Path, roi: Roi, config: dict, max_voltage: float = 1000.0) -> tuple[list[VoltageSample], pd.DataFrame]:
+def _sample_voltage_series(
+    video_path: Path,
+    roi: Roi,
+    config: dict,
+    max_voltage: float = 1000.0,
+    dynamic_roi: bool = False,
+) -> tuple[list[VoltageSample], pd.DataFrame]:
     meta = inspect_video(video_path)
     every = int(config["ocr"]["sample_every_n_frames"])
     samples: list[VoltageSample] = []
     rows: list[dict[str, object]] = []
     for frame_idx in range(0, meta.frame_count, max(1, every)):
         frame = read_frame(video_path, frame_idx)
-        reading = read_voltage_from_frame(frame, roi)
+        sample_roi = find_voltage_roi(frame) if dynamic_roi else roi
+        reading = read_voltage_from_frame(frame, sample_roi)
         voltage = reading.voltage_V
         source = reading.source
         confidence = reading.confidence
@@ -78,6 +85,10 @@ def _sample_voltage_series(video_path: Path, roi: Roi, config: dict, max_voltage
                 "raw_text": reading.text,
                 "accepted": accepted,
                 "reject_reason": reject_reason,
+                "roi_x": sample_roi.x,
+                "roi_y": sample_roi.y,
+                "roi_w": sample_roi.w,
+                "roi_h": sample_roi.h,
             }
         )
     return samples, pd.DataFrame(rows, columns=VOLTAGE_SAMPLE_COLUMNS)
@@ -95,7 +106,9 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     save_diagnostic_frame(video_path, diagnostics_dir / "first_frame.jpg", 0)
     first_frame = read_frame(video_path, 0)
     microscope_roi = Roi.from_config(config["roi"].get("microscope_roi"))
-    voltage_roi = Roi.from_config(config["roi"].get("voltage_roi")) or find_voltage_roi(first_frame)
+    configured_voltage_roi = Roi.from_config(config["roi"].get("voltage_roi"))
+    voltage_roi = configured_voltage_roi or find_voltage_roi(first_frame)
+    dynamic_voltage_roi = configured_voltage_roi is None and bool(config["ocr"].get("dynamic_voltage_roi", True))
     grid = calibrate_grid(
         first_frame,
         microscope_roi,
@@ -107,7 +120,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     if not manual_platforms.empty:
         platforms = manual_platforms
     else:
-        samples, voltage_samples = _sample_voltage_series(video_path, voltage_roi, config)
+        samples, voltage_samples = _sample_voltage_series(video_path, voltage_roi, config, dynamic_roi=dynamic_voltage_roi)
         platforms = segment_voltage_platforms(
             samples,
             float(config["ocr"]["voltage_tolerance_V"]),
@@ -147,7 +160,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
     diagnostics = {
         "video": meta.to_dict(),
-        "roi": {"microscope_roi": grid.roi.to_list(), "voltage_roi": voltage_roi.to_list()},
+        "roi": {"microscope_roi": grid.roi.to_list(), "voltage_roi": voltage_roi.to_list(), "dynamic_voltage_roi": dynamic_voltage_roi},
         "grid": grid.to_dict(),
         "platform_count": int(len(platforms)),
         "track_rows": int(len(best_track)),

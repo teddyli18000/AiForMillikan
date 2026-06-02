@@ -30,6 +30,13 @@ def test_template_voltage_ocr_on_synthetic_digits():
     assert reading.confidence > 0.2
 
 
+def test_voltage_ocr_rejects_unmarked_numeric_noise():
+    image = np.zeros((80, 180, 3), dtype=np.uint8)
+    cv2.putText(image, "855", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (210, 210, 210), 2, cv2.LINE_AA)
+    reading = read_voltage_from_image(image)
+    assert reading.voltage_V is None
+
+
 def test_seven_segment_digit_classifier():
     image = np.zeros((42, 28), dtype=np.uint8)
     cv2.line(image, (6, 3), (22, 3), 255, 2)

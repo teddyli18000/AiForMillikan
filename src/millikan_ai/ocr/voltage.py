@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 import cv2
 import numpy as np
@@ -54,6 +55,7 @@ def _make_templates() -> dict[str, list[np.ndarray]]:
 
 
 TEMPLATES = _make_templates()
+VOLTAGE_TEXT_PATTERN = re.compile(r"^[+-]?\d{1,3}V?$")
 
 SEVEN_SEGMENT_DIGITS = {
     frozenset("abcfed"): "0",
@@ -298,8 +300,10 @@ def read_voltage_from_image(image: np.ndarray) -> OcrReading:
             chars.append(char)
             scores.append(score)
     text = "".join(chars)
-    numeric_text = text.split("V", 1)[0]
-    digits = "".join(ch for ch in numeric_text if ch.isdigit() or ch in "+-")
+    candidate_text = text.strip()
+    digits = ""
+    if VOLTAGE_TEXT_PATTERN.match(candidate_text) and ("V" in candidate_text or candidate_text[:1] in "+-"):
+        digits = candidate_text.rstrip("V")
     voltage = None
     if digits not in {"", "+", "-"}:
         try:

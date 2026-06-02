@@ -25,6 +25,10 @@ VOLTAGE_SAMPLE_COLUMNS = [
     "raw_text",
     "accepted",
     "reject_reason",
+    "roi_x",
+    "roi_y",
+    "roi_w",
+    "roi_h",
 ]
 
 BEST_TRACK_COLUMNS = [
