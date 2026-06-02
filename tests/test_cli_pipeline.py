@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import yaml
 
+from millikan_ai.cli.__main__ import _parse_platform_spec
 from millikan_ai.config import load_config, save_config
 from millikan_ai.pipeline import run_pipeline, validate_run
 
@@ -56,3 +57,11 @@ def test_cli_help_runs():
     assert result.returncode == 0
     assert "inspect" in result.stdout
 
+
+def test_parse_cli_platform_spec_uses_frame_time():
+    platform = _parse_platform_spec("30:90:175", fps=30.0, index=2)
+    assert platform["platform_id"] == "P002"
+    assert platform["start_time_s"] == 1.0
+    assert platform["end_time_s"] == 3.0
+    assert platform["voltage_V"] == 175.0
+    assert platform["source"] == "manual_cli"
