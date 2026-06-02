@@ -55,6 +55,19 @@ def _make_templates() -> dict[str, list[np.ndarray]]:
 
 TEMPLATES = _make_templates()
 
+SEVEN_SEGMENT_DIGITS = {
+    frozenset("abcfed"): "0",
+    frozenset("bc"): "1",
+    frozenset("abged"): "2",
+    frozenset("abgcd"): "3",
+    frozenset("fgbc"): "4",
+    frozenset("afgcd"): "5",
+    frozenset("afgecd"): "6",
+    frozenset("abc"): "7",
+    frozenset("abcdefg"): "8",
+    frozenset("abfgcd"): "9",
+}
+
 
 def preprocess_voltage_roi(image: np.ndarray) -> np.ndarray:
     if image.ndim == 3:
@@ -142,8 +155,32 @@ def _first_text_line(binary: np.ndarray) -> np.ndarray:
             groups[-1].append(int(row))
         else:
             groups.append([int(row)])
-    groups.sort(key=len, reverse=True)
-    top = min(groups[:2], key=lambda g: sum(g) / len(g))
+    best_score = -1.0
+    best_group = groups[0]
+    for group in groups:
+        y0, y1 = max(0, group[0] - 4), min(binary.shape[0], group[-1] + 5)
+        candidate = binary[y0:y1, :]
+        contours, _ = cv2.findContours(candidate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        boxes = []
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            area = cv2.contourArea(contour)
+            if area < 4 or h < 6 or w < 3:
+                continue
+            if h > candidate.shape[0] * 0.95 and w < 8:
+                continue
+            boxes.append((x, y, w, h))
+        if boxes:
+            xs = [x for x, _, _, _ in boxes] + [x + w for x, _, w, _ in boxes]
+            span = max(xs) - min(xs)
+        else:
+            span = 0
+        score = len(boxes) * 3.0 + min(span, binary.shape[1] * 0.5) / max(binary.shape[1], 1)
+        score += min(len(group), 120) / 120.0
+        if score > best_score:
+            best_score = score
+            best_group = group
+    top = best_group
     y0, y1 = max(0, top[0] - 6), min(binary.shape[0], top[-1] + 7)
     return binary[y0:y1, :]
 
@@ -211,7 +248,44 @@ def _match_char(patch: np.ndarray) -> tuple[str, float]:
             if score > best_score:
                 best_char = char
                 best_score = score
+    fallback = _match_seven_segment_char(patch)
+    if best_score < 0.45 and fallback[1] >= 0.95:
+        return fallback
     return best_char, max(0.0, min(1.0, best_score))
+
+
+def _match_seven_segment_char(patch: np.ndarray) -> tuple[str, float]:
+    glyph = _normalize_glyph(patch)
+    on = glyph > 0
+    fill_ratio = float(on.mean())
+    if fill_ratio > 0.42 or fill_ratio < 0.04:
+        return "", 0.0
+    regions = {
+        "a": on[2:8, 6:22].mean(),
+        "b": on[6:18, 18:27].mean(),
+        "c": on[22:36, 18:27].mean(),
+        "d": on[34:41, 6:22].mean(),
+        "e": on[22:36, 1:10].mean(),
+        "f": on[6:18, 1:10].mean(),
+        "g": on[18:25, 6:22].mean(),
+    }
+    active = frozenset(segment for segment, value in regions.items() if value >= 0.12)
+    inactive_values = [value for segment, value in regions.items() if segment not in active]
+    active_values = [value for segment, value in regions.items() if segment in active]
+    if active_values and inactive_values and (np.mean(active_values) - np.mean(inactive_values)) < 0.08:
+        return "", 0.0
+    if not active:
+        return "", 0.0
+    best_digit = ""
+    best_distance = 99
+    for expected, digit in SEVEN_SEGMENT_DIGITS.items():
+        distance = len(active.symmetric_difference(expected))
+        if distance < best_distance:
+            best_distance = distance
+            best_digit = digit
+    confidence = max(0.0, 1.0 - best_distance / 5.0)
+    # Plus and V are not seven-segment digits; keep them for fallback matching.
+    return best_digit, confidence
 
 
 def read_voltage_from_image(image: np.ndarray) -> OcrReading:

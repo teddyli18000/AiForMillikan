@@ -6,6 +6,8 @@ from millikan_ai.calibration.grid import detect_horizontal_grid_lines
 from millikan_ai.config import load_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
 from millikan_ai.ocr.voltage import find_voltage_roi, read_voltage_from_image
+from millikan_ai.ocr.voltage import _first_text_line, preprocess_voltage_roi
+from millikan_ai.ocr.voltage import _match_seven_segment_char
 from millikan_ai.physics.charge import compute_drop_result
 from millikan_ai.segments.fitting import fit_line, select_stable_window
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
@@ -26,6 +28,25 @@ def test_template_voltage_ocr_on_synthetic_digits():
     reading = read_voltage_from_image(image)
     assert reading.voltage_V == 100
     assert reading.confidence > 0.2
+
+
+def test_seven_segment_digit_classifier():
+    image = np.zeros((42, 28), dtype=np.uint8)
+    cv2.line(image, (6, 3), (22, 3), 255, 2)
+    cv2.line(image, (24, 6), (24, 18), 255, 2)
+    cv2.line(image, (24, 23), (24, 36), 255, 2)
+    char, confidence = _match_seven_segment_char(image)
+    assert char == "7"
+    assert confidence >= 0.6
+
+
+def test_voltage_ocr_line_selection_skips_top_noise():
+    image = np.zeros((96, 408, 3), dtype=np.uint8)
+    cv2.line(image, (5, 8), (170, 8), (210, 210, 210), 1)
+    cv2.putText(image, "+100V", (120, 54), cv2.FONT_HERSHEY_SIMPLEX, 1.25, (210, 210, 210), 2, cv2.LINE_AA)
+    binary = preprocess_voltage_roi(image)
+    line = _first_text_line(binary)
+    assert line.shape[0] > 40
 
 
 def test_find_voltage_roi_uses_text_line_not_fixed_position():
