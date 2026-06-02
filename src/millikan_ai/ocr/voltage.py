@@ -85,27 +85,8 @@ def find_voltage_roi(frame: np.ndarray) -> Roi:
     vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 35))
     grid_like = cv2.morphologyEx(mask, cv2.MORPH_OPEN, horizontal_kernel) | cv2.morphologyEx(mask, cv2.MORPH_OPEN, vertical_kernel)
     mask = cv2.subtract(mask, grid_like)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    projection = mask.mean(axis=1)
-    active = np.where(projection > max(2.0, projection.max(initial=0) * 0.12))[0]
-    if len(active) == 0:
-        return Roi(int(width * 0.55), 0, int(width * 0.32), int(height * 0.12))
-    groups: list[list[int]] = [[int(active[0])]]
-    for row in active[1:]:
-        if int(row) - groups[-1][-1] <= 8:
-            groups[-1].append(int(row))
-        else:
-            groups.append([int(row)])
-    groups = [group for group in groups if len(group) >= 5]
-    if not groups:
-        return Roi(int(width * 0.55), 0, int(width * 0.32), int(height * 0.12))
-    # Voltage is the first text line above the timer.
-    group = min(groups, key=lambda g: sum(g) / len(g))
-    y0, y1 = max(0, group[0] - 12), min(search.shape[0], group[-1] + 14)
-    line_mask = mask[y0:y1, :]
-    contours, _ = cv2.findContours(line_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    boxes = []
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    boxes: list[tuple[int, int, int, int]] = []
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
         area = cv2.contourArea(contour)
@@ -113,16 +94,40 @@ def find_voltage_roi(frame: np.ndarray) -> Roi:
             continue
         if w > 45 or h > 45:
             continue
+        if x + w / 2 < search.shape[1] * 0.32:
+            continue
         boxes.append((x, y, w, h))
-    if boxes:
-        xs = [x for x, _, _, _ in boxes] + [x + w for x, _, w, _ in boxes]
-        x0, x1 = max(0, min(xs) - 18), min(search.shape[1], max(xs) + 22)
-    else:
-        cols = np.where(line_mask.mean(axis=0) > max(1.5, line_mask.mean(axis=0).max(initial=0) * 0.08))[0]
-        if len(cols) == 0:
-            x0, x1 = int(search.shape[1] * 0.25), int(search.shape[1] * 0.95)
+    if not boxes:
+        return Roi(int(width * 0.55), 0, int(width * 0.32), int(height * 0.12))
+    rows: list[list[tuple[int, int, int, int]]] = []
+    for box in sorted(boxes, key=lambda b: b[1] + b[3] / 2):
+        cy = box[1] + box[3] / 2
+        for row in rows:
+            row_cy = sum(b[1] + b[3] / 2 for b in row) / len(row)
+            if abs(cy - row_cy) <= 28:
+                row.append(box)
+                break
         else:
-            x0, x1 = max(0, int(cols[0]) - 18), min(search.shape[1], int(cols[-1]) + 22)
+            rows.append([box])
+    candidates = []
+    for row in rows:
+        xs = [x for x, _, _, _ in row] + [x + w for x, _, w, _ in row]
+        ys = [y for _, y, _, _ in row] + [y + h for _, y, _, h in row]
+        x_span = max(xs) - min(xs)
+        if len(row) >= 2 and x_span >= 45:
+            candidates.append((min(ys), min(xs), max(xs), min(ys), max(ys)))
+    if not candidates:
+        row = max(rows, key=len)
+        xs = [x for x, _, _, _ in row] + [x + w for x, _, w, _ in row]
+        ys = [y for _, y, _, _ in row] + [y + h for _, y, _, h in row]
+        candidates.append((min(ys), min(xs), max(xs), min(ys), max(ys)))
+    _, x_min, x_max, y_min, y_max = min(candidates, key=lambda item: item[0])
+    row_width = x_max - x_min
+    # Keep a generous horizontal band once the voltage row is found; component boxes may
+    # miss broken seven-segment strokes under blur/reflection.
+    x0 = max(0, x_min - max(40, row_width))
+    x1 = min(search.shape[1], x_max + max(45, int(row_width * 0.35)))
+    y0, y1 = max(0, y_min - 14), min(search.shape[0], y_max + 16)
     return Roi(sx0 + x0, sy0 + y0, x1 - x0, y1 - y0)
 
 
