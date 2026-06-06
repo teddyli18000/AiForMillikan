@@ -85,6 +85,7 @@ def _build_run_manifest(
         "status": {
             "video_readable": bool(diagnostics.get("video", {}).get("readable")),
             "valid_for_q": bool(drop_result.get("valid")),
+            "valid_for_elementary_charge": bool(elementary.get("valid")),
             "drop_valid": bool(drop_result.get("valid")),
             "ml_training": bool(quality_scores.get("ml_training", False)),
             "flags": flags,
