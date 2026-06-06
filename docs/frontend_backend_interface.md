@@ -4,13 +4,30 @@ This document defines the current backend contract for the future portable deskt
 
 ## CLI/API Entry Point
 
-The backend entry point for a single video run is:
+The preferred backend entry point for the future desktop app is the Python API:
+
+```python
+from millikan_ai.api import AnalysisRequest, ManualPlatformInput, analyze_video
+
+result = analyze_video(
+    AnalysisRequest(
+        video_path="raw_data/2u.mp4",
+        config_path="configs/default.yaml",
+        manual_platforms=(
+            ManualPlatformInput(0, 180, 0.0),
+            ManualPlatformInput(181, 468, 175.0),
+        ),
+    )
+)
+```
+
+The CLI remains the test harness for the same backend flow:
 
 ```powershell
 .venv\Scripts\python -m millikan_ai.cli analyze --video <video_path> --config configs\default.yaml --interactive-platforms
 ```
 
-For non-interactive UI integration, the frontend should create or request manual platform rows and run:
+For non-interactive CLI integration, a caller can create or request manual platform rows and run:
 
 ```powershell
 .venv\Scripts\python -m millikan_ai.cli analyze --video <video_path> --config <generated_config.yaml> --run-dir <run_dir>
@@ -109,6 +126,16 @@ Voltage OCR is not trusted for current raw videos. The UI should ask:
 - voltage in volts
 
 The backend validates frame ranges and records manual entries as non-OCR sources. The UI must not label manually entered voltages as automatic OCR.
+
+## Multi-Drop Extension Direction
+
+The current contract is single-drop. Multi-drop support should extend this without breaking existing fields:
+
+- keep `run_manifest.json.schema_version` versioned
+- keep `primary_results` for the selected/default drop
+- add a future `drops` collection for per-drop `drop_results`
+- add a future multi-drop elementary-charge result that consumes all valid independent `charge_abs_C` values
+- keep single-drop reports valid when only one droplet is found
 
 ## Current Non-ML Scope
 

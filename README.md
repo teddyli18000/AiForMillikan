@@ -127,6 +127,30 @@ manual_platforms:
 
 The backend records `source=manual` or `source=manual_cli` in `platforms.csv`; it does not pretend manual corrections came from OCR.
 
+## Backend API
+
+The future desktop app should call the backend API directly instead of shelling out through the CLI when possible:
+
+```python
+from millikan_ai.api import AnalysisRequest, ManualPlatformInput, analyze_video
+
+result = analyze_video(
+    AnalysisRequest(
+        video_path="raw_data/2u.mp4",
+        config_path="configs/default.yaml",
+        manual_platforms=(
+            ManualPlatformInput(0, 180, 0.0),
+            ManualPlatformInput(181, 468, 175.0),
+        ),
+    )
+)
+
+print(result.run_dir)
+print(result.manifest["status"])
+```
+
+The API writes the same output contract as the CLI, including `run_manifest.json`.
+
 ## Current Raw Video Behavior
 
 `raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md`, but voltage OCR is rejected as low confidence, so physical charge output is invalid until manual platforms are supplied. With CLI manual platforms, the backend can select a stable single droplet and compute a real physics-based `q`. This OCR rejection is intentional safety behavior.

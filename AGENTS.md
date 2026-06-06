@@ -7,6 +7,7 @@ This project analyzes Millikan oil drop experiment videos. The current backend i
 ## Module Boundaries
 
 - `src/millikan_ai/video/`: OpenCV video metadata, frame sampling, and diagnostic frames.
+- `src/millikan_ai/api.py`: public backend API for CLI and future PySide6/Qt frontend integration.
 - `src/millikan_ai/calibration/`: screen/ROI/grid calibration and physical scale estimation.
 - `src/millikan_ai/ocr/`: local OpenCV/template voltage OCR; no Tesseract or deep OCR dependency.
 - `src/millikan_ai/tracking/`: non-ML droplet candidate detection, single-target tracking, scoring, and overlay rendering.

@@ -4,33 +4,18 @@ import argparse
 import json
 from pathlib import Path
 
-from millikan_ai.config import load_config, save_config
-from millikan_ai.pipeline import run_pipeline, validate_run, write_summary
+from millikan_ai.api import AnalysisRequest, ManualPlatformInput, analyze_video, manual_platform_row, parse_manual_platform_spec, prepare_analysis_config
+from millikan_ai.config import load_config
+from millikan_ai.pipeline import validate_run, write_summary
 from millikan_ai.video.reader import inspect_video, save_diagnostic_frame
 
 
 def _manual_platform_row(start_frame: int, end_frame: int, voltage: float, fps: float, index: int, frame_count: int | None = None) -> dict[str, object]:
-    if start_frame < 0 or end_frame < start_frame:
-        raise ValueError(f"invalid platform frame range: {start_frame}:{end_frame}")
-    if frame_count is not None and frame_count > 0 and end_frame >= frame_count:
-        raise ValueError(f"platform end_frame {end_frame} exceeds video last frame {frame_count - 1}")
-    return {
-        "platform_id": f"P{index:03d}",
-        "start_frame": start_frame,
-        "end_frame": end_frame,
-        "start_time_s": start_frame / fps if fps else 0.0,
-        "end_time_s": end_frame / fps if fps else 0.0,
-        "voltage_V": voltage,
-        "voltage_confidence": 1.0,
-        "source": "manual_cli",
-    }
+    return manual_platform_row(ManualPlatformInput(start_frame, end_frame, voltage, source="manual_cli"), fps, index, frame_count)
 
 
 def _parse_platform_spec(spec: str, fps: float, index: int, frame_count: int | None = None) -> dict[str, object]:
-    parts = [part.strip() for part in spec.split(":")]
-    if len(parts) != 3:
-        raise ValueError(f"platform spec must be START_FRAME:END_FRAME:VOLTAGE, got: {spec}")
-    return _manual_platform_row(int(parts[0]), int(parts[1]), float(parts[2]), fps, index, frame_count)
+    return manual_platform_row(parse_manual_platform_spec(spec, source="manual_cli"), fps, index, frame_count)
 
 
 def _prompt_int(prompt: str, default: int | None = None) -> int:
@@ -57,42 +42,41 @@ def _prompt_float(prompt: str, default: float | None = None) -> float:
             print("请输入数字。")
 
 
-def _prompt_platform_rows(fps: float, frame_count: int, start_index: int = 1) -> list[dict[str, object]]:
+def _prompt_platform_inputs(fps: float, frame_count: int) -> list[ManualPlatformInput]:
     print(f"video frames: 0..{max(0, frame_count - 1)}, fps={fps:g}")
     count = _prompt_int("voltage platform count")
     if count <= 0:
         raise ValueError("voltage platform count must be positive")
-    rows: list[dict[str, object]] = []
+    platforms: list[ManualPlatformInput] = []
     previous_end = -1
     for offset in range(count):
-        platform_index = start_index + offset
         remaining = max(1, count - offset)
         default_start = previous_end + 1
         default_end = frame_count - 1 if offset == count - 1 else max(default_start, default_start + ((frame_count - default_start) // remaining) - 1)
-        print(f"platform {platform_index}")
+        print(f"platform {offset + 1}")
         start_frame = _prompt_int("  start frame", default_start)
         end_frame = _prompt_int("  end frame", default_end)
         voltage = _prompt_float("  voltage V")
-        rows.append(_manual_platform_row(start_frame, end_frame, voltage, fps, platform_index, frame_count))
+        platforms.append(ManualPlatformInput(start_frame, end_frame, voltage, source="manual_cli"))
         previous_end = end_frame
-    return rows
+    return platforms
+
+
+def _prompt_platform_rows(fps: float, frame_count: int, start_index: int = 1) -> list[dict[str, object]]:
+    return [manual_platform_row(platform, fps, index, frame_count) for index, platform in enumerate(_prompt_platform_inputs(fps, frame_count), start=start_index)]
 
 
 def _prepare_config(args: argparse.Namespace) -> str:
-    specs = list(args.platform or [])
+    platforms = [parse_manual_platform_spec(spec, source="manual_cli") for spec in list(args.platform or [])]
     use_interactive = getattr(args, "interactive_platforms", False)
-    if not specs and not use_interactive:
+    if not platforms and not use_interactive:
         return args.config
-    config = load_config(args.config)
     meta = inspect_video(args.video)
-    rows = [_parse_platform_spec(spec, meta.fps, idx, meta.frame_count) for idx, spec in enumerate(specs, start=1)]
     if use_interactive:
-        if rows:
+        if platforms:
             print("已有 --platform 输入；继续追加交互输入的平台。")
-        rows.extend(_prompt_platform_rows(meta.fps, meta.frame_count, len(rows) + 1))
-    config["manual_platforms"] = rows
-    target = Path(config["project"]["run_root"]) / "manual_configs" / f"{Path(args.video).stem}_manual_platforms.yaml"
-    save_config(config, target)
+        platforms.extend(_prompt_platform_inputs(meta.fps, meta.frame_count))
+    target = prepare_analysis_config(args.video, args.config, platforms)
     return str(target)
 
 
@@ -111,10 +95,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"platform_input_error={exc}")
         return 2
-    run_dir = run_pipeline(args.video, config_path, args.run_dir)
-    print(f"run_dir={run_dir}")
-    print(f"config={config_path}")
-    errors = validate_run(run_dir, config_path)
+    result = analyze_video(AnalysisRequest(args.video, config_path, args.run_dir))
+    print(f"run_dir={result.run_dir}")
+    print(f"config={result.config_path}")
+    errors = result.validation_errors
     if errors:
         print("validation_errors=" + json.dumps(errors, ensure_ascii=False))
         return 2
@@ -127,12 +111,12 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"platform_input_error={exc}")
         return 2
-    run_dir = run_pipeline(args.video, config_path, args.run_dir)
-    report = Path(run_dir) / "analysis_report.md"
-    print(f"run_dir={run_dir}")
-    print(f"config={config_path}")
+    result = analyze_video(AnalysisRequest(args.video, config_path, args.run_dir))
+    report = Path(result.run_dir) / "analysis_report.md"
+    print(f"run_dir={result.run_dir}")
+    print(f"config={result.config_path}")
     print(f"analysis_report={report}")
-    errors = validate_run(run_dir, config_path)
+    errors = result.validation_errors
     if errors:
         print("validation_errors=" + json.dumps(errors, ensure_ascii=False))
         return 2
