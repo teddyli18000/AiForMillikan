@@ -4,13 +4,14 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pandas as pd
 import yaml
 
 from millikan_ai.cli.__main__ import _parse_platform_spec, _prompt_platform_rows
 from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.config import load_config, save_config
 from millikan_ai.pipeline import _tracking_roi_from_grid, run_pipeline, validate_run
-from millikan_ai.tracking.tracker import _grid_clear_fraction, _roi_clear_fraction
+from millikan_ai.tracking.tracker import _grid_clear_fraction, _roi_clear_fraction, track_multiple_candidates
 
 
 def _make_synthetic_video(path: Path) -> None:
@@ -22,6 +23,18 @@ def _make_synthetic_video(path: Path) -> None:
         x = 90
         y = 50 + idx * 0.35
         cv2.circle(frame, (int(x), int(y)), 4, (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+
+def _make_synthetic_multi_drop_video(path: Path) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+    for idx in range(120):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        for y in [30, 70, 110, 150, 190]:
+            cv2.line(frame, (30, y), (230, y), (255, 255, 255), 2)
+        cv2.circle(frame, (90, int(48 + idx * 0.30)), 4, (255, 255, 255), -1)
+        cv2.circle(frame, (155, int(58 + idx * 0.24)), 4, (230, 230, 230), -1)
         writer.write(frame)
     writer.release()
 
@@ -62,6 +75,71 @@ def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     assert isinstance(validity["overall_valid_for_q"], bool)
     assert isinstance(validity["blocking_failed_checks"], list)
     assert "drop_q_valid" in {check["id"] for check in validity["checks"]}
+
+
+def test_track_multiple_candidates_returns_distinct_tracks(tmp_path: Path):
+    video = tmp_path / "multi.mp4"
+    _make_synthetic_multi_drop_video(video)
+    config = load_config("configs/default.yaml")
+    config["segment"]["stable_min_duration_s"] = 0.5
+    config["segment"]["transient_drop_s"] = 0.1
+    config["segment"]["min_valid_points"] = 10
+    config["segment"]["min_fit_r2"] = 0.5
+    config["segment"]["min_motion_displacement_px"] = 1
+    config["tracking"]["top_k_seeds"] = 10
+    config["tracking"]["max_drops"] = 3
+    roi = Roi(20, 20, 240, 200)
+    platforms = pd.DataFrame(
+        [
+            {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "manual"},
+            {"platform_id": "P002", "start_frame": 60, "end_frame": 119, "start_time_s": 2.0, "end_time_s": 3.97, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "manual"},
+        ]
+    )
+
+    tracks, summary = track_multiple_candidates(video, "multi", roi, platforms, config)
+
+    assert tracks["track_id"].nunique() >= 2
+    assert summary["selected_for_multi_drop"].sum() >= 2
+    first_points = tracks.sort_values("frame_idx").groupby("track_id").first()
+    assert first_points["x_px"].max() - first_points["x_px"].min() > 40
+
+
+def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
+    video = tmp_path / "multi_pipeline.mp4"
+    _make_synthetic_multi_drop_video(video)
+    config = load_config("configs/default.yaml")
+    config["roi"]["microscope_roi"] = [20, 20, 240, 200]
+    config["manual_platforms"] = [
+        {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "manual"},
+        {"platform_id": "P002", "start_frame": 60, "end_frame": 119, "start_time_s": 2.0, "end_time_s": 3.97, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "manual"},
+    ]
+    config["segment"]["stable_min_duration_s"] = 0.5
+    config["segment"]["transient_drop_s"] = 0.1
+    config["segment"]["min_valid_points"] = 10
+    config["segment"]["min_fit_r2"] = 0.5
+    config["segment"]["min_motion_displacement_px"] = 1
+    config["tracking"]["top_k_seeds"] = 10
+    config["tracking"]["max_drops"] = 3
+    config_path = tmp_path / "config.yaml"
+    save_config(config, config_path)
+
+    run_dir = run_pipeline(video, config_path, tmp_path / "run")
+
+    drop_tracks = pd.read_csv(run_dir / "drop_tracks.csv")
+    drop_segments = pd.read_csv(run_dir / "drop_track_segments.csv")
+    multi_results = json.loads((run_dir / "multi_drop_results.json").read_text(encoding="utf-8"))
+    manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    layers = json.loads((run_dir / "visualization_layers.json").read_text(encoding="utf-8"))
+    report = (run_dir / "analysis_report.md").read_text(encoding="utf-8")
+    assert drop_tracks["track_id"].nunique() >= 2
+    assert drop_segments["track_id"].nunique() >= 2
+    assert multi_results["num_total_drops"] >= 2
+    assert len(multi_results["drops"]) >= 2
+    assert manifest["counts"]["drops"] >= 2
+    drop_track_layer = next(layer for layer in layers["layers"] if layer["id"] == "drop_tracks")
+    assert len(drop_track_layer["tracks"]) >= 2
+    assert "多油滴结果" in report
+    assert "multi_drop_results.json" in report
 
 
 def test_cli_help_runs():

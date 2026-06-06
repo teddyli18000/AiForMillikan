@@ -43,7 +43,7 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - If OCR, ROI detection, or tracking confidence is low, write explicit flags and allow manual/config-driven correction.
 - Do not claim ML-based trajectory filtering is implemented in this stage.
 - Do not silently output physical results when fewer than two usable voltage platforms exist.
-- `analysis_report.md` is the user-facing single-drop report; CSV/JSON/MP4 files remain the machine-readable contract.
+- `analysis_report.md` is the user-facing report for the selected/default drop plus any configured multi-drop outputs; CSV/JSON/MP4 files remain the machine-readable contract.
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
 - Platform velocity fitting should use the best stable sub-window inside each voltage platform, not blindly fit the whole platform.
 - Candidate tracking and segment validation must reject stationary grid/bright-spot candidates using `segment.min_motion_displacement_px`.
@@ -54,3 +54,4 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - `validity_report.json` is the frontend-facing legality/reasonableness checklist. Add explicit checks there when adding new q, tracking, or multi-drop prerequisites.
 - `visualization_layers.json` is the frontend-facing structured drawing contract. Prefer adding reusable layer objects there over encoding new UI-only information only in rendered images.
 - `diagnostic_overlay.jpg` is the frontend-facing static visualization contract: it should show pixel `+X/+Y`, microscope ROI, tracking ROI, grid lines, measurement lines, selected droplet, and trajectory. Keep `docs/frontend_backend_interface.md` in sync when this contract changes.
+- Multi-drop tracking is opt-in through `tracking.max_drops`; default remains `1` for conservative single-drop behavior. When enabled, the backend writes `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json` while preserving `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for the selected/default drop.

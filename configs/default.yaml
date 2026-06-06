@@ -32,6 +32,8 @@ segment:
 
 tracking:
   top_k_seeds: 30
+  max_drops: 1
+  multi_drop_min_trajectory_distance_px: 20
   max_search_radius_px: 35
   min_blob_area_px: 3
   max_blob_area_px: 180
@@ -65,10 +67,13 @@ output:
   voltage_samples_csv: voltage_samples.csv
   platforms_csv: platforms.csv
   best_track_csv: best_track.csv
+  drop_tracks_csv: drop_tracks.csv
   best_track_segments_csv: best_track_segments.csv
+  drop_track_segments_csv: drop_track_segments.csv
   candidate_tracks_summary_csv: candidate_tracks_summary.csv
   diagnostics_json: diagnostics.json
   drop_results_json: drop_results.json
+  multi_drop_results_json: multi_drop_results.json
   quality_scores_json: quality_scores.json
   elementary_charge_result_json: elementary_charge_result.json
   validity_report_json: validity_report.json

@@ -70,10 +70,13 @@ Each run should also expose:
 - `diagnostics.json`: machine-readable ROI, grid, timing, and visualization paths.
 - `validity_report.json`: machine-readable legality and reasonableness checks.
 - `best_track.csv`: per-frame selected droplet coordinates.
+- `drop_tracks.csv`: per-frame coordinates for all selected droplets when multi-drop tracking is enabled.
 - `best_track_segments.csv`: fitted stable velocity windows.
+- `drop_track_segments.csv`: fitted stable velocity windows for all selected droplets.
 - `candidate_tracks_summary.csv`: ranked candidate droplet quality table.
 - `platforms.csv`: voltage platform boundaries and values.
 - `drop_results.json`: physical `q` calculation result.
+- `multi_drop_results.json`: per-drop physical `q` results and valid drop counts.
 - `analysis_report.md`: user-facing full report.
 
 `visualization_layers.json` currently contains layers for:
@@ -87,6 +90,7 @@ Each run should also expose:
 - voltage platform time intervals
 - selected droplet marker
 - selected droplet trajectory
+- all selected droplet trajectories in the `drop_tracks` layer when more than one track is selected
 
 `diagnostic_overlay.jpg` is a rendered preview of the same concepts. The UI should prefer `visualization_layers.json` for interactive overlays and use the image as a quick preview or fallback.
 
@@ -97,7 +101,7 @@ Each run should also expose:
 - `schema_version`: integer contract version.
 - `run_dir`: run output directory.
 - `status`: `video_readable`, `valid_for_q`, `drop_valid`, `ml_training`, and combined `flags`.
-- `counts`: platform, track row, and stable segment counts.
+- `counts`: platform, selected drop, selected/default track row, and selected/default segment counts.
 - `coordinate_system`: pixel and time conventions for frontend rendering.
 - `video`: metadata copied from `diagnostics.json`.
 - `roi`: microscope, tracking, and voltage ROI.
@@ -134,8 +138,9 @@ The desktop UI should show these panels for each run:
 6. Candidate ranking table backed by `candidate_tracks_summary.csv`.
 7. Stable velocity segments backed by `best_track_segments.csv`.
 8. Physics calculation backed by `drop_results.json`.
-9. Flags and failure reasons from `diagnostics.json`, `drop_results.json`, and `elementary_charge_result.json`.
-10. Detailed legality checklist from `validity_report.json`.
+9. Multi-drop track and segment tables backed by `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json`.
+10. Flags and failure reasons from `diagnostics.json`, `drop_results.json`, and `elementary_charge_result.json`.
+11. Detailed legality checklist from `validity_report.json`.
 
 ## Manual Platform UI Contract
 
@@ -158,14 +163,15 @@ The backend validates frame ranges and records manual entries as non-OCR sources
 
 These fields explain why bright grid intersections, watermarks, borders, and edge highlights are not selected as the best droplet.
 
-## Multi-Drop Extension Direction
+## Multi-Drop Contract
 
-The current contract is single-drop. Multi-drop support should extend this without breaking existing fields:
+The current default remains conservative single-drop behavior with `tracking.max_drops: 1`. When `tracking.max_drops` is raised, the backend selects multiple distinct non-rejected trajectories and computes q per selected track. Existing selected/default drop fields remain stable:
 
 - keep `run_manifest.json.schema_version` versioned
 - keep `primary_results` for the selected/default drop
-- add a future `drops` collection for per-drop `drop_results`
-- add a future multi-drop elementary-charge result that consumes all valid independent `charge_abs_C` values
+- keep `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for the selected/default drop
+- use `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json` for all selected drops
+- use `elementary_charge_result.json` for the estimator over all valid independent `charge_abs_C` values
 - keep single-drop reports valid when only one droplet is found
 
 ## Current Non-ML Scope

@@ -55,17 +55,42 @@ def _config_lines(config: dict[str, Any]) -> list[str]:
     return rows
 
 
+def _drop_result_rows(multi_drop_results: dict[str, Any]) -> pd.DataFrame:
+    rows = []
+    for drop in multi_drop_results.get("drops", []):
+        result = drop.get("result", {}) or {}
+        fit = drop.get("fit", {}) or {}
+        rows.append(
+            {
+                "drop_id": drop.get("drop_id", ""),
+                "track_id": drop.get("track_id", ""),
+                "valid": drop.get("valid"),
+                "charge_abs_C": result.get("charge_abs_C"),
+                "sigma_charge_C": result.get("sigma_charge_C"),
+                "radius_m": result.get("radius_m"),
+                "alpha": fit.get("alpha"),
+                "beta": fit.get("beta"),
+                "quality_score": drop.get("quality_score"),
+                "flags": ",".join(drop.get("flags", [])),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
     root = Path(run_dir)
     output = config["output"]
     diagnostics = _read_json(root / output["diagnostics_json"])
     drop = _read_json(root / output["drop_results_json"])
+    multi_drop = _read_json(root / output.get("multi_drop_results_json", "multi_drop_results.json"))
     quality = _read_json(root / output["quality_scores_json"])
     elementary = _read_json(root / output["elementary_charge_result_json"])
     platforms = _read_csv(root / output["platforms_csv"])
     voltage_samples = _read_csv(root / output.get("voltage_samples_csv", "voltage_samples.csv"))
     candidates = _read_csv(root / output["candidate_tracks_summary_csv"])
     segments = _read_csv(root / output["best_track_segments_csv"])
+    drop_segments = _read_csv(root / output.get("drop_track_segments_csv", "drop_track_segments.csv"))
+    drop_result_rows = _drop_result_rows(multi_drop)
     video = diagnostics.get("video", {})
     grid = diagnostics.get("grid", {})
     flags = list(diagnostics.get("flags", [])) + list(drop.get("flags", [])) + list(elementary.get("flags", []))
@@ -80,7 +105,8 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
         f"- 视频是否合法: {str(valid_video).lower()}",
         f"- 是否满足 q 计算条件: {str(valid_for_q).lower()}",
         f"- 主要 flags: {', '.join(flags) if flags else 'none'}",
-        f"- 有效油滴数量: {1 if valid_for_q else 0}",
+        f"- 识别油滴数量: {multi_drop.get('num_total_drops', 1 if not candidates.empty else 0)}",
+        f"- 有效油滴数量: {multi_drop.get('valid_drop_count', 1 if valid_for_q else 0)}",
         "",
         "## 输入与参数",
         "",
@@ -126,9 +152,23 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
         "",
         f"- overlay: `{root / output['overlay_mp4']}`",
         "",
+        "## 多油滴结果",
+        "",
+        f"- total_drops: `{multi_drop.get('num_total_drops', 0)}`",
+        f"- valid_drop_count: `{multi_drop.get('valid_drop_count', 0)}`",
+        f"- multi_drop_results: `{root / output.get('multi_drop_results_json', 'multi_drop_results.json')}`",
+        f"- drop_tracks: `{root / output.get('drop_tracks_csv', 'drop_tracks.csv')}`",
+        f"- drop_track_segments: `{root / output.get('drop_track_segments_csv', 'drop_track_segments.csv')}`",
+        "",
+        _table(drop_result_rows, max_rows=20),
+        "",
         "## 稳定速度段",
         "",
         _table(segments),
+        "",
+        "## 多油滴速度段",
+        "",
+        _table(drop_segments, max_rows=30),
         "",
         "## q 计算",
         "",
