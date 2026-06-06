@@ -325,7 +325,16 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     if grid.scale_y_m_per_px is None:
         diagnostics["flags"].append("requires_manual_grid_calibration")
     _write_json(target / output_cfg["diagnostics_json"], diagnostics)
-    validity_report = build_validity_report(diagnostics, drop_result, elementary, platforms, segments, candidate_summary)
+    validity_report = build_validity_report(
+        diagnostics,
+        drop_result,
+        elementary,
+        platforms,
+        segments,
+        candidate_summary,
+        multi_drop_results,
+        int(config["elementary"]["min_drops"]),
+    )
     _write_json(target / output_cfg["validity_report_json"], validity_report)
     write_summary(target, config)
     write_analysis_report(target, config)
