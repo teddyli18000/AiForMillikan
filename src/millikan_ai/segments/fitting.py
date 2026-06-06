@@ -53,6 +53,8 @@ def fit_track_segments(
     config: dict,
 ) -> pd.DataFrame:
     rows = []
+    default_video_id = str(track["video_id"].iloc[0]) if "video_id" in track and not track.empty else ""
+    default_track_id = str(track["track_id"].iloc[0]) if "track_id" in track and not track.empty else ""
     transient = float(config["segment"]["transient_drop_s"])
     min_duration = float(config["segment"]["stable_min_duration_s"])
     min_points = int(config["segment"]["min_valid_points"])
@@ -89,8 +91,8 @@ def fit_track_segments(
         stable = not flags
         rows.append(
             {
-                "video_id": str(segment["video_id"].iloc[0]) if not segment.empty else "",
-                "track_id": str(segment["track_id"].iloc[0]) if not segment.empty else "",
+                "video_id": str(segment["video_id"].iloc[0]) if not segment.empty else default_video_id,
+                "track_id": str(segment["track_id"].iloc[0]) if not segment.empty else default_track_id,
                 "platform_id": platform["platform_id"],
                 "voltage_V": platform["voltage_V"],
                 "start_time_s": start,

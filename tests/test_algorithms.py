@@ -9,7 +9,7 @@ from millikan_ai.ocr.voltage import find_voltage_roi, read_voltage_from_image
 from millikan_ai.ocr.voltage import _first_text_line, preprocess_voltage_roi
 from millikan_ai.ocr.voltage import _match_seven_segment_char
 from millikan_ai.physics.charge import compute_drop_result
-from millikan_ai.segments.fitting import fit_line, select_stable_window
+from millikan_ai.segments.fitting import fit_line, fit_track_segments, select_stable_window
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
 
 
@@ -104,6 +104,39 @@ def test_select_stable_window_skips_noisy_platform_prefix():
     fit = fit_line(stable["time_s"].to_numpy(float), stable["y_px"].to_numpy(float))
     assert stable["time_s"].min() >= 1.0
     assert fit["r2"] > 0.95
+
+
+def test_fit_track_segments_preserves_track_id_for_transient_cropped_short_platform():
+    config = load_config("configs/default.yaml")
+    config["segment"]["transient_drop_s"] = 0.5
+    config["segment"]["stable_min_duration_s"] = 1.0
+    config["segment"]["min_valid_points"] = 5
+    track = pd.DataFrame(
+        {
+            "video_id": ["synthetic"] * 10,
+            "track_id": ["candidate_001"] * 10,
+            "time_s": np.arange(10) / 30.0,
+            "x_px": np.full(10, 50.0),
+            "y_px": np.linspace(100, 105, 10),
+            "is_valid_detection": True,
+        }
+    )
+    platforms = pd.DataFrame(
+        [
+            {
+                "platform_id": "P001",
+                "start_time_s": 0.0,
+                "end_time_s": 0.2,
+                "voltage_V": 100.0,
+            }
+        ]
+    )
+
+    segments = fit_track_segments(track, platforms, scale_y_m_per_px=1e-6, config=config)
+
+    assert segments.iloc[0]["track_id"] == "candidate_001"
+    assert segments.iloc[0]["video_id"] == "synthetic"
+    assert "too_short" in segments.iloc[0]["flags"]
 
 
 def test_compute_drop_result_for_synthetic_segments():

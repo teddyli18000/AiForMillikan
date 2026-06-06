@@ -165,6 +165,8 @@ Tracking is constrained to the detected grid area so watermarks, manufacturer te
 
 For frontend review, each run writes `run_manifest.json`, `validity_report.json`, `visualization_layers.json`, and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; the validity report lists pass/fail checks; the layer JSON provides structured drawing data for interactive frontend overlays, including multi-drop tracks when `tracking.max_drops > 1`; the diagnostic image is a rendered preview. See `docs/frontend_backend_interface.md` for the desktop UI contract.
 
+Raw smoke-test findings for `2u.mp4`, `3u1.mp4`, and `3u2.mp4` are recorded in `docs/raw_video_smoke.md`.
+
 With reliable platform data, the single-drop calculation uses:
 
 ```text
