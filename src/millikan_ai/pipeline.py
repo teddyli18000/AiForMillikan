@@ -29,8 +29,15 @@ from millikan_ai.video.reader import inspect_video, read_frame, save_diagnostic_
 
 
 def _run_dir(config: dict, video_path: Path) -> Path:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return Path(config["project"]["run_root"]) / f"{video_path.stem}_{stamp}"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    base = Path(config["project"]["run_root"]) / f"{video_path.stem}_{stamp}"
+    if not base.exists():
+        return base
+    for index in range(1, 1000):
+        candidate = Path(f"{base}_{index:03d}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"Cannot allocate unique run directory under {base.parent}")
 
 
 def _write_json(path: Path, data: dict) -> None:

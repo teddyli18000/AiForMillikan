@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import yaml
 
-from millikan_ai.cli.__main__ import _parse_platform_spec
+from millikan_ai.cli.__main__ import _parse_platform_spec, _prompt_platform_rows
 from millikan_ai.config import load_config, save_config
 from millikan_ai.pipeline import run_pipeline, validate_run
 
@@ -65,3 +65,29 @@ def test_parse_cli_platform_spec_uses_frame_time():
     assert platform["end_time_s"] == 3.0
     assert platform["voltage_V"] == 175.0
     assert platform["source"] == "manual_cli"
+
+
+def test_parse_cli_platform_spec_rejects_out_of_range_end_frame():
+    try:
+        _parse_platform_spec("0:120:175", fps=30.0, index=1, frame_count=120)
+    except ValueError as exc:
+        assert "exceeds video last frame" in str(exc)
+    else:
+        raise AssertionError("expected out-of-range platform to be rejected")
+
+
+def test_interactive_platform_wizard_prompts_for_ranges_and_voltage(monkeypatch):
+    answers = iter(["2", "", "59", "0", "60", "", "175"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    rows = _prompt_platform_rows(fps=30.0, frame_count=120)
+
+    assert rows[0]["platform_id"] == "P001"
+    assert rows[0]["start_frame"] == 0
+    assert rows[0]["end_frame"] == 59
+    assert rows[0]["voltage_V"] == 0.0
+    assert rows[1]["platform_id"] == "P002"
+    assert rows[1]["start_frame"] == 60
+    assert rows[1]["end_frame"] == 119
+    assert rows[1]["end_time_s"] == 119 / 30.0
+    assert rows[1]["voltage_V"] == 175.0
