@@ -130,6 +130,7 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     multi_results = json.loads((run_dir / "multi_drop_results.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     layers = json.loads((run_dir / "visualization_layers.json").read_text(encoding="utf-8"))
+    report = (run_dir / "analysis_report.md").read_text(encoding="utf-8")
     assert drop_tracks["track_id"].nunique() >= 2
     assert drop_segments["track_id"].nunique() >= 2
     assert multi_results["num_total_drops"] >= 2
@@ -137,6 +138,8 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     assert manifest["counts"]["drops"] >= 2
     drop_track_layer = next(layer for layer in layers["layers"] if layer["id"] == "drop_tracks")
     assert len(drop_track_layer["tracks"]) >= 2
+    assert "多油滴结果" in report
+    assert "multi_drop_results.json" in report
 
 
 def test_cli_help_runs():
