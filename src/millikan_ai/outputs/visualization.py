@@ -35,6 +35,7 @@ def build_visualization_layers(
     voltage_roi: Roi,
     best_track: pd.DataFrame,
     platforms: pd.DataFrame,
+    drop_tracks: pd.DataFrame | None = None,
 ) -> dict[str, object]:
     axis_origin = [tracking_roi.x + 25, tracking_roi.y + 35]
     layers: list[dict[str, object]] = [
@@ -98,6 +99,31 @@ def build_visualization_layers(
                     }
                     for row in platforms.to_dict("records")
                 ],
+            }
+        )
+    if drop_tracks is not None and not drop_tracks.empty:
+        tracks = []
+        for track_id, track in drop_tracks.groupby("track_id", sort=False):
+            points = [
+                {
+                    "frame_idx": int(row["frame_idx"]),
+                    "time_s": float(row["time_s"]),
+                    "x_px": float(row["x_px"]),
+                    "y_px": float(row["y_px"]),
+                    "valid": bool(row.get("is_valid_detection", True)),
+                    "platform_id": str(_clean(row.get("platform_id", "")) or ""),
+                    "voltage_V": _clean(float(row["voltage_V"])) if row.get("voltage_V") is not None else None,
+                }
+                for row in track.to_dict("records")
+            ]
+            tracks.append({"track_id": str(track_id), "points": points})
+        layers.append(
+            {
+                "id": "drop_tracks",
+                "type": "multi_frame_point_series",
+                "label": "All selected droplet trajectories",
+                "tracks": tracks,
+                "style": {"stroke_palette": ["#00ff00", "#ff66cc", "#66ccff", "#ffaa00"], "stroke_width": 2},
             }
         )
     if not best_track.empty:

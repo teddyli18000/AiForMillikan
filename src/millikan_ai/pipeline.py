@@ -293,7 +293,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     _write_json(target / output_cfg["quality_scores_json"], quality_scores)
     elementary = estimate_elementary_charge(drop_results or [drop_result], config)
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
-    visualization_layers = build_visualization_layers(meta, grid, tracking_roi, voltage_roi, best_track, platforms)
+    visualization_layers = build_visualization_layers(meta, grid, tracking_roi, voltage_roi, best_track, platforms, drop_tracks)
     _write_json(target / output_cfg["visualization_layers_json"], visualization_layers)
     diagnostics = {
         "video": meta.to_dict(),
