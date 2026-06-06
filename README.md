@@ -186,3 +186,5 @@ For a single oil drop, elementary-charge blind estimation is intentionally repor
 By default, `tracking.max_drops` is `1` so raw-video smoke tests stay conservative. Raising it enables multi-drop candidate selection and per-track q calculation outputs in `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json`. `drop_results.json` remains the selected/default drop result for backward compatibility.
 
 Tracked droplets and physically valid droplets are distinct. `candidate_tracks_summary.csv` records post-physics fields such as `q_valid`, `physics_flags`, `charge_abs_C`, and `radius_m`; `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` are the authoritative valid-droplet counts for reports and frontend display.
+
+When multiple selected tracks are evaluated, `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` use the highest-ranked physically valid drop. If no selected drop has valid q, they fall back to the highest-ranked evaluated candidate and report explicit physics flags.
