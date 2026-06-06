@@ -39,6 +39,25 @@ def _make_synthetic_multi_drop_video(path: Path) -> None:
     writer.release()
 
 
+def _make_synthetic_three_valid_drop_video(path: Path) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (340, 260))
+    positions = [
+        {"x": 75, "y": 42.0, "slow": 0.36, "fast": 0.18, "brightness": 255},
+        {"x": 145, "y": 82.0, "slow": 0.44, "fast": 0.22, "brightness": 240},
+        {"x": 215, "y": 122.0, "slow": 0.52, "fast": 0.26, "brightness": 225},
+    ]
+    for idx in range(180):
+        frame = np.zeros((260, 340, 3), dtype=np.uint8)
+        for y in [25, 65, 105, 145, 185, 225]:
+            cv2.line(frame, (30, y), (280, y), (255, 255, 255), 2)
+        for drop in positions:
+            step = drop["slow"] if idx < 90 else drop["fast"]
+            drop["y"] += step
+            cv2.circle(frame, (int(drop["x"]), int(drop["y"])), 5, (drop["brightness"], drop["brightness"], drop["brightness"]), -1)
+        writer.write(frame)
+    writer.release()
+
+
 def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     video = tmp_path / "synthetic.mp4"
     _make_synthetic_video(video)
@@ -149,6 +168,40 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     assert "elementary_charge_ready" not in validity["blocking_failed_checks"]
     assert "多油滴结果" in report
     assert "multi_drop_results.json" in report
+
+
+def test_pipeline_estimates_elementary_charge_from_three_valid_drops(tmp_path: Path):
+    video = tmp_path / "three_valid.mp4"
+    _make_synthetic_three_valid_drop_video(video)
+    config = load_config("configs/default.yaml")
+    config["roi"]["microscope_roi"] = [20, 15, 300, 230]
+    config["manual_platforms"] = [
+        {"platform_id": "P001", "start_frame": 0, "end_frame": 89, "start_time_s": 0.0, "end_time_s": 89 / 30.0, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "manual"},
+        {"platform_id": "P002", "start_frame": 90, "end_frame": 179, "start_time_s": 90 / 30.0, "end_time_s": 179 / 30.0, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "manual"},
+    ]
+    config["segment"]["stable_min_duration_s"] = 0.8
+    config["segment"]["transient_drop_s"] = 0.1
+    config["segment"]["min_valid_points"] = 18
+    config["segment"]["min_fit_r2"] = 0.5
+    config["segment"]["min_motion_displacement_px"] = 1
+    config["tracking"]["top_k_seeds"] = 12
+    config["tracking"]["max_drops"] = 3
+    config["tracking"]["min_grid_clear_fraction"] = 0.0
+    config["tracking"]["min_roi_clear_fraction"] = 0.0
+    config_path = tmp_path / "config.yaml"
+    save_config(config, config_path)
+
+    run_dir = run_pipeline(video, config_path, tmp_path / "run")
+
+    elementary = json.loads((run_dir / "elementary_charge_result.json").read_text(encoding="utf-8"))
+    multi = json.loads((run_dir / "multi_drop_results.json").read_text(encoding="utf-8"))
+    validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
+    manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert multi["valid_drop_count"] == 3
+    assert elementary["valid"] is True
+    assert elementary["num_used_drops"] == 3
+    assert validity["overall_valid_for_elementary_charge"] is True
+    assert manifest["status"]["valid_for_elementary_charge"] is True
 
 
 def test_primary_drop_selection_prefers_valid_q_over_top_tracking_score():
