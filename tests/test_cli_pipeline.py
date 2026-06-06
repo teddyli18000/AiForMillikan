@@ -10,7 +10,7 @@ import yaml
 from millikan_ai.cli.__main__ import _parse_platform_spec, _prompt_platform_rows
 from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.config import load_config, save_config
-from millikan_ai.pipeline import _tracking_roi_from_grid, run_pipeline, validate_run
+from millikan_ai.pipeline import _select_primary_drop, _tracking_roi_from_grid, run_pipeline, validate_run
 from millikan_ai.tracking.tracker import _grid_clear_fraction, _roi_clear_fraction, track_multiple_candidates
 
 
@@ -149,6 +149,24 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     assert "elementary_charge_ready" not in validity["blocking_failed_checks"]
     assert "多油滴结果" in report
     assert "multi_drop_results.json" in report
+
+
+def test_primary_drop_selection_prefers_valid_q_over_top_tracking_score():
+    candidate_summary = pd.DataFrame(
+        [
+            {"candidate_id": "candidate_001", "score_total": 0.95},
+            {"candidate_id": "candidate_002", "score_total": 0.75},
+        ]
+    )
+    drops = [
+        {"drop_id": "drop_001", "track_id": "candidate_001", "valid": False, "quality_score": 0.2},
+        {"drop_id": "drop_002", "track_id": "candidate_002", "valid": True, "quality_score": 0.8},
+    ]
+
+    selected_id, selected_drop = _select_primary_drop(drops, candidate_summary, "candidate_001")
+
+    assert selected_id == "candidate_002"
+    assert selected_drop["drop_id"] == "drop_002"
 
 
 def test_cli_help_runs():

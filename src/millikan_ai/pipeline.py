@@ -235,6 +235,34 @@ def _annotate_candidate_physics(candidate_summary: pd.DataFrame, drop_results: l
     return annotated
 
 
+def _candidate_rank_map(candidate_summary: pd.DataFrame) -> dict[str, int]:
+    if candidate_summary.empty or "candidate_id" not in candidate_summary:
+        return {}
+    if "rank" in candidate_summary:
+        return {str(row["candidate_id"]): int(row.get("rank") or index + 1) for index, row in enumerate(candidate_summary.to_dict("records"))}
+    return {str(candidate_id): index + 1 for index, candidate_id in enumerate(candidate_summary["candidate_id"].astype(str).tolist())}
+
+
+def _select_primary_drop(
+    drop_results: list[dict[str, object]],
+    candidate_summary: pd.DataFrame,
+    fallback_track_id: str,
+) -> tuple[str, dict[str, object] | None]:
+    if not drop_results:
+        return fallback_track_id, None
+    ranks = _candidate_rank_map(candidate_summary)
+    valid = [drop for drop in drop_results if bool(drop.get("valid"))]
+    pool = valid or drop_results
+    selected = min(
+        pool,
+        key=lambda drop: (
+            ranks.get(str(drop.get("track_id", "")), 10_000),
+            -float(drop.get("quality_score", 0.0) or 0.0),
+        ),
+    )
+    return str(selected.get("track_id", fallback_track_id) or fallback_track_id), selected
+
+
 def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path | None = None) -> Path:
     config = load_config(config_path)
     video_path = Path(video)
@@ -280,29 +308,30 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     selected_ids = []
     if "selected_for_multi_drop" in candidate_summary:
         selected_ids = [str(row["candidate_id"]) for row in candidate_summary.to_dict("records") if bool(row.get("selected_for_multi_drop"))]
-    best_track_id = selected_ids[0] if selected_ids else (str(candidate_summary.iloc[0]["candidate_id"]) if not candidate_summary.empty else "")
-    if best_track_id and not drop_tracks.empty:
-        best_track = drop_tracks[drop_tracks["track_id"] == best_track_id].copy()
-    else:
-        best_track = pd.DataFrame(columns=BEST_TRACK_COLUMNS)
-    best_track.to_csv(target / output_cfg["best_track_csv"], index=False)
+    fallback_track_id = selected_ids[0] if selected_ids else (str(candidate_summary.iloc[0]["candidate_id"]) if not candidate_summary.empty else "")
     drop_tracks.to_csv(target / output_cfg.get("drop_tracks_csv", "drop_tracks.csv"), index=False)
     if grid.scale_y_m_per_px is not None and not drop_tracks.empty and not platforms.empty:
         drop_segments = _fit_segments_for_tracks(drop_tracks, platforms, grid.scale_y_m_per_px, config)
     else:
         drop_segments = pd.DataFrame(columns=SEGMENT_COLUMNS)
+    drop_results, multi_drop_results = _compute_multi_drop_results(drop_segments, config)
+    best_track_id, selected_drop = _select_primary_drop(drop_results, candidate_summary, fallback_track_id)
+    if best_track_id and not drop_tracks.empty:
+        best_track = drop_tracks[drop_tracks["track_id"] == best_track_id].copy()
+    else:
+        best_track = pd.DataFrame(columns=BEST_TRACK_COLUMNS)
     if best_track_id and not drop_segments.empty:
         segments = drop_segments[drop_segments["track_id"] == best_track_id].copy()
     else:
         segments = pd.DataFrame(columns=SEGMENT_COLUMNS)
+    best_track.to_csv(target / output_cfg["best_track_csv"], index=False)
     segments.to_csv(target / output_cfg["best_track_segments_csv"], index=False)
     drop_segments.to_csv(target / output_cfg.get("drop_track_segments_csv", "drop_track_segments.csv"), index=False)
     overlay_written = False
     diagnostic_overlay_written = render_diagnostic_overlay(video_path, best_track, grid, tracking_roi, target / output_cfg["diagnostic_overlay_jpg"])
     if not best_track.empty:
         overlay_written = render_overlay(video_path, best_track, grid, target / output_cfg["overlay_mp4"])
-    drop_results, multi_drop_results = _compute_multi_drop_results(drop_segments, config)
-    drop_result = next((drop for drop in drop_results if drop.get("track_id") == best_track_id), None) or compute_drop_result(segments, config)
+    drop_result = selected_drop or compute_drop_result(segments, config)
     candidate_summary = _annotate_candidate_physics(candidate_summary, drop_results)
     candidate_summary.to_csv(target / output_cfg["candidate_tracks_summary_csv"], index=False)
     _write_json(target / output_cfg["drop_results_json"], drop_result)
