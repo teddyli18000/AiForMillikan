@@ -46,6 +46,7 @@ def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     diagnostics = json.loads((run_dir / "diagnostics.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     layers = json.loads((run_dir / "visualization_layers.json").read_text(encoding="utf-8"))
+    validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
     assert diagnostics["track_rows"] > 0
     assert diagnostics["diagnostic_overlay_written"] is True
     assert (run_dir / "diagnostic_overlay.jpg").exists()
@@ -54,9 +55,13 @@ def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     assert manifest["coordinate_system"]["y_positive"] == "down"
     assert manifest["files"]["diagnostic_overlay_jpg"].endswith("diagnostic_overlay.jpg")
     assert any(panel["id"] == "platform_editor" for panel in manifest["frontend_panels"])
+    assert any(panel["id"] == "validity" for panel in manifest["frontend_panels"])
     layer_ids = {layer["id"] for layer in layers["layers"]}
     assert {"pixel_axes", "tracking_roi", "best_track"}.issubset(layer_ids)
     assert layers["coordinate_system"]["x_positive"] == "right"
+    assert isinstance(validity["overall_valid_for_q"], bool)
+    assert isinstance(validity["blocking_failed_checks"], list)
+    assert "drop_q_valid" in {check["id"] for check in validity["checks"]}
 
 
 def test_cli_help_runs():

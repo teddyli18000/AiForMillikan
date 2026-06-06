@@ -51,5 +51,6 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - Candidate ranking should penalize candidates too close to grid lines or tracking ROI edges using `tracking.min_grid_line_distance_px`, `tracking.min_grid_clear_fraction`, `tracking.min_tracking_roi_margin_px`, and `tracking.min_roi_clear_fraction`.
 - CLI manual platform inputs use `--platform START_FRAME:END_FRAME:VOLTAGE`; generated configs are written under `runs/manual_configs/` and platforms use `source=manual_cli`.
 - `run_manifest.json` is the frontend-facing machine-readable entry point for a completed run. Keep it stable and update `docs/frontend_backend_interface.md` when adding/removing output artifacts or panel contracts.
+- `validity_report.json` is the frontend-facing legality/reasonableness checklist. Add explicit checks there when adding new q, tracking, or multi-drop prerequisites.
 - `visualization_layers.json` is the frontend-facing structured drawing contract. Prefer adding reusable layer objects there over encoding new UI-only information only in rendered images.
 - `diagnostic_overlay.jpg` is the frontend-facing static visualization contract: it should show pixel `+X/+Y`, microscope ROI, tracking ROI, grid lines, measurement lines, selected droplet, and trajectory. Keep `docs/frontend_backend_interface.md` in sync when this contract changes.

@@ -68,6 +68,7 @@ Each run should also expose:
 - `diagnostic_overlay.jpg`: first-frame diagnostic image for UI review.
 - `overlay_best_track.mp4`: full-video overlay of the selected track.
 - `diagnostics.json`: machine-readable ROI, grid, timing, and visualization paths.
+- `validity_report.json`: machine-readable legality and reasonableness checks.
 - `best_track.csv`: per-frame selected droplet coordinates.
 - `best_track_segments.csv`: fitted stable velocity windows.
 - `candidate_tracks_summary.csv`: ranked candidate droplet quality table.
@@ -108,6 +109,19 @@ Each run should also expose:
 
 The UI should not infer validity from file existence. Use `status.valid_for_q` and `status.flags`.
 
+## Validity Report
+
+`validity_report.json` is the detailed checklist behind `manifest.status.valid_for_q`.
+
+Important fields:
+
+- `overall_valid_for_q`: whether the current run satisfies q calculation requirements.
+- `blocking_failed_checks`: check ids that block q validity.
+- `checks`: detailed pass/fail objects with `id`, `passed`, `message`, and `details`.
+- `combined_flags`: flags collected from diagnostics, q calculation, and elementary-charge estimation.
+
+The UI should show failed checks directly instead of hiding the reason behind a generic invalid state.
+
 ## Frontend Display Checklist
 
 The desktop UI should show these panels for each run:
@@ -121,6 +135,7 @@ The desktop UI should show these panels for each run:
 7. Stable velocity segments backed by `best_track_segments.csv`.
 8. Physics calculation backed by `drop_results.json`.
 9. Flags and failure reasons from `diagnostics.json`, `drop_results.json`, and `elementary_charge_result.json`.
+10. Detailed legality checklist from `validity_report.json`.
 
 ## Manual Platform UI Contract
 

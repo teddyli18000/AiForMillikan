@@ -19,6 +19,7 @@ from millikan_ai.outputs.schemas import (
     VOLTAGE_SAMPLE_COLUMNS,
     validate_columns,
 )
+from millikan_ai.outputs.validity import build_validity_report
 from millikan_ai.outputs.visualization import build_visualization_layers
 from millikan_ai.physics.charge import compute_drop_result
 from millikan_ai.reporting.markdown import write_analysis_report
@@ -121,6 +122,7 @@ def _build_run_manifest(
             {"id": "stable_segments", "source": files.get("best_track_segments_csv")},
             {"id": "charge_result", "source": files.get("drop_results_json")},
             {"id": "quality", "source": files.get("quality_scores_json")},
+            {"id": "validity", "source": files.get("validity_report_json")},
         ],
     }
 
@@ -271,6 +273,8 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     if grid.scale_y_m_per_px is None:
         diagnostics["flags"].append("requires_manual_grid_calibration")
     _write_json(target / output_cfg["diagnostics_json"], diagnostics)
+    validity_report = build_validity_report(diagnostics, drop_result, elementary, platforms, segments, candidate_summary)
+    _write_json(target / output_cfg["validity_report_json"], validity_report)
     write_summary(target, config)
     write_analysis_report(target, config)
     manifest = _build_run_manifest(target, config, diagnostics, drop_result, elementary, quality_scores)
@@ -288,7 +292,7 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
     errors.extend(validate_columns(root / output["best_track_csv"], BEST_TRACK_COLUMNS))
     errors.extend(validate_columns(root / output["best_track_segments_csv"], SEGMENT_COLUMNS))
     errors.extend(validate_columns(root / output["candidate_tracks_summary_csv"], CANDIDATE_SUMMARY_COLUMNS))
-    for key in ["diagnostics_json", "drop_results_json", "quality_scores_json", "elementary_charge_result_json", "visualization_layers_json"]:
+    for key in ["diagnostics_json", "drop_results_json", "quality_scores_json", "elementary_charge_result_json", "validity_report_json", "visualization_layers_json"]:
         path = root / output[key]
         if not path.exists():
             errors.append(f"missing file: {path.name}")

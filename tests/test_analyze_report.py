@@ -69,7 +69,10 @@ def test_single_platform_report_is_invalid(tmp_path: Path):
     run_dir = run_pipeline(video, config_path, tmp_path / "run")
     report = (run_dir / "analysis_report.md").read_text(encoding="utf-8")
     drop = json.loads((run_dir / "drop_results.json").read_text(encoding="utf-8"))
+    validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
 
     assert drop["valid"] is False
     assert "insufficient_stable_platforms" in report
     assert "视频是否合法: false" in report
+    assert validity["overall_valid_for_q"] is False
+    assert "enough_voltage_platforms" in validity["blocking_failed_checks"] or "distinct_voltage_values" in validity["blocking_failed_checks"]
