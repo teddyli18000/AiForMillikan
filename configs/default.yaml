@@ -36,6 +36,7 @@ tracking:
   min_blob_area_px: 3
   max_blob_area_px: 180
   best_track_min_score: 0.45
+  restrict_to_measurement_grid: true
 
 physics:
   voltage_sign: 1

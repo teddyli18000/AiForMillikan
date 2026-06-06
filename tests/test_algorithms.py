@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from millikan_ai.calibration.grid import detect_horizontal_grid_lines
+from millikan_ai.calibration.grid import detect_horizontal_grid_lines, detect_vertical_grid_lines
 from millikan_ai.config import load_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
 from millikan_ai.ocr.voltage import find_voltage_roi, read_voltage_from_image
@@ -20,6 +20,15 @@ def test_detect_horizontal_grid_lines_on_synthetic_image():
     lines = detect_horizontal_grid_lines(image)
     assert len(lines) == 5
     assert abs(lines[1] - 70) <= 2
+
+
+def test_detect_vertical_grid_lines_on_synthetic_image():
+    image = np.zeros((240, 320, 3), dtype=np.uint8)
+    for x in [30, 90, 150, 210, 270]:
+        cv2.line(image, (x, 20), (x, 220), (255, 255, 255), 2)
+    lines = detect_vertical_grid_lines(image)
+    assert len(lines) == 5
+    assert abs(lines[-2] - 210) <= 2
 
 
 def test_template_voltage_ocr_on_synthetic_digits():

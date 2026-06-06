@@ -50,6 +50,22 @@ def _load_manual_platforms(config: dict) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=PLATFORMS_COLUMNS) if rows else pd.DataFrame(columns=PLATFORMS_COLUMNS)
 
 
+def _tracking_roi_from_grid(grid, config: dict) -> Roi:
+    roi = grid.roi
+    if not bool(config.get("tracking", {}).get("restrict_to_measurement_grid", True)):
+        return roi
+    x0 = int(grid.x_start_px) if grid.x_start_px is not None else roi.x
+    x1 = int(grid.x_end_px) if grid.x_end_px is not None else roi.x + roi.w
+    y0 = roi.y
+    y1 = int(grid.y_end_px) if grid.y_end_px is not None else roi.y + roi.h
+    if x1 <= x0 or y1 <= y0:
+        return roi
+    x0 = max(roi.x, x0)
+    x1 = min(roi.x + roi.w, x1)
+    y1 = min(roi.y + roi.h, y1)
+    return Roi(x0, y0, max(1, x1 - x0), max(1, y1 - y0))
+
+
 def _sample_voltage_series(
     video_path: Path,
     roi: Roi,
@@ -137,7 +153,8 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         platforms = pd.DataFrame(columns=PLATFORMS_COLUMNS)
     voltage_samples.to_csv(target / output_cfg.get("voltage_samples_csv", "voltage_samples.csv"), index=False)
     platforms.to_csv(target / output_cfg["platforms_csv"], index=False)
-    best_track, candidate_summary = track_best_candidate(video_path, video_path.stem, grid.roi, platforms, config)
+    tracking_roi = _tracking_roi_from_grid(grid, config)
+    best_track, candidate_summary = track_best_candidate(video_path, video_path.stem, tracking_roi, platforms, config)
     if best_track.empty:
         best_track = pd.DataFrame(columns=BEST_TRACK_COLUMNS)
     if candidate_summary.empty:
@@ -167,7 +184,12 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
     diagnostics = {
         "video": meta.to_dict(),
-        "roi": {"microscope_roi": grid.roi.to_list(), "voltage_roi": voltage_roi.to_list(), "dynamic_voltage_roi": dynamic_voltage_roi},
+        "roi": {
+            "microscope_roi": grid.roi.to_list(),
+            "tracking_roi": tracking_roi.to_list(),
+            "voltage_roi": voltage_roi.to_list(),
+            "dynamic_voltage_roi": dynamic_voltage_roi,
+        },
         "grid": grid.to_dict(),
         "platform_count": int(len(platforms)),
         "track_rows": int(len(best_track)),

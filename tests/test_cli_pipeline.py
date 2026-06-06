@@ -7,8 +7,9 @@ import numpy as np
 import yaml
 
 from millikan_ai.cli.__main__ import _parse_platform_spec, _prompt_platform_rows
+from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.config import load_config, save_config
-from millikan_ai.pipeline import run_pipeline, validate_run
+from millikan_ai.pipeline import _tracking_roi_from_grid, run_pipeline, validate_run
 
 
 def _make_synthetic_video(path: Path) -> None:
@@ -91,3 +92,23 @@ def test_interactive_platform_wizard_prompts_for_ranges_and_voltage(monkeypatch)
     assert rows[1]["end_frame"] == 119
     assert rows[1]["end_time_s"] == 119 / 30.0
     assert rows[1]["voltage_V"] == 175.0
+
+
+def test_tracking_roi_is_clipped_to_measurement_grid_bottom():
+    config = load_config("configs/default.yaml")
+    grid = GridCalibration(
+        roi=Roi(10, 20, 300, 400),
+        grid_lines_x=[30, 120, 220],
+        grid_lines_y=[40, 120, 220, 320],
+        x_start_px=30,
+        x_end_px=220,
+        y_start_px=120,
+        y_end_px=320,
+        measurement_distance_m=0.0015,
+        scale_y_m_per_px=0.0015 / 200,
+        warnings=[],
+    )
+
+    roi = _tracking_roi_from_grid(grid, config)
+
+    assert roi.to_list() == [30, 20, 190, 300]

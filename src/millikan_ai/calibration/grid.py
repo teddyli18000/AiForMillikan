@@ -31,7 +31,10 @@ class Roi:
 @dataclass(frozen=True)
 class GridCalibration:
     roi: Roi
+    grid_lines_x: list[int]
     grid_lines_y: list[int]
+    x_start_px: int | None
+    x_end_px: int | None
     y_start_px: int | None
     y_end_px: int | None
     measurement_distance_m: float
@@ -41,7 +44,10 @@ class GridCalibration:
     def to_dict(self) -> dict[str, object]:
         return {
             "roi": self.roi.to_list(),
+            "grid_lines_x": self.grid_lines_x,
             "grid_lines_y": self.grid_lines_y,
+            "x_start_px": self.x_start_px,
+            "x_end_px": self.x_end_px,
             "y_start_px": self.y_start_px,
             "y_end_px": self.y_end_px,
             "measurement_distance_m": self.measurement_distance_m,
@@ -109,6 +115,35 @@ def detect_horizontal_grid_lines(image: np.ndarray, min_distance_px: int = 25) -
     return merged
 
 
+def detect_vertical_grid_lines(image: np.ndarray, min_distance_px: int = 25) -> list[int]:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 45))
+    vertical = cv2.morphologyEx(mask, cv2.MORPH_OPEN, vertical_kernel)
+    projection = vertical.mean(axis=0)
+    if projection.max(initial=0) <= 0:
+        return []
+    threshold = max(12.0, float(projection.max()) * 0.28)
+    xs = np.where(projection >= threshold)[0]
+    if len(xs) == 0:
+        return []
+    groups: list[list[int]] = [[int(xs[0])]]
+    for x in xs[1:]:
+        if int(x) - groups[-1][-1] <= 3:
+            groups[-1].append(int(x))
+        else:
+            groups.append([int(x)])
+    centers = [int(round(sum(group) / len(group))) for group in groups]
+    merged: list[int] = []
+    for x in centers:
+        if not merged or x - merged[-1] >= min_distance_px:
+            merged.append(x)
+        else:
+            merged[-1] = int(round((merged[-1] + x) / 2))
+    return merged
+
+
 def calibrate_grid(
     frame: np.ndarray,
     microscope_roi: Roi | None,
@@ -117,9 +152,12 @@ def calibrate_grid(
 ) -> GridCalibration:
     roi = microscope_roi or auto_microscope_roi(frame)
     crop = roi.crop(frame)
+    local_vertical_lines = detect_vertical_grid_lines(crop)
     local_lines = detect_horizontal_grid_lines(crop)
+    global_vertical_lines = [roi.x + x for x in local_vertical_lines]
     global_lines = [roi.y + y for y in local_lines]
     warnings: list[str] = []
+    x_start = x_end = None
     y_start = y_end = None
     scale = None
     if len(global_lines) < min_grid_lines:
@@ -132,4 +170,9 @@ def calibrate_grid(
             warnings.append("invalid_grid_span")
         else:
             scale = measurement_distance_m / pixel_span
-    return GridCalibration(roi, global_lines, y_start, y_end, measurement_distance_m, scale, warnings)
+    if len(global_vertical_lines) < 2:
+        warnings.append("too_few_vertical_grid_lines")
+    else:
+        x_start = global_vertical_lines[0]
+        x_end = global_vertical_lines[-1]
+    return GridCalibration(roi, global_vertical_lines, global_lines, x_start, x_end, y_start, y_end, measurement_distance_m, scale, warnings)
