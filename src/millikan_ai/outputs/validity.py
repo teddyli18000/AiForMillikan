@@ -16,6 +16,8 @@ def build_validity_report(
     platforms: pd.DataFrame,
     segments: pd.DataFrame,
     candidates: pd.DataFrame,
+    multi_drop_results: dict[str, Any] | None = None,
+    elementary_min_drops: int | None = None,
 ) -> dict[str, object]:
     video = diagnostics.get("video", {})
     grid = diagnostics.get("grid", {})
@@ -23,6 +25,11 @@ def build_validity_report(
     distinct_voltages = int(platforms["voltage_V"].dropna().nunique()) if "voltage_V" in platforms else 0
     stable_segments = int(segments["stable"].astype(bool).sum()) if "stable" in segments and not segments.empty else 0
     candidate_reject_reason = str(top_candidate.get("reject_reason", "") or "")
+    multi_drop_results = multi_drop_results or {}
+    total_drop_count = int(multi_drop_results.get("num_total_drops", diagnostics.get("drop_count", 0)) or 0)
+    valid_drop_count = int(multi_drop_results.get("valid_drop_count", 1 if drop_result.get("valid") else 0) or 0)
+    required_drop_count = int(elementary_min_drops or 0)
+    elementary_ready = bool(elementary.get("valid")) or (required_drop_count > 0 and valid_drop_count >= required_drop_count)
     checks = [
         _check("video_readable", bool(video.get("readable")), "Video can be opened by OpenCV.", {"path": video.get("path")}),
         _check("fps_valid", float(video.get("fps") or 0) > 0, "FPS is available for frame-to-time conversion.", {"fps": video.get("fps")}),
@@ -64,16 +71,39 @@ def build_validity_report(
         ),
         _check("drop_q_valid", bool(drop_result.get("valid")), "Physics q calculation is valid.", {"flags": drop_result.get("flags", [])}),
         _check(
+            "multi_drop_q_results",
+            valid_drop_count >= 1,
+            "At least one selected droplet has a valid q result.",
+            {
+                "total_drop_count": total_drop_count,
+                "valid_drop_count": valid_drop_count,
+                "invalid_drop_count": max(0, total_drop_count - valid_drop_count),
+            },
+        ),
+        _check(
+            "elementary_charge_ready",
+            elementary_ready,
+            "Enough independent valid droplet q values exist for blind elementary-charge estimation.",
+            {
+                "valid_drop_count": valid_drop_count,
+                "required_drop_count": required_drop_count,
+                "elementary_valid": bool(elementary.get("valid")),
+                "flags": elementary.get("flags", []),
+            },
+        ),
+        _check(
             "elementary_charge_status",
             bool(elementary.get("valid")) or "insufficient_independent_drops" in elementary.get("flags", []) or "insufficient_drops" in elementary.get("flags", []),
             "Elementary-charge estimation either succeeded or reported an explicit insufficiency reason.",
             {"flags": elementary.get("flags", []), "valid": elementary.get("valid")},
         ),
     ]
-    blocking_failed = [check["id"] for check in checks if not check["passed"] and check["id"] != "elementary_charge_status"]
+    non_q_blocking = {"elementary_charge_status", "elementary_charge_ready"}
+    blocking_failed = [check["id"] for check in checks if not check["passed"] and check["id"] not in non_q_blocking]
     return {
         "schema_version": 1,
         "overall_valid_for_q": bool(drop_result.get("valid")) and not blocking_failed,
+        "overall_valid_for_elementary_charge": bool(elementary.get("valid")),
         "blocking_failed_checks": blocking_failed,
         "checks": checks,
         "combined_flags": list(diagnostics.get("flags", [])) + list(drop_result.get("flags", [])) + list(elementary.get("flags", [])),

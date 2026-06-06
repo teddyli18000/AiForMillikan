@@ -101,7 +101,7 @@ Each run should also expose:
 - `schema_version`: integer contract version.
 - `run_dir`: run output directory.
 - `status`: `video_readable`, `valid_for_q`, `drop_valid`, `ml_training`, and combined `flags`.
-- `counts`: platform, selected drop, selected/default track row, and selected/default segment counts.
+- `counts`: platform, selected drop, physically valid drop, selected/default track row, and selected/default segment counts.
 - `coordinate_system`: pixel and time conventions for frontend rendering.
 - `video`: metadata copied from `diagnostics.json`.
 - `roi`: microscope, tracking, and voltage ROI.
@@ -120,6 +120,7 @@ The UI should not infer validity from file existence. Use `status.valid_for_q` a
 Important fields:
 
 - `overall_valid_for_q`: whether the current run satisfies q calculation requirements.
+- `overall_valid_for_elementary_charge`: whether blind elementary-charge estimation produced a valid result.
 - `blocking_failed_checks`: check ids that block q validity.
 - `checks`: detailed pass/fail objects with `id`, `passed`, `message`, and `details`.
 - `combined_flags`: flags collected from diagnostics, q calculation, and elementary-charge estimation.
@@ -160,8 +161,13 @@ The backend validates frame ranges and records manual entries as non-OCR sources
 - `grid_clear_fraction`: fraction of valid detections not too close to detected grid lines.
 - `roi_clear_fraction`: fraction of valid detections not too close to the tracking ROI edge.
 - `reject_reason`: comma-separated hard-rule reasons such as `too_close_to_grid_lines`, `too_close_to_tracking_roi_edge`, or `insufficient_stable_platform_fits`.
+- `selected_for_multi_drop`: whether this candidate was tracked through the multi-drop q evaluation path.
+- `drop_id`: per-drop result id when the candidate was selected for multi-drop evaluation.
+- `q_valid`: whether the candidate produced a physically valid q result.
+- `physics_flags`: q calculation failure reasons such as `non_positive_alpha`.
+- `charge_abs_C` and `radius_m`: post-physics values when `q_valid` is true.
 
-These fields explain why bright grid intersections, watermarks, borders, and edge highlights are not selected as the best droplet.
+These fields explain why bright grid intersections, watermarks, borders, edge highlights, or physically impossible tracks are not counted as valid droplets.
 
 ## Multi-Drop Contract
 
@@ -171,6 +177,7 @@ The current default remains conservative single-drop behavior with `tracking.max
 - keep `primary_results` for the selected/default drop
 - keep `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for the selected/default drop
 - use `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json` for all selected drops
+- use `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` for the valid-droplet count
 - use `elementary_charge_result.json` for the estimator over all valid independent `charge_abs_C` values
 - keep single-drop reports valid when only one droplet is found
 
