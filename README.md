@@ -79,6 +79,7 @@ Each run directory writes:
 - `elementary_charge_result.json`
 - `diagnostic_overlay.jpg`
 - `overlay_best_track.mp4`
+- `run_manifest.json`
 - `summary.txt`
 - `analysis_report.md`
 
@@ -132,7 +133,7 @@ The backend records `source=manual` or `source=manual_cli` in `platforms.csv`; i
 
 Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection.
 
-For frontend review, each run writes `diagnostic_overlay.jpg`. It draws the pixel `+X/+Y` axes, microscope ROI, tracking ROI, detected grid lines, measurement start/end lines, selected droplet, and selected trajectory. See `docs/frontend_backend_interface.md` for the desktop UI contract.
+For frontend review, each run writes `run_manifest.json` and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; it lists run validity, flags, output paths, coordinate conventions, and suggested UI panels. The diagnostic image draws the pixel `+X/+Y` axes, microscope ROI, tracking ROI, detected grid lines, measurement start/end lines, selected droplet, and selected trajectory. See `docs/frontend_backend_interface.md` for the desktop UI contract.
 
 With reliable platform data, the single-drop calculation uses:
 

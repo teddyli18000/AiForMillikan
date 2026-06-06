@@ -66,6 +66,64 @@ def _tracking_roi_from_grid(grid, config: dict) -> Roi:
     return Roi(x0, y0, max(1, x1 - x0), max(1, y1 - y0))
 
 
+def _build_run_manifest(
+    run_dir: Path,
+    config: dict,
+    diagnostics: dict,
+    drop_result: dict,
+    elementary: dict,
+    quality_scores: dict,
+) -> dict[str, object]:
+    output = config["output"]
+    flags = list(diagnostics.get("flags", [])) + list(drop_result.get("flags", [])) + list(elementary.get("flags", []))
+    files = {key: str(run_dir / filename) for key, filename in output.items()}
+    return {
+        "schema_version": 1,
+        "run_dir": str(run_dir),
+        "status": {
+            "video_readable": bool(diagnostics.get("video", {}).get("readable")),
+            "valid_for_q": bool(drop_result.get("valid")),
+            "drop_valid": bool(drop_result.get("valid")),
+            "ml_training": bool(quality_scores.get("ml_training", False)),
+            "flags": flags,
+        },
+        "counts": {
+            "platforms": int(diagnostics.get("platform_count", 0)),
+            "track_rows": int(diagnostics.get("track_rows", 0)),
+            "segments": int(diagnostics.get("segment_rows", 0)),
+        },
+        "coordinate_system": {
+            "origin": "top_left_video_pixel",
+            "x_positive": "right",
+            "y_positive": "down",
+            "time_s": "frame_idx / fps",
+            "physical_y_velocity": "vy_px_s * scale_y_m_per_px",
+        },
+        "video": diagnostics.get("video", {}),
+        "roi": diagnostics.get("roi", {}),
+        "grid": diagnostics.get("grid", {}),
+        "visualizations": diagnostics.get("visualizations", {}),
+        "primary_results": {
+            "charge_abs_C": drop_result.get("result", {}).get("charge_abs_C"),
+            "charge_C": drop_result.get("result", {}).get("charge_C"),
+            "sigma_charge_C": drop_result.get("result", {}).get("sigma_charge_C"),
+            "radius_m": drop_result.get("result", {}).get("radius_m"),
+            "elementary_charge": elementary.get("elementary_charge", {}),
+        },
+        "files": files,
+        "frontend_panels": [
+            {"id": "summary", "source": files.get("analysis_report_md")},
+            {"id": "diagnostic_overlay", "source": files.get("diagnostic_overlay_jpg")},
+            {"id": "track_overlay_video", "source": files.get("overlay_mp4")},
+            {"id": "platform_editor", "source": files.get("platforms_csv")},
+            {"id": "candidate_tracks", "source": files.get("candidate_tracks_summary_csv")},
+            {"id": "stable_segments", "source": files.get("best_track_segments_csv")},
+            {"id": "charge_result", "source": files.get("drop_results_json")},
+            {"id": "quality", "source": files.get("quality_scores_json")},
+        ],
+    }
+
+
 def _sample_voltage_series(
     video_path: Path,
     roi: Roi,
@@ -211,6 +269,8 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     _write_json(target / output_cfg["diagnostics_json"], diagnostics)
     write_summary(target, config)
     write_analysis_report(target, config)
+    manifest = _build_run_manifest(target, config, diagnostics, drop_result, elementary, quality_scores)
+    _write_json(target / output_cfg.get("run_manifest_json", "run_manifest.json"), manifest)
     return target
 
 
@@ -226,6 +286,15 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
     errors.extend(validate_columns(root / output["candidate_tracks_summary_csv"], CANDIDATE_SUMMARY_COLUMNS))
     for key in ["diagnostics_json", "drop_results_json", "quality_scores_json", "elementary_charge_result_json"]:
         path = root / output[key]
+        if not path.exists():
+            errors.append(f"missing file: {path.name}")
+        else:
+            try:
+                json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                errors.append(f"invalid json {path.name}: {exc}")
+    manifest_path = root / output.get("run_manifest_json", "run_manifest.json")
+    for path in [manifest_path]:
         if not path.exists():
             errors.append(f"missing file: {path.name}")
         else:

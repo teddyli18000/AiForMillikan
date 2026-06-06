@@ -69,5 +69,6 @@ output:
   elementary_charge_result_json: elementary_charge_result.json
   diagnostic_overlay_jpg: diagnostic_overlay.jpg
   overlay_mp4: overlay_best_track.mp4
+  run_manifest_json: run_manifest.json
   summary_txt: summary.txt
   analysis_report_md: analysis_report.md

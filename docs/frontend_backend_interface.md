@@ -42,8 +42,11 @@ The frontend must display this convention when showing the analyzed screenshot.
 
 ## Required Visualization Outputs
 
-Each successful run should expose:
+Each run should expose `run_manifest.json`. The desktop UI should treat it as the primary entry point for a completed run, then load the referenced files from `manifest.files` and `manifest.frontend_panels`.
 
+Each run should also expose:
+
+- `run_manifest.json`: machine-readable run status, paths, coordinate convention, counts, and UI panel sources.
 - `diagnostic_overlay.jpg`: first-frame diagnostic image for UI review.
 - `overlay_best_track.mp4`: full-video overlay of the selected track.
 - `diagnostics.json`: machine-readable ROI, grid, timing, and visualization paths.
@@ -63,6 +66,25 @@ Each successful run should expose:
 - `+X` and `+Y` pixel axes
 - selected droplet marker
 - selected droplet trajectory
+
+## Run Manifest Schema
+
+`run_manifest.json` contains:
+
+- `schema_version`: integer contract version.
+- `run_dir`: run output directory.
+- `status`: `video_readable`, `valid_for_q`, `drop_valid`, `ml_training`, and combined `flags`.
+- `counts`: platform, track row, and stable segment counts.
+- `coordinate_system`: pixel and time conventions for frontend rendering.
+- `video`: metadata copied from `diagnostics.json`.
+- `roi`: microscope, tracking, and voltage ROI.
+- `grid`: detected grid lines, measurement lines, and scale.
+- `visualizations`: static diagnostic image and overlay video paths.
+- `primary_results`: charge, uncertainty, radius, and elementary-charge fields when available.
+- `files`: all output artifact paths keyed by config output name.
+- `frontend_panels`: ordered panel suggestions for the desktop UI.
+
+The UI should not infer validity from file existence. Use `status.valid_for_q` and `status.flags`.
 
 ## Frontend Display Checklist
 

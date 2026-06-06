@@ -43,10 +43,15 @@ def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     errors = validate_run(run_dir, config_path)
     assert errors == []
     diagnostics = json.loads((run_dir / "diagnostics.json").read_text(encoding="utf-8"))
+    manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert diagnostics["track_rows"] > 0
     assert diagnostics["diagnostic_overlay_written"] is True
     assert (run_dir / "diagnostic_overlay.jpg").exists()
     assert (run_dir / "overlay_best_track.mp4").exists()
+    assert manifest["schema_version"] == 1
+    assert manifest["coordinate_system"]["y_positive"] == "down"
+    assert manifest["files"]["diagnostic_overlay_jpg"].endswith("diagnostic_overlay.jpg")
+    assert any(panel["id"] == "platform_editor" for panel in manifest["frontend_panels"])
 
 
 def test_cli_help_runs():
