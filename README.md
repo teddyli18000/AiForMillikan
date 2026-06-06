@@ -11,6 +11,7 @@ This stage implements a non-ML backend framework:
 - non-ML bright-blob droplet tracking and best-candidate selection
 - terminal velocity fitting
 - physics-based single-drop charge inversion
+- opt-in multi-drop backend outputs while preserving the selected/default drop contract
 - non-ML elementary charge grid-search estimator
 - run output validation and summaries
 
@@ -71,10 +72,13 @@ Each run directory writes:
 - `voltage_samples.csv`
 - `platforms.csv`
 - `best_track.csv`
+- `drop_tracks.csv`
 - `best_track_segments.csv`
+- `drop_track_segments.csv`
 - `candidate_tracks_summary.csv`
 - `diagnostics.json`
 - `drop_results.json`
+- `multi_drop_results.json`
 - `quality_scores.json`
 - `elementary_charge_result.json`
 - `validity_report.json`
@@ -159,7 +163,7 @@ The API writes the same output contract as the CLI, including `run_manifest.json
 
 Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection. Candidate ranking also penalizes tracks that stay too close to grid lines or tracking ROI edges, which reduces false positives from grid intersections and edge highlights.
 
-For frontend review, each run writes `run_manifest.json`, `validity_report.json`, `visualization_layers.json`, and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; the validity report lists pass/fail checks; the layer JSON provides structured drawing data for interactive frontend overlays; the diagnostic image is a rendered preview. See `docs/frontend_backend_interface.md` for the desktop UI contract.
+For frontend review, each run writes `run_manifest.json`, `validity_report.json`, `visualization_layers.json`, and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; the validity report lists pass/fail checks; the layer JSON provides structured drawing data for interactive frontend overlays, including multi-drop tracks when `tracking.max_drops > 1`; the diagnostic image is a rendered preview. See `docs/frontend_backend_interface.md` for the desktop UI contract.
 
 With reliable platform data, the single-drop calculation uses:
 
@@ -176,3 +180,5 @@ q = 6 * pi * eta_eff(r) * r * beta
 Within each voltage platform, the backend fits the best stable sub-window after dropping the transient interval. It does not blindly fit the whole platform when early motion is unstable.
 
 For a single oil drop, elementary-charge blind estimation is intentionally reported as underdetermined because it needs multiple independent `q_i` values.
+
+By default, `tracking.max_drops` is `1` so raw-video smoke tests stay conservative. Raising it enables multi-drop candidate selection and per-track q calculation outputs in `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json`. `drop_results.json` remains the selected/default drop result for backward compatibility.
