@@ -67,6 +67,7 @@ output:
   drop_results_json: drop_results.json
   quality_scores_json: quality_scores.json
   elementary_charge_result_json: elementary_charge_result.json
+  diagnostic_overlay_jpg: diagnostic_overlay.jpg
   overlay_mp4: overlay_best_track.mp4
   summary_txt: summary.txt
   analysis_report_md: analysis_report.md

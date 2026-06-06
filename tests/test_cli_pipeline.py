@@ -44,6 +44,8 @@ def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     assert errors == []
     diagnostics = json.loads((run_dir / "diagnostics.json").read_text(encoding="utf-8"))
     assert diagnostics["track_rows"] > 0
+    assert diagnostics["diagnostic_overlay_written"] is True
+    assert (run_dir / "diagnostic_overlay.jpg").exists()
     assert (run_dir / "overlay_best_track.mp4").exists()
 
 

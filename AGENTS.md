@@ -28,7 +28,7 @@ This project analyzes Millikan oil drop experiment videos. The current backend i
 Use the local virtual environment:
 
 ```powershell
-.venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp -o cache_dir=runs\pytest_cache
+.venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp_work -o cache_dir=runs\pytest_cache_work
 .venv\Scripts\python -m millikan_ai.cli inspect raw_data\single.mp4
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
@@ -46,4 +46,6 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
 - Platform velocity fitting should use the best stable sub-window inside each voltage platform, not blindly fit the whole platform.
 - Candidate tracking and segment validation must reject stationary grid/bright-spot candidates using `segment.min_motion_displacement_px`.
+- Candidate tracking must stay inside the detected grid/tracking ROI so watermarks, manufacturer text, and border highlights are not eligible droplets.
 - CLI manual platform inputs use `--platform START_FRAME:END_FRAME:VOLTAGE`; generated configs are written under `runs/manual_configs/` and platforms use `source=manual_cli`.
+- `diagnostic_overlay.jpg` is the frontend-facing static visualization contract: it should show pixel `+X/+Y`, microscope ROI, tracking ROI, grid lines, measurement lines, selected droplet, and trajectory. Keep `docs/frontend_backend_interface.md` in sync when this contract changes.

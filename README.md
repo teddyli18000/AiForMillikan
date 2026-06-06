@@ -31,7 +31,7 @@ Do not install dependencies globally or into the base Conda environment. Use `.v
 ## Test
 
 ```powershell
-.venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp -o cache_dir=runs\pytest_cache
+.venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp_work -o cache_dir=runs\pytest_cache_work
 ```
 
 The test suite uses synthetic images/videos for deterministic OCR, grid, platform, tracking, velocity, charge, elementary-charge, and CLI behavior.
@@ -77,6 +77,7 @@ Each run directory writes:
 - `drop_results.json`
 - `quality_scores.json`
 - `elementary_charge_result.json`
+- `diagnostic_overlay.jpg`
 - `overlay_best_track.mp4`
 - `summary.txt`
 - `analysis_report.md`
@@ -98,6 +99,8 @@ For guided input, use:
 ```powershell
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --interactive-platforms
 ```
+
+The guided flow asks for the number of voltage platforms, then each platform's start frame, end frame, and voltage. This is the preferred current workflow because raw video OCR is not trusted yet.
 
 You can also add `manual_platforms` to a config file:
 
@@ -126,6 +129,10 @@ The backend records `source=manual` or `source=manual_cli` in `platforms.csv`; i
 ## Current Raw Video Behavior
 
 `raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md`, but voltage OCR is rejected as low confidence, so physical charge output is invalid until manual platforms are supplied. With CLI manual platforms, the backend can select a stable single droplet and compute a real physics-based `q`. This OCR rejection is intentional safety behavior.
+
+Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection.
+
+For frontend review, each run writes `diagnostic_overlay.jpg`. It draws the pixel `+X/+Y` axes, microscope ROI, tracking ROI, detected grid lines, measurement start/end lines, selected droplet, and selected trajectory. See `docs/frontend_backend_interface.md` for the desktop UI contract.
 
 With reliable platform data, the single-drop calculation uses:
 

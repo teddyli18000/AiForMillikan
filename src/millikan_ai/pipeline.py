@@ -23,7 +23,7 @@ from millikan_ai.physics.charge import compute_drop_result
 from millikan_ai.reporting.markdown import write_analysis_report
 from millikan_ai.segments.fitting import fit_track_segments
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
-from millikan_ai.tracking.overlay import render_overlay
+from millikan_ai.tracking.overlay import render_diagnostic_overlay, render_overlay
 from millikan_ai.tracking.tracker import track_best_candidate
 from millikan_ai.video.reader import inspect_video, read_frame, save_diagnostic_frame
 
@@ -167,6 +167,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         segments = pd.DataFrame(columns=SEGMENT_COLUMNS)
     segments.to_csv(target / output_cfg["best_track_segments_csv"], index=False)
     overlay_written = False
+    diagnostic_overlay_written = render_diagnostic_overlay(video_path, best_track, grid, tracking_roi, target / output_cfg["diagnostic_overlay_jpg"])
     if not best_track.empty:
         overlay_written = render_overlay(video_path, best_track, grid, target / output_cfg["overlay_mp4"])
     drop_result = compute_drop_result(segments, config)
@@ -195,6 +196,11 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         "track_rows": int(len(best_track)),
         "segment_rows": int(len(segments)),
         "overlay_written": overlay_written,
+        "diagnostic_overlay_written": diagnostic_overlay_written,
+        "visualizations": {
+            "diagnostic_overlay_jpg": str(target / output_cfg["diagnostic_overlay_jpg"]),
+            "overlay_mp4": str(target / output_cfg["overlay_mp4"]),
+        },
         "time_source": "opencv_fps_frame_index",
         "flags": [],
     }
@@ -227,6 +233,9 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
                 json.loads(path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
                 errors.append(f"invalid json {path.name}: {exc}")
+    diagnostic_overlay = root / output.get("diagnostic_overlay_jpg", "diagnostic_overlay.jpg")
+    if not diagnostic_overlay.exists():
+        errors.append(f"missing file: {diagnostic_overlay.name}")
     if not (root / output.get("analysis_report_md", "analysis_report.md")).exists():
         errors.append("missing file: analysis_report.md")
     return errors
