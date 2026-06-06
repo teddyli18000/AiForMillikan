@@ -19,6 +19,7 @@ from millikan_ai.outputs.schemas import (
     VOLTAGE_SAMPLE_COLUMNS,
     validate_columns,
 )
+from millikan_ai.outputs.visualization import build_visualization_layers
 from millikan_ai.physics.charge import compute_drop_result
 from millikan_ai.reporting.markdown import write_analysis_report
 from millikan_ai.segments.fitting import fit_track_segments
@@ -241,6 +242,8 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     _write_json(target / output_cfg["quality_scores_json"], quality_scores)
     elementary = estimate_elementary_charge([drop_result], config)
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
+    visualization_layers = build_visualization_layers(meta, grid, tracking_roi, voltage_roi, best_track, platforms)
+    _write_json(target / output_cfg["visualization_layers_json"], visualization_layers)
     diagnostics = {
         "video": meta.to_dict(),
         "roi": {
@@ -256,6 +259,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         "overlay_written": overlay_written,
         "diagnostic_overlay_written": diagnostic_overlay_written,
         "visualizations": {
+            "visualization_layers_json": str(target / output_cfg["visualization_layers_json"]),
             "diagnostic_overlay_jpg": str(target / output_cfg["diagnostic_overlay_jpg"]),
             "overlay_mp4": str(target / output_cfg["overlay_mp4"]),
         },
@@ -284,7 +288,7 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
     errors.extend(validate_columns(root / output["best_track_csv"], BEST_TRACK_COLUMNS))
     errors.extend(validate_columns(root / output["best_track_segments_csv"], SEGMENT_COLUMNS))
     errors.extend(validate_columns(root / output["candidate_tracks_summary_csv"], CANDIDATE_SUMMARY_COLUMNS))
-    for key in ["diagnostics_json", "drop_results_json", "quality_scores_json", "elementary_charge_result_json"]:
+    for key in ["diagnostics_json", "drop_results_json", "quality_scores_json", "elementary_charge_result_json", "visualization_layers_json"]:
         path = root / output[key]
         if not path.exists():
             errors.append(f"missing file: {path.name}")

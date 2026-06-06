@@ -71,6 +71,7 @@ output:
   drop_results_json: drop_results.json
   quality_scores_json: quality_scores.json
   elementary_charge_result_json: elementary_charge_result.json
+  visualization_layers_json: visualization_layers.json
   diagnostic_overlay_jpg: diagnostic_overlay.jpg
   overlay_mp4: overlay_best_track.mp4
   run_manifest_json: run_manifest.json

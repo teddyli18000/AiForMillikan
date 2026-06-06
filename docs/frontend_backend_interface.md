@@ -64,6 +64,7 @@ Each run should expose `run_manifest.json`. The desktop UI should treat it as th
 Each run should also expose:
 
 - `run_manifest.json`: machine-readable run status, paths, coordinate convention, counts, and UI panel sources.
+- `visualization_layers.json`: structured drawing layers for frontend rendering.
 - `diagnostic_overlay.jpg`: first-frame diagnostic image for UI review.
 - `overlay_best_track.mp4`: full-video overlay of the selected track.
 - `diagnostics.json`: machine-readable ROI, grid, timing, and visualization paths.
@@ -74,15 +75,19 @@ Each run should also expose:
 - `drop_results.json`: physical `q` calculation result.
 - `analysis_report.md`: user-facing full report.
 
-`diagnostic_overlay.jpg` currently draws:
+`visualization_layers.json` currently contains layers for:
 
 - microscope ROI
 - tracking ROI
+- voltage ROI
 - detected vertical and horizontal grid lines
 - measurement start/end lines
 - `+X` and `+Y` pixel axes
+- voltage platform time intervals
 - selected droplet marker
 - selected droplet trajectory
+
+`diagnostic_overlay.jpg` is a rendered preview of the same concepts. The UI should prefer `visualization_layers.json` for interactive overlays and use the image as a quick preview or fallback.
 
 ## Run Manifest Schema
 
@@ -109,12 +114,13 @@ The desktop UI should show these panels for each run:
 
 1. Video validity summary from `analysis_report.md` or `drop_results.json`.
 2. Annotated screenshot from `diagnostic_overlay.jpg`.
-3. Track overlay video from `overlay_best_track.mp4`.
-4. Platform editor table backed by `platforms.csv`.
-5. Candidate ranking table backed by `candidate_tracks_summary.csv`.
-6. Stable velocity segments backed by `best_track_segments.csv`.
-7. Physics calculation backed by `drop_results.json`.
-8. Flags and failure reasons from `diagnostics.json`, `drop_results.json`, and `elementary_charge_result.json`.
+3. Interactive layer overlay from `visualization_layers.json`.
+4. Track overlay video from `overlay_best_track.mp4`.
+5. Platform editor table backed by `platforms.csv`.
+6. Candidate ranking table backed by `candidate_tracks_summary.csv`.
+7. Stable velocity segments backed by `best_track_segments.csv`.
+8. Physics calculation backed by `drop_results.json`.
+9. Flags and failure reasons from `diagnostics.json`, `drop_results.json`, and `elementary_charge_result.json`.
 
 ## Manual Platform UI Contract
 
