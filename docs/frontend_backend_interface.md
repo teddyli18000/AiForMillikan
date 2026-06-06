@@ -175,7 +175,8 @@ The current default remains conservative single-drop behavior with `tracking.max
 
 - keep `run_manifest.json.schema_version` versioned
 - keep `primary_results` for the selected/default drop
-- keep `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for the selected/default drop
+- choose the selected/default drop as the highest-ranked physically valid q result; if no selected result is valid, fall back to the highest-ranked evaluated candidate with explicit flags
+- keep `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for that selected/default drop
 - use `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json` for all selected drops
 - use `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` for the valid-droplet count
 - use `elementary_charge_result.json` for the estimator over all valid independent `charge_abs_C` values
