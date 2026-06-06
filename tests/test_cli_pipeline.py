@@ -104,6 +104,38 @@ def test_track_multiple_candidates_returns_distinct_tracks(tmp_path: Path):
     assert first_points["x_px"].max() - first_points["x_px"].min() > 40
 
 
+def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
+    video = tmp_path / "multi_pipeline.mp4"
+    _make_synthetic_multi_drop_video(video)
+    config = load_config("configs/default.yaml")
+    config["roi"]["microscope_roi"] = [20, 20, 240, 200]
+    config["manual_platforms"] = [
+        {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "manual"},
+        {"platform_id": "P002", "start_frame": 60, "end_frame": 119, "start_time_s": 2.0, "end_time_s": 3.97, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "manual"},
+    ]
+    config["segment"]["stable_min_duration_s"] = 0.5
+    config["segment"]["transient_drop_s"] = 0.1
+    config["segment"]["min_valid_points"] = 10
+    config["segment"]["min_fit_r2"] = 0.5
+    config["segment"]["min_motion_displacement_px"] = 1
+    config["tracking"]["top_k_seeds"] = 10
+    config["tracking"]["max_drops"] = 3
+    config_path = tmp_path / "config.yaml"
+    save_config(config, config_path)
+
+    run_dir = run_pipeline(video, config_path, tmp_path / "run")
+
+    drop_tracks = pd.read_csv(run_dir / "drop_tracks.csv")
+    drop_segments = pd.read_csv(run_dir / "drop_track_segments.csv")
+    multi_results = json.loads((run_dir / "multi_drop_results.json").read_text(encoding="utf-8"))
+    manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert drop_tracks["track_id"].nunique() >= 2
+    assert drop_segments["track_id"].nunique() >= 2
+    assert multi_results["num_total_drops"] >= 2
+    assert len(multi_results["drops"]) >= 2
+    assert manifest["counts"]["drops"] >= 2
+
+
 def test_cli_help_runs():
     result = subprocess.run(
         [".venv/Scripts/python", "-m", "millikan_ai.cli", "--help"],

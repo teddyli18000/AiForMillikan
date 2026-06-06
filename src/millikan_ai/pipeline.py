@@ -26,7 +26,7 @@ from millikan_ai.reporting.markdown import write_analysis_report
 from millikan_ai.segments.fitting import fit_track_segments
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
 from millikan_ai.tracking.overlay import render_diagnostic_overlay, render_overlay
-from millikan_ai.tracking.tracker import track_best_candidate
+from millikan_ai.tracking.tracker import track_multiple_candidates
 from millikan_ai.video.reader import inspect_video, read_frame, save_diagnostic_frame
 
 
@@ -91,6 +91,7 @@ def _build_run_manifest(
         },
         "counts": {
             "platforms": int(diagnostics.get("platform_count", 0)),
+            "drops": int(diagnostics.get("drop_count", 0)),
             "track_rows": int(diagnostics.get("track_rows", 0)),
             "segments": int(diagnostics.get("segment_rows", 0)),
         },
@@ -120,7 +121,9 @@ def _build_run_manifest(
             {"id": "platform_editor", "source": files.get("platforms_csv")},
             {"id": "candidate_tracks", "source": files.get("candidate_tracks_summary_csv")},
             {"id": "stable_segments", "source": files.get("best_track_segments_csv")},
+            {"id": "multi_drop_segments", "source": files.get("drop_track_segments_csv")},
             {"id": "charge_result", "source": files.get("drop_results_json")},
+            {"id": "multi_drop_results", "source": files.get("multi_drop_results_json")},
             {"id": "quality", "source": files.get("quality_scores_json")},
             {"id": "validity", "source": files.get("validity_report_json")},
         ],
@@ -178,6 +181,34 @@ def _sample_voltage_series(
     return samples, pd.DataFrame(rows, columns=VOLTAGE_SAMPLE_COLUMNS)
 
 
+def _fit_segments_for_tracks(drop_tracks: pd.DataFrame, platforms: pd.DataFrame, scale_y_m_per_px: float, config: dict) -> pd.DataFrame:
+    if drop_tracks.empty or platforms.empty:
+        return pd.DataFrame(columns=SEGMENT_COLUMNS)
+    frames = []
+    for _track_id, track in drop_tracks.groupby("track_id", sort=False):
+        frames.append(fit_track_segments(track, platforms, scale_y_m_per_px, config))
+    if not frames:
+        return pd.DataFrame(columns=SEGMENT_COLUMNS)
+    return pd.concat(frames, ignore_index=True)
+
+
+def _compute_multi_drop_results(drop_segments: pd.DataFrame, config: dict) -> tuple[list[dict[str, object]], dict[str, object]]:
+    drops: list[dict[str, object]] = []
+    if not drop_segments.empty:
+        for index, (track_id, segments) in enumerate(drop_segments.groupby("track_id", sort=False), start=1):
+            result = compute_drop_result(segments, config)
+            result["drop_id"] = f"drop_{index:03d}"
+            result["track_id"] = str(track_id)
+            drops.append(result)
+    valid_drop_count = sum(1 for drop in drops if bool(drop.get("valid")))
+    return drops, {
+        "schema_version": 1,
+        "num_total_drops": len(drops),
+        "valid_drop_count": valid_drop_count,
+        "drops": drops,
+    }
+
+
 def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path | None = None) -> Path:
     config = load_config(config_path)
     video_path = Path(video)
@@ -215,34 +246,52 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     voltage_samples.to_csv(target / output_cfg.get("voltage_samples_csv", "voltage_samples.csv"), index=False)
     platforms.to_csv(target / output_cfg["platforms_csv"], index=False)
     tracking_roi = _tracking_roi_from_grid(grid, config)
-    best_track, candidate_summary = track_best_candidate(video_path, video_path.stem, tracking_roi, platforms, config, grid)
-    if best_track.empty:
-        best_track = pd.DataFrame(columns=BEST_TRACK_COLUMNS)
+    drop_tracks, candidate_summary = track_multiple_candidates(video_path, video_path.stem, tracking_roi, platforms, config, grid)
+    if drop_tracks.empty:
+        drop_tracks = pd.DataFrame(columns=BEST_TRACK_COLUMNS)
     if candidate_summary.empty:
         candidate_summary = pd.DataFrame(columns=CANDIDATE_SUMMARY_COLUMNS)
+    selected_ids = []
+    if "selected_for_multi_drop" in candidate_summary:
+        selected_ids = [str(row["candidate_id"]) for row in candidate_summary.to_dict("records") if bool(row.get("selected_for_multi_drop"))]
+    best_track_id = selected_ids[0] if selected_ids else (str(candidate_summary.iloc[0]["candidate_id"]) if not candidate_summary.empty else "")
+    if best_track_id and not drop_tracks.empty:
+        best_track = drop_tracks[drop_tracks["track_id"] == best_track_id].copy()
+    else:
+        best_track = pd.DataFrame(columns=BEST_TRACK_COLUMNS)
     best_track.to_csv(target / output_cfg["best_track_csv"], index=False)
+    drop_tracks.to_csv(target / output_cfg.get("drop_tracks_csv", "drop_tracks.csv"), index=False)
     candidate_summary.to_csv(target / output_cfg["candidate_tracks_summary_csv"], index=False)
-    if grid.scale_y_m_per_px is not None and not best_track.empty and not platforms.empty:
-        segments = fit_track_segments(best_track, platforms, grid.scale_y_m_per_px, config)
+    if grid.scale_y_m_per_px is not None and not drop_tracks.empty and not platforms.empty:
+        drop_segments = _fit_segments_for_tracks(drop_tracks, platforms, grid.scale_y_m_per_px, config)
+    else:
+        drop_segments = pd.DataFrame(columns=SEGMENT_COLUMNS)
+    if best_track_id and not drop_segments.empty:
+        segments = drop_segments[drop_segments["track_id"] == best_track_id].copy()
     else:
         segments = pd.DataFrame(columns=SEGMENT_COLUMNS)
     segments.to_csv(target / output_cfg["best_track_segments_csv"], index=False)
+    drop_segments.to_csv(target / output_cfg.get("drop_track_segments_csv", "drop_track_segments.csv"), index=False)
     overlay_written = False
     diagnostic_overlay_written = render_diagnostic_overlay(video_path, best_track, grid, tracking_roi, target / output_cfg["diagnostic_overlay_jpg"])
     if not best_track.empty:
         overlay_written = render_overlay(video_path, best_track, grid, target / output_cfg["overlay_mp4"])
-    drop_result = compute_drop_result(segments, config)
+    drop_results, multi_drop_results = _compute_multi_drop_results(drop_segments, config)
+    drop_result = next((drop for drop in drop_results if drop.get("track_id") == best_track_id), None) or compute_drop_result(segments, config)
     _write_json(target / output_cfg["drop_results_json"], drop_result)
+    _write_json(target / output_cfg.get("multi_drop_results_json", "multi_drop_results.json"), multi_drop_results)
     quality_scores = {
         "implemented": "non_ml_hard_rule_summary",
         "ml_training": False,
         "best_candidate": candidate_summary.head(1).to_dict("records"),
+        "valid_drop_count": int(multi_drop_results["valid_drop_count"]),
+        "total_drop_count": int(multi_drop_results["num_total_drops"]),
         "ml_filtering": "not_in_scope",
         "drop_valid": bool(drop_result.get("valid")),
         "drop_flags": drop_result.get("flags", []),
     }
     _write_json(target / output_cfg["quality_scores_json"], quality_scores)
-    elementary = estimate_elementary_charge([drop_result], config)
+    elementary = estimate_elementary_charge(drop_results or [drop_result], config)
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
     visualization_layers = build_visualization_layers(meta, grid, tracking_roi, voltage_roi, best_track, platforms)
     _write_json(target / output_cfg["visualization_layers_json"], visualization_layers)
@@ -256,8 +305,11 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         },
         "grid": grid.to_dict(),
         "platform_count": int(len(platforms)),
+        "drop_count": int(multi_drop_results["num_total_drops"]),
         "track_rows": int(len(best_track)),
+        "all_track_rows": int(len(drop_tracks)),
         "segment_rows": int(len(segments)),
+        "all_segment_rows": int(len(drop_segments)),
         "overlay_written": overlay_written,
         "diagnostic_overlay_written": diagnostic_overlay_written,
         "visualizations": {
@@ -290,9 +342,19 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
     errors.extend(validate_columns(root / output.get("voltage_samples_csv", "voltage_samples.csv"), VOLTAGE_SAMPLE_COLUMNS))
     errors.extend(validate_columns(root / output["platforms_csv"], PLATFORMS_COLUMNS))
     errors.extend(validate_columns(root / output["best_track_csv"], BEST_TRACK_COLUMNS))
+    errors.extend(validate_columns(root / output.get("drop_tracks_csv", "drop_tracks.csv"), BEST_TRACK_COLUMNS))
     errors.extend(validate_columns(root / output["best_track_segments_csv"], SEGMENT_COLUMNS))
+    errors.extend(validate_columns(root / output.get("drop_track_segments_csv", "drop_track_segments.csv"), SEGMENT_COLUMNS))
     errors.extend(validate_columns(root / output["candidate_tracks_summary_csv"], CANDIDATE_SUMMARY_COLUMNS))
-    for key in ["diagnostics_json", "drop_results_json", "quality_scores_json", "elementary_charge_result_json", "validity_report_json", "visualization_layers_json"]:
+    for key in [
+        "diagnostics_json",
+        "drop_results_json",
+        "multi_drop_results_json",
+        "quality_scores_json",
+        "elementary_charge_result_json",
+        "validity_report_json",
+        "visualization_layers_json",
+    ]:
         path = root / output[key]
         if not path.exists():
             errors.append(f"missing file: {path.name}")
