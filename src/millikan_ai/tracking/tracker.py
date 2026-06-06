@@ -90,14 +90,14 @@ def _roi_clear_fraction(rows: list[dict[str, object]], roi: Roi, min_margin_px: 
     return clear / len(valid_rows)
 
 
-def track_best_candidate(
+def _track_seed_candidates(
     video_path: str | Path,
     video_id: str,
     microscope_roi: Roi,
     platforms: pd.DataFrame,
     config: dict,
     grid: GridCalibration | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]]]:
     meta = inspect_video(video_path)
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -117,10 +117,19 @@ def track_best_candidate(
     seeds = detect_blobs(frame, microscope_roi, min_area, max_area)[: int(tracking_cfg["top_k_seeds"])]
     if not seeds:
         cap.release()
-        return pd.DataFrame(), pd.DataFrame(
-            [{"candidate_id": "none", "usable_platform_count": 0, "total_duration_s": 0, "missing_ratio": 1, "score_total": 0, "rank": 1, "reject_reason": "no_seeds"}]
-        )
-    tracks: list[list[dict[str, object]]] = []
+        return {}, [
+            {
+                "candidate_id": "none",
+                "usable_platform_count": 0,
+                "total_duration_s": 0,
+                "missing_ratio": 1,
+                "score_total": 0,
+                "rank": 1,
+                "reject_reason": "no_seeds",
+                "selected_for_multi_drop": False,
+            }
+        ]
+    tracks: dict[str, list[dict[str, object]]] = {}
     summaries = []
     for seed_idx, seed in enumerate(seeds[: min(10, len(seeds))], start=1):
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -182,10 +191,11 @@ def track_best_candidate(
             reject_reasons.append("too_close_to_grid_lines")
         if roi_clear_fraction < min_roi_clear:
             reject_reasons.append("too_close_to_tracking_roi_edge")
-        tracks.append(rows)
+        candidate_id = f"candidate_{seed_idx:03d}"
+        tracks[candidate_id] = rows
         summaries.append(
             {
-                "candidate_id": f"candidate_{seed_idx:03d}",
+                "candidate_id": candidate_id,
                 "usable_platform_count": platform_count,
                 "total_duration_s": total_duration,
                 "missing_ratio": missing_ratio,
@@ -197,12 +207,95 @@ def track_best_candidate(
                 "roi_clear_fraction": roi_clear_fraction,
                 "rank": 0,
                 "reject_reason": ",".join(reject_reasons),
+                "selected_for_multi_drop": False,
             }
         )
     cap.release()
     summaries.sort(key=lambda row: row["score_total"], reverse=True)
     for rank, row in enumerate(summaries, start=1):
         row["rank"] = rank
-    best_id = summaries[0]["candidate_id"]
-    best_rows = next(rows for rows in tracks if rows and rows[0]["track_id"] == best_id)
-    return pd.DataFrame(best_rows), pd.DataFrame(summaries)
+    return tracks, summaries
+
+
+def _first_valid_point(rows: list[dict[str, object]]) -> tuple[float, float] | None:
+    for row in rows:
+        if bool(row.get("is_valid_detection")):
+            return float(row["x_px"]), float(row["y_px"])
+    if rows:
+        return float(rows[0]["x_px"]), float(rows[0]["y_px"])
+    return None
+
+
+def _trajectory_distance(a: list[dict[str, object]], b: list[dict[str, object]]) -> float:
+    by_frame = {int(row["frame_idx"]): row for row in b if bool(row.get("is_valid_detection"))}
+    distances = []
+    for row in a:
+        if not bool(row.get("is_valid_detection")):
+            continue
+        other = by_frame.get(int(row["frame_idx"]))
+        if other is None:
+            continue
+        distances.append(math.hypot(float(row["x_px"]) - float(other["x_px"]), float(row["y_px"]) - float(other["y_px"])))
+    if not distances:
+        first_a = _first_valid_point(a)
+        first_b = _first_valid_point(b)
+        if first_a is None or first_b is None:
+            return 0.0
+        return math.hypot(first_a[0] - first_b[0], first_a[1] - first_b[1])
+    return float(np.median(distances))
+
+
+def track_multiple_candidates(
+    video_path: str | Path,
+    video_id: str,
+    microscope_roi: Roi,
+    platforms: pd.DataFrame,
+    config: dict,
+    grid: GridCalibration | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    tracks, summaries = _track_seed_candidates(video_path, video_id, microscope_roi, platforms, config, grid)
+    if not tracks:
+        return pd.DataFrame(), pd.DataFrame(summaries)
+
+    tracking_cfg = config["tracking"]
+    max_drops = max(1, int(tracking_cfg.get("max_drops", 1)))
+    min_distance = float(tracking_cfg.get("multi_drop_min_trajectory_distance_px", 20))
+    selected_ids: list[str] = []
+    selected_tracks: list[list[dict[str, object]]] = []
+    for summary in summaries:
+        candidate_id = str(summary["candidate_id"])
+        rows = tracks.get(candidate_id, [])
+        if not rows or str(summary.get("reject_reason", "") or ""):
+            continue
+        if any(_trajectory_distance(rows, selected) < min_distance for selected in selected_tracks):
+            summary["reject_reason"] = "duplicate_track"
+            continue
+        summary["selected_for_multi_drop"] = True
+        selected_ids.append(candidate_id)
+        selected_tracks.append(rows)
+        if len(selected_ids) >= max_drops:
+            break
+
+    if not selected_tracks and summaries:
+        best_id = str(summaries[0]["candidate_id"])
+        if best_id in tracks:
+            summaries[0]["selected_for_multi_drop"] = True
+            selected_tracks.append(tracks[best_id])
+
+    track_frame = pd.DataFrame([row for rows in selected_tracks for row in rows])
+    return track_frame, pd.DataFrame(summaries)
+
+
+def track_best_candidate(
+    video_path: str | Path,
+    video_id: str,
+    microscope_roi: Roi,
+    platforms: pd.DataFrame,
+    config: dict,
+    grid: GridCalibration | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    tracks, summaries = _track_seed_candidates(video_path, video_id, microscope_roi, platforms, config, grid)
+    if not tracks:
+        return pd.DataFrame(), pd.DataFrame(summaries)
+    best_id = str(summaries[0]["candidate_id"])
+    return pd.DataFrame(tracks[best_id]), pd.DataFrame(summaries)

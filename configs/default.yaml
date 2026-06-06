@@ -32,6 +32,8 @@ segment:
 
 tracking:
   top_k_seeds: 30
+  max_drops: 1
+  multi_drop_min_trajectory_distance_px: 20
   max_search_radius_px: 35
   min_blob_area_px: 3
   max_blob_area_px: 180
