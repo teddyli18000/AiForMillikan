@@ -127,6 +127,7 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
 
     drop_tracks = pd.read_csv(run_dir / "drop_tracks.csv")
     drop_segments = pd.read_csv(run_dir / "drop_track_segments.csv")
+    candidate_summary = pd.read_csv(run_dir / "candidate_tracks_summary.csv")
     multi_results = json.loads((run_dir / "multi_drop_results.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     layers = json.loads((run_dir / "visualization_layers.json").read_text(encoding="utf-8"))
@@ -137,6 +138,9 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     assert multi_results["num_total_drops"] >= 2
     assert len(multi_results["drops"]) >= 2
     assert manifest["counts"]["drops"] >= 2
+    assert manifest["counts"]["valid_drops"] == multi_results["valid_drop_count"]
+    assert {"drop_id", "q_valid", "physics_flags", "charge_abs_C"}.issubset(candidate_summary.columns)
+    assert candidate_summary["q_valid"].astype(bool).sum() == multi_results["valid_drop_count"]
     drop_track_layer = next(layer for layer in layers["layers"] if layer["id"] == "drop_tracks")
     assert len(drop_track_layer["tracks"]) >= 2
     checks = {check["id"]: check for check in validity["checks"]}

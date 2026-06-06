@@ -92,6 +92,7 @@ def _build_run_manifest(
         "counts": {
             "platforms": int(diagnostics.get("platform_count", 0)),
             "drops": int(diagnostics.get("drop_count", 0)),
+            "valid_drops": int(quality_scores.get("valid_drop_count", 0)),
             "track_rows": int(diagnostics.get("track_rows", 0)),
             "segments": int(diagnostics.get("segment_rows", 0)),
         },
@@ -209,6 +210,31 @@ def _compute_multi_drop_results(drop_segments: pd.DataFrame, config: dict) -> tu
     }
 
 
+def _annotate_candidate_physics(candidate_summary: pd.DataFrame, drop_results: list[dict[str, object]]) -> pd.DataFrame:
+    if candidate_summary.empty:
+        return candidate_summary
+    annotated = candidate_summary.copy()
+    annotated["drop_id"] = ""
+    annotated["q_valid"] = False
+    annotated["physics_flags"] = ""
+    annotated["charge_abs_C"] = pd.NA
+    annotated["radius_m"] = pd.NA
+    for drop in drop_results:
+        track_id = str(drop.get("track_id", ""))
+        if not track_id:
+            continue
+        mask = annotated["candidate_id"].astype(str) == track_id
+        if not mask.any():
+            continue
+        result = drop.get("result", {}) or {}
+        annotated.loc[mask, "drop_id"] = str(drop.get("drop_id", ""))
+        annotated.loc[mask, "q_valid"] = bool(drop.get("valid"))
+        annotated.loc[mask, "physics_flags"] = ",".join(drop.get("flags", []))
+        annotated.loc[mask, "charge_abs_C"] = result.get("charge_abs_C")
+        annotated.loc[mask, "radius_m"] = result.get("radius_m")
+    return annotated
+
+
 def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path | None = None) -> Path:
     config = load_config(config_path)
     video_path = Path(video)
@@ -261,7 +287,6 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         best_track = pd.DataFrame(columns=BEST_TRACK_COLUMNS)
     best_track.to_csv(target / output_cfg["best_track_csv"], index=False)
     drop_tracks.to_csv(target / output_cfg.get("drop_tracks_csv", "drop_tracks.csv"), index=False)
-    candidate_summary.to_csv(target / output_cfg["candidate_tracks_summary_csv"], index=False)
     if grid.scale_y_m_per_px is not None and not drop_tracks.empty and not platforms.empty:
         drop_segments = _fit_segments_for_tracks(drop_tracks, platforms, grid.scale_y_m_per_px, config)
     else:
@@ -278,6 +303,8 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         overlay_written = render_overlay(video_path, best_track, grid, target / output_cfg["overlay_mp4"])
     drop_results, multi_drop_results = _compute_multi_drop_results(drop_segments, config)
     drop_result = next((drop for drop in drop_results if drop.get("track_id") == best_track_id), None) or compute_drop_result(segments, config)
+    candidate_summary = _annotate_candidate_physics(candidate_summary, drop_results)
+    candidate_summary.to_csv(target / output_cfg["candidate_tracks_summary_csv"], index=False)
     _write_json(target / output_cfg["drop_results_json"], drop_result)
     _write_json(target / output_cfg.get("multi_drop_results_json", "multi_drop_results.json"), multi_drop_results)
     quality_scores = {
