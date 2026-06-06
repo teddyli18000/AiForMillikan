@@ -37,6 +37,10 @@ tracking:
   max_blob_area_px: 180
   best_track_min_score: 0.45
   restrict_to_measurement_grid: true
+  min_grid_line_distance_px: 8
+  min_grid_clear_fraction: 0.60
+  min_tracking_roi_margin_px: 20
+  min_roi_clear_fraction: 0.70
 
 physics:
   voltage_sign: 1

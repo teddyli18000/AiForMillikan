@@ -212,7 +212,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     voltage_samples.to_csv(target / output_cfg.get("voltage_samples_csv", "voltage_samples.csv"), index=False)
     platforms.to_csv(target / output_cfg["platforms_csv"], index=False)
     tracking_roi = _tracking_roi_from_grid(grid, config)
-    best_track, candidate_summary = track_best_candidate(video_path, video_path.stem, tracking_roi, platforms, config)
+    best_track, candidate_summary = track_best_candidate(video_path, video_path.stem, tracking_roi, platforms, config, grid)
     if best_track.empty:
         best_track = pd.DataFrame(columns=BEST_TRACK_COLUMNS)
     if candidate_summary.empty:

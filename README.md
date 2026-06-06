@@ -155,7 +155,7 @@ The API writes the same output contract as the CLI, including `run_manifest.json
 
 `raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md`, but voltage OCR is rejected as low confidence, so physical charge output is invalid until manual platforms are supplied. With CLI manual platforms, the backend can select a stable single droplet and compute a real physics-based `q`. This OCR rejection is intentional safety behavior.
 
-Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection.
+Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection. Candidate ranking also penalizes tracks that stay too close to grid lines or tracking ROI edges, which reduces false positives from grid intersections and edge highlights.
 
 For frontend review, each run writes `run_manifest.json` and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; it lists run validity, flags, output paths, coordinate conventions, and suggested UI panels. The diagnostic image draws the pixel `+X/+Y` axes, microscope ROI, tracking ROI, detected grid lines, measurement start/end lines, selected droplet, and selected trajectory. See `docs/frontend_backend_interface.md` for the desktop UI contract.
 

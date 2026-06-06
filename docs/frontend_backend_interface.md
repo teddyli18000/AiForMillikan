@@ -127,6 +127,16 @@ Voltage OCR is not trusted for current raw videos. The UI should ask:
 
 The backend validates frame ranges and records manual entries as non-OCR sources. The UI must not label manually entered voltages as automatic OCR.
 
+## Candidate Quality Fields
+
+`candidate_tracks_summary.csv` may include extra diagnostic columns beyond the required schema. The UI should surface them when present:
+
+- `grid_clear_fraction`: fraction of valid detections not too close to detected grid lines.
+- `roi_clear_fraction`: fraction of valid detections not too close to the tracking ROI edge.
+- `reject_reason`: comma-separated hard-rule reasons such as `too_close_to_grid_lines`, `too_close_to_tracking_roi_edge`, or `insufficient_stable_platform_fits`.
+
+These fields explain why bright grid intersections, watermarks, borders, and edge highlights are not selected as the best droplet.
+
 ## Multi-Drop Extension Direction
 
 The current contract is single-drop. Multi-drop support should extend this without breaking existing fields:

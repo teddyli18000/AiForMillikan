@@ -10,6 +10,7 @@ from millikan_ai.cli.__main__ import _parse_platform_spec, _prompt_platform_rows
 from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.config import load_config, save_config
 from millikan_ai.pipeline import _tracking_roi_from_grid, run_pipeline, validate_run
+from millikan_ai.tracking.tracker import _grid_clear_fraction, _roi_clear_fraction
 
 
 def _make_synthetic_video(path: Path) -> None:
@@ -119,3 +120,32 @@ def test_tracking_roi_is_clipped_to_measurement_grid_bottom():
     roi = _tracking_roi_from_grid(grid, config)
 
     assert roi.to_list() == [30, 20, 190, 300]
+
+
+def test_grid_clear_fraction_penalizes_grid_line_highlights():
+    grid = GridCalibration(
+        roi=Roi(0, 0, 300, 300),
+        grid_lines_x=[100, 200],
+        grid_lines_y=[80, 160],
+        x_start_px=100,
+        x_end_px=200,
+        y_start_px=80,
+        y_end_px=160,
+        measurement_distance_m=0.0015,
+        scale_y_m_per_px=0.0015 / 80,
+        warnings=[],
+    )
+    grid_line_rows = [{"x_px": 100.5, "y_px": 120, "is_valid_detection": True} for _ in range(10)]
+    droplet_rows = [{"x_px": 135, "y_px": 120, "is_valid_detection": True} for _ in range(10)]
+
+    assert _grid_clear_fraction(grid_line_rows, grid, min_distance_px=8) == 0.0
+    assert _grid_clear_fraction(droplet_rows, grid, min_distance_px=8) == 1.0
+
+
+def test_roi_clear_fraction_penalizes_edge_highlights():
+    roi = Roi(100, 50, 300, 200)
+    edge_rows = [{"x_px": 105, "y_px": 120, "is_valid_detection": True} for _ in range(10)]
+    inner_rows = [{"x_px": 180, "y_px": 120, "is_valid_detection": True} for _ in range(10)]
+
+    assert _roi_clear_fraction(edge_rows, roi, min_margin_px=20) == 0.0
+    assert _roi_clear_fraction(inner_rows, roi, min_margin_px=20) == 1.0
