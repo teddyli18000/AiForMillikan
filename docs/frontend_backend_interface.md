@@ -100,7 +100,7 @@ Each run should also expose:
 
 - `schema_version`: integer contract version.
 - `run_dir`: run output directory.
-- `status`: `video_readable`, `valid_for_q`, `drop_valid`, `ml_training`, and combined `flags`.
+- `status`: `video_readable`, `valid_for_q`, `valid_for_elementary_charge`, `drop_valid`, `ml_training`, and combined `flags`.
 - `counts`: platform, selected drop, physically valid drop, selected/default track row, and selected/default segment counts.
 - `coordinate_system`: pixel and time conventions for frontend rendering.
 - `video`: metadata copied from `diagnostics.json`.
@@ -111,7 +111,7 @@ Each run should also expose:
 - `files`: all output artifact paths keyed by config output name.
 - `frontend_panels`: ordered panel suggestions for the desktop UI.
 
-The UI should not infer validity from file existence. Use `status.valid_for_q` and `status.flags`.
+The UI should not infer validity from file existence. Use `status.valid_for_q`, `status.valid_for_elementary_charge`, and `status.flags`.
 
 ## Validity Report
 

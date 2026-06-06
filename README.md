@@ -35,7 +35,7 @@ Do not install dependencies globally or into the base Conda environment. Use `.v
 .venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp_work -o cache_dir=runs\pytest_cache_work
 ```
 
-The test suite uses synthetic images/videos for deterministic OCR, grid, platform, tracking, velocity, charge, elementary-charge, and CLI behavior.
+The test suite uses synthetic images/videos for deterministic OCR, grid, platform, tracking, velocity, charge, elementary-charge, and CLI behavior. It includes a three-droplet pipeline case that reaches `elementary_charge_result.json.valid=true`.
 
 ## CLI
 
