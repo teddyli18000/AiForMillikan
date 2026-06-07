@@ -180,6 +180,20 @@ def test_root_interactive_entry_collects_manual_platforms(monkeypatch, tmp_path:
     assert "analysis_report.md" in out
 
 
+def test_root_platform_prompt_defaults_split_frame_ranges(monkeypatch):
+    import run_millikan
+
+    answers = iter(["2", "", "", "0", "", "", "175"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    platforms = run_millikan._prompt_platforms(fps=30.0, frame_count=120)
+
+    assert platforms[0].start_frame == 0
+    assert platforms[0].end_frame == 59
+    assert platforms[1].start_frame == 60
+    assert platforms[1].end_frame == 119
+
+
 def test_track_multiple_candidates_returns_distinct_tracks(tmp_path: Path):
     video = tmp_path / "multi.mp4"
     _make_synthetic_multi_drop_video(video)

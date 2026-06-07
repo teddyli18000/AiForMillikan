@@ -65,8 +65,9 @@ def _prompt_platforms(fps: float, frame_count: int) -> tuple[ManualPlatformInput
     platforms: list[ManualPlatformInput] = []
     previous_end = -1
     for index in range(count):
+        remaining = max(1, count - index)
         default_start = previous_end + 1
-        default_end = frame_count - 1 if index == count - 1 else default_start
+        default_end = frame_count - 1 if index == count - 1 else max(default_start, default_start + ((frame_count - default_start) // remaining) - 1)
         print(f"\n平台 {index + 1}")
         start_frame = _prompt_int("  起始帧 start_frame", default_start)
         end_frame = _prompt_int("  结束帧 end_frame", default_end)
