@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from millikan_ai.config import load_config, save_config
 from millikan_ai.pipeline import run_pipeline, validate_run
 from millikan_ai.video.reader import inspect_video
+
+ProgressCallback = Callable[[float, str], None]
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,7 @@ class AnalysisRequest:
     config_path: str | Path = "configs/default.yaml"
     run_dir: str | Path | None = None
     manual_platforms: tuple[ManualPlatformInput, ...] = ()
+    progress_callback: ProgressCallback | None = None
 
 
 @dataclass(frozen=True)
@@ -76,7 +79,7 @@ def prepare_analysis_config(video_path: str | Path, config_path: str | Path, man
 
 def analyze_video(request: AnalysisRequest) -> AnalysisResult:
     prepared_config = prepare_analysis_config(request.video_path, request.config_path, request.manual_platforms)
-    run_dir = run_pipeline(request.video_path, prepared_config, request.run_dir)
+    run_dir = run_pipeline(request.video_path, prepared_config, request.run_dir, progress_callback=request.progress_callback)
     errors = validate_run(run_dir, prepared_config)
     manifest_path = run_dir / "run_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}

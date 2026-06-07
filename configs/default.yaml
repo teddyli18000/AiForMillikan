@@ -15,13 +15,6 @@ calibration:
   measurement_distance_m: 0.0015
   min_grid_lines: 4
 
-ocr:
-  sample_every_n_frames: 15
-  dynamic_voltage_roi: true
-  min_confidence: 0.70
-  voltage_tolerance_V: 8.0
-  min_platform_duration_s: 1.0
-
 segment:
   stable_min_duration_s: 2.0
   transient_drop_s: 0.5

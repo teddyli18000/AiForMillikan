@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import cv2
 import pandas as pd
 
-from millikan_ai.calibration.grid import Roi, calibrate_grid
+from millikan_ai.calibration.grid import Roi, calibrate_grid, default_voltage_roi
 from millikan_ai.config import load_config, save_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
-from millikan_ai.ocr.voltage import find_voltage_roi, read_voltage_from_frame
 from millikan_ai.outputs.schemas import (
     BEST_TRACK_COLUMNS,
     CANDIDATE_SUMMARY_COLUMNS,
@@ -24,10 +24,11 @@ from millikan_ai.outputs.visualization import build_visualization_layers
 from millikan_ai.physics.charge import compute_drop_result
 from millikan_ai.reporting.markdown import write_analysis_report
 from millikan_ai.segments.fitting import fit_track_segments
-from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
 from millikan_ai.tracking.overlay import render_diagnostic_overlay, render_overlay
 from millikan_ai.tracking.tracker import track_multiple_candidates
 from millikan_ai.video.reader import inspect_video, read_frame, save_diagnostic_frame
+
+ProgressCallback = Callable[[float, str], None]
 
 
 def _run_dir(config: dict, video_path: Path) -> Path:
@@ -50,6 +51,11 @@ def _write_json(path: Path, data: dict) -> None:
 def _load_manual_platforms(config: dict) -> pd.DataFrame:
     rows = config.get("manual_platforms") or []
     return pd.DataFrame(rows, columns=PLATFORMS_COLUMNS) if rows else pd.DataFrame(columns=PLATFORMS_COLUMNS)
+
+
+def _emit_progress(callback: ProgressCallback | None, percent: float, label: str) -> None:
+    if callback is not None:
+        callback(max(0.0, min(1.0, percent)), label)
 
 
 def _tracking_roi_from_grid(grid, config: dict) -> Roi:
@@ -130,57 +136,6 @@ def _build_run_manifest(
             {"id": "validity", "source": files.get("validity_report_json")},
         ],
     }
-
-
-def _sample_voltage_series(
-    video_path: Path,
-    roi: Roi,
-    config: dict,
-    max_voltage: float = 1000.0,
-    dynamic_roi: bool = False,
-) -> tuple[list[VoltageSample], pd.DataFrame]:
-    meta = inspect_video(video_path)
-    every = int(config["ocr"]["sample_every_n_frames"])
-    samples: list[VoltageSample] = []
-    rows: list[dict[str, object]] = []
-    for frame_idx in range(0, meta.frame_count, max(1, every)):
-        frame = read_frame(video_path, frame_idx)
-        sample_roi = find_voltage_roi(frame) if dynamic_roi else roi
-        reading = read_voltage_from_frame(frame, sample_roi)
-        voltage = reading.voltage_V
-        source = reading.source
-        confidence = reading.confidence
-        accepted = True
-        reject_reason = ""
-        if voltage is None or abs(voltage) > max_voltage or reading.confidence < float(config["ocr"]["min_confidence"]):
-            voltage = None
-            source = "template_ocr_rejected"
-            confidence = min(confidence, 0.2)
-            accepted = False
-            if reading.voltage_V is None:
-                reject_reason = "no_voltage_value"
-            elif abs(reading.voltage_V) > max_voltage:
-                reject_reason = "voltage_out_of_range"
-            else:
-                reject_reason = "low_confidence"
-        samples.append(VoltageSample(frame_idx, frame_idx / meta.fps if meta.fps else 0.0, voltage, confidence, source))
-        rows.append(
-            {
-                "frame_idx": frame_idx,
-                "time_s": frame_idx / meta.fps if meta.fps else 0.0,
-                "voltage_V": voltage,
-                "confidence": confidence,
-                "source": source,
-                "raw_text": reading.text,
-                "accepted": accepted,
-                "reject_reason": reject_reason,
-                "roi_x": sample_roi.x,
-                "roi_y": sample_roi.y,
-                "roi_w": sample_roi.w,
-                "roi_h": sample_roi.h,
-            }
-        )
-    return samples, pd.DataFrame(rows, columns=VOLTAGE_SAMPLE_COLUMNS)
 
 
 def _fit_segments_for_tracks(drop_tracks: pd.DataFrame, platforms: pd.DataFrame, scale_y_m_per_px: float, config: dict) -> pd.DataFrame:
@@ -264,43 +219,45 @@ def _select_primary_drop(
     return str(selected.get("track_id", fallback_track_id) or fallback_track_id), selected
 
 
-def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path | None = None) -> Path:
+def run_pipeline(
+    video: str | Path,
+    config_path: str | Path,
+    run_dir: str | Path | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> Path:
     config = load_config(config_path)
     video_path = Path(video)
     target = Path(run_dir) if run_dir else _run_dir(config, video_path)
     target.mkdir(parents=True, exist_ok=True)
     output_cfg = config["output"]
+    _emit_progress(progress_callback, 0.02, "inspect video")
     meta = inspect_video(video_path)
     save_config(config, target / "run_config.yaml")
+    _emit_progress(progress_callback, 0.08, "write diagnostic frame")
     diagnostics_dir = target / config["video"]["diagnostics_dir"]
     save_diagnostic_frame(video_path, diagnostics_dir / "first_frame.jpg", 0)
     first_frame = read_frame(video_path, 0)
     microscope_roi = Roi.from_config(config["roi"].get("microscope_roi"))
     configured_voltage_roi = Roi.from_config(config["roi"].get("voltage_roi"))
-    voltage_roi = configured_voltage_roi or find_voltage_roi(first_frame)
-    dynamic_voltage_roi = configured_voltage_roi is None and bool(config["ocr"].get("dynamic_voltage_roi", True))
+    voltage_roi = configured_voltage_roi or default_voltage_roi(meta.width, meta.height)
+    dynamic_voltage_roi = False
+    _emit_progress(progress_callback, 0.16, "calibrate grid")
     grid = calibrate_grid(
         first_frame,
         microscope_roi,
         float(config["calibration"]["measurement_distance_m"]),
         int(config["calibration"]["min_grid_lines"]),
     )
+    _emit_progress(progress_callback, 0.24, "load manual voltage platforms")
     manual_platforms = _load_manual_platforms(config)
     voltage_samples = pd.DataFrame(columns=VOLTAGE_SAMPLE_COLUMNS)
-    if not manual_platforms.empty:
-        platforms = manual_platforms
-    else:
-        samples, voltage_samples = _sample_voltage_series(video_path, voltage_roi, config, dynamic_roi=dynamic_voltage_roi)
-        platforms = segment_voltage_platforms(
-            samples,
-            float(config["ocr"]["voltage_tolerance_V"]),
-            float(config["ocr"]["min_platform_duration_s"]),
-        )
+    platforms = manual_platforms
     if platforms.empty:
         platforms = pd.DataFrame(columns=PLATFORMS_COLUMNS)
     voltage_samples.to_csv(target / output_cfg.get("voltage_samples_csv", "voltage_samples.csv"), index=False)
     platforms.to_csv(target / output_cfg["platforms_csv"], index=False)
     tracking_roi = _tracking_roi_from_grid(grid, config)
+    _emit_progress(progress_callback, 0.36, "tracking droplets")
     drop_tracks, candidate_summary = track_multiple_candidates(video_path, video_path.stem, tracking_roi, platforms, config, grid)
     if drop_tracks.empty:
         drop_tracks = pd.DataFrame(columns=BEST_TRACK_COLUMNS)
@@ -311,10 +268,12 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
         selected_ids = [str(row["candidate_id"]) for row in candidate_summary.to_dict("records") if bool(row.get("selected_for_multi_drop"))]
     fallback_track_id = selected_ids[0] if selected_ids else (str(candidate_summary.iloc[0]["candidate_id"]) if not candidate_summary.empty else "")
     drop_tracks.to_csv(target / output_cfg.get("drop_tracks_csv", "drop_tracks.csv"), index=False)
+    _emit_progress(progress_callback, 0.58, "fit stable velocity segments")
     if grid.scale_y_m_per_px is not None and not drop_tracks.empty and not platforms.empty:
         drop_segments = _fit_segments_for_tracks(drop_tracks, platforms, grid.scale_y_m_per_px, config)
     else:
         drop_segments = pd.DataFrame(columns=SEGMENT_COLUMNS)
+    _emit_progress(progress_callback, 0.68, "compute charge results")
     drop_results, multi_drop_results = _compute_multi_drop_results(drop_segments, config)
     best_track_id, selected_drop = _select_primary_drop(drop_results, candidate_summary, fallback_track_id)
     if best_track_id and not drop_tracks.empty:
@@ -331,6 +290,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     overlay_written = False
     diagnostic_overlay_written = render_diagnostic_overlay(video_path, best_track, grid, tracking_roi, target / output_cfg["diagnostic_overlay_jpg"])
     if not best_track.empty:
+        _emit_progress(progress_callback, 0.76, "render overlay")
         overlay_written = render_overlay(video_path, best_track, grid, target / output_cfg["overlay_mp4"])
     drop_result = selected_drop or compute_drop_result(segments, config)
     candidate_summary = _annotate_candidate_physics(candidate_summary, drop_results)
@@ -350,6 +310,7 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     _write_json(target / output_cfg["quality_scores_json"], quality_scores)
     elementary = estimate_elementary_charge(drop_results or [drop_result], config)
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
+    _emit_progress(progress_callback, 0.86, "write visualization outputs")
     visualization_layers = build_visualization_layers(meta, grid, tracking_roi, voltage_roi, best_track, platforms, drop_tracks)
     _write_json(target / output_cfg["visualization_layers_json"], visualization_layers)
     diagnostics = {
@@ -394,9 +355,11 @@ def run_pipeline(video: str | Path, config_path: str | Path, run_dir: str | Path
     )
     _write_json(target / output_cfg["validity_report_json"], validity_report)
     write_summary(target, config)
+    _emit_progress(progress_callback, 0.94, "write analysis report")
     write_analysis_report(target, config)
     manifest = _build_run_manifest(target, config, diagnostics, drop_result, elementary, quality_scores)
     _write_json(target / output_cfg.get("run_manifest_json", "run_manifest.json"), manifest)
+    _emit_progress(progress_callback, 1.0, "write manifest")
     return target
 
 

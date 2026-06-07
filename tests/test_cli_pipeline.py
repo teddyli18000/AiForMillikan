@@ -10,6 +10,7 @@ import yaml
 from millikan_ai.cli.__main__ import _parse_platform_spec, _prompt_platform_rows
 from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.config import load_config, save_config
+from millikan_ai import pipeline
 from millikan_ai.pipeline import _select_primary_drop, _tracking_roi_from_grid, run_pipeline, validate_run
 from millikan_ai.tracking.tracker import _grid_clear_fraction, _roi_clear_fraction, track_multiple_candidates
 
@@ -94,6 +95,89 @@ def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     assert isinstance(validity["overall_valid_for_q"], bool)
     assert isinstance(validity["blocking_failed_checks"], list)
     assert "drop_q_valid" in {check["id"] for check in validity["checks"]}
+
+
+def test_pipeline_mainline_no_longer_exposes_ocr_sampling():
+    assert not hasattr(pipeline, "_sample_voltage_series")
+    assert not hasattr(pipeline, "read_voltage_from_frame")
+    assert not hasattr(pipeline, "find_voltage_roi")
+
+
+def test_pipeline_reports_progress_stages(tmp_path: Path):
+    video = tmp_path / "synthetic.mp4"
+    _make_synthetic_video(video)
+    config = load_config("configs/default.yaml")
+    config["roi"]["microscope_roi"] = [20, 20, 240, 200]
+    config["manual_platforms"] = [
+        {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "manual"},
+        {"platform_id": "P002", "start_frame": 60, "end_frame": 119, "start_time_s": 2.0, "end_time_s": 3.97, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "manual"},
+    ]
+    config["segment"]["stable_min_duration_s"] = 0.5
+    config["segment"]["transient_drop_s"] = 0.1
+    config["segment"]["min_valid_points"] = 10
+    config_path = tmp_path / "config.yaml"
+    save_config(config, config_path)
+    events: list[tuple[float, str]] = []
+
+    run_pipeline(video, config_path, tmp_path / "run", progress_callback=lambda percent, label: events.append((percent, label)))
+
+    labels = [label for _percent, label in events]
+    assert labels[0] == "inspect video"
+    assert "tracking droplets" in labels
+    assert labels[-1] == "write manifest"
+    assert all(0.0 <= percent <= 1.0 for percent, _label in events)
+
+
+def test_root_interactive_entry_collects_manual_platforms(monkeypatch, tmp_path: Path, capsys):
+    video = tmp_path / "synthetic.mp4"
+    _make_synthetic_video(video)
+    config = load_config("configs/default.yaml")
+    config["project"]["run_root"] = str(tmp_path / "runs")
+    config_path = tmp_path / "config.yaml"
+    save_config(config, config_path)
+    run_dir = tmp_path / "run_result"
+    (run_dir / "analysis_report.md").parent.mkdir(parents=True)
+    (run_dir / "analysis_report.md").write_text("# report\n", encoding="utf-8")
+    (run_dir / "run_manifest.json").write_text(json.dumps({"schema_version": 1, "files": {}}), encoding="utf-8")
+
+    import run_millikan
+
+    captured = {}
+
+    def fake_analyze_video(request):
+        captured["request"] = request
+        return run_millikan.AnalysisResult(run_dir=run_dir, config_path=Path(request.config_path), manifest={"schema_version": 1}, validation_errors=[])
+
+    answers = iter(
+        [
+            str(video),
+            str(config_path),
+            "",
+            "",
+            "",
+            "2",
+            "0",
+            "59",
+            "0",
+            "60",
+            "119",
+            "175",
+            "y",
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr(run_millikan, "analyze_video", fake_analyze_video)
+
+    exit_code = run_millikan.run_interactive()
+
+    out = capsys.readouterr().out
+    request = captured["request"]
+    assert exit_code == 0
+    assert Path(request.video_path) == video
+    assert len(request.manual_platforms) == 2
+    assert request.manual_platforms[0].source == "manual_cli"
+    assert str(run_dir) in out
+    assert "analysis_report.md" in out
 
 
 def test_track_multiple_candidates_returns_distinct_tracks(tmp_path: Path):
