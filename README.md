@@ -6,8 +6,7 @@ This stage implements a non-ML backend framework:
 
 - OpenCV video inspection and diagnostic frames
 - automatic microscope ROI and grid scale calibration
-- local template-based voltage OCR with strict confidence filtering
-- voltage platform segmentation
+- manual voltage platform input for trusted voltage/time ranges
 - non-ML bright-blob droplet tracking and best-candidate selection
 - terminal velocity fitting
 - physics-based single-drop charge inversion
@@ -35,9 +34,17 @@ Do not install dependencies globally or into the base Conda environment. Use `.v
 .venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp_work -o cache_dir=runs\pytest_cache_work
 ```
 
-The test suite uses synthetic images/videos for deterministic OCR, grid, platform, tracking, velocity, charge, elementary-charge, and CLI behavior. It includes a three-droplet pipeline case that reaches `elementary_charge_result.json.valid=true`.
+The test suite uses synthetic images/videos for deterministic grid, manual platform, tracking, velocity, charge, elementary-charge, and CLI behavior. It includes a three-droplet pipeline case that reaches `elementary_charge_result.json.valid=true`.
 
 ## CLI
+
+Start the guided interactive workflow from the repository root:
+
+```powershell
+.venv\Scripts\python run_millikan.py
+```
+
+The wizard asks for the video path, config path, measurement distance, plate distance, voltage sign, and manual voltage platform ranges. It shows stage progress while running and prints the final run directory, report path, manifest path, and overlay path.
 
 Inspect a raw video:
 
@@ -45,16 +52,16 @@ Inspect a raw video:
 .venv\Scripts\python -m millikan_ai.cli inspect raw_data\single.mp4 --save-frame runs\single_first.jpg
 ```
 
-Run the backend pipeline:
+Run the backend pipeline with manual platform ranges:
 
 ```powershell
-.venv\Scripts\python -m millikan_ai.cli run --video raw_data\2u.mp4 --config configs\default.yaml --non-interactive
+.venv\Scripts\python -m millikan_ai.cli run --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
 ```
 
 Generate the user-facing single-drop analysis report:
 
 ```powershell
-.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
 ```
 
 Validate and summarize a run:
@@ -89,11 +96,11 @@ Each run directory writes:
 - `summary.txt`
 - `analysis_report.md`
 
-If automatic voltage OCR cannot produce reliable platform voltages, `diagnostics.json` includes `requires_manual_platforms`. The run still records video metadata, grid calibration, candidate tracking, overlay, and validation-safe output files.
+Current `develop`/`main` does not run voltage OCR. If no manual platform rows are supplied, `diagnostics.json` includes `requires_manual_platforms`. The run still records video metadata, grid calibration, candidate tracking, overlay, and validation-safe output files.
 
 ## Manual Platform Input
 
-For reliable physical `q` calculation, add `manual_platforms` to a config file when OCR confidence is low:
+For reliable physical `q` calculation, provide manual voltage platforms through the root wizard, CLI flags, API, or config file:
 
 For quick CLI testing, pass frame ranges directly. The format is `START_FRAME:END_FRAME:VOLTAGE`, and the CLI writes a reproducible config under `runs\manual_configs\`.
 
@@ -107,7 +114,7 @@ For guided input, use:
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --interactive-platforms
 ```
 
-The guided flow asks for the number of voltage platforms, then each platform's start frame, end frame, and voltage. This is the preferred current workflow because raw video OCR is not trusted yet.
+The guided flow asks for the number of voltage platforms, then each platform's start frame, end frame, and voltage.
 
 You can also add `manual_platforms` to a config file:
 
@@ -131,7 +138,7 @@ manual_platforms:
     source: manual
 ```
 
-The backend records `source=manual` or `source=manual_cli` in `platforms.csv`; it does not pretend manual corrections came from OCR.
+The backend records `source=manual`, `source=manual_cli`, or `source=manual_ui` in `platforms.csv`; it does not pretend manually entered voltages came from OCR.
 
 ## Backend API
 
@@ -159,7 +166,7 @@ The API writes the same output contract as the CLI, including `run_manifest.json
 
 ## Current Raw Video Behavior
 
-`raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md`, but voltage OCR is rejected as low confidence, so physical charge output is invalid until manual platforms are supplied. With CLI manual platforms, the backend can select a stable single droplet and compute a real physics-based `q`. This OCR rejection is intentional safety behavior.
+`raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md` when manual platforms are supplied. With manual platforms, the backend can select a stable single droplet and compute a real physics-based `q`. Without manual platforms, the run is explicitly invalid for q calculation.
 
 Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection. Candidate ranking also penalizes tracks that stay too close to grid lines or tracking ROI edges, which reduces false positives from grid intersections and edge highlights.
 

@@ -86,7 +86,7 @@ def build_visualization_layers(
             {
                 "id": "voltage_platforms",
                 "type": "time_intervals",
-                "label": "Manual or OCR voltage platforms",
+                "label": "Manual voltage platforms",
                 "intervals": [
                     {
                         "platform_id": str(row["platform_id"]),

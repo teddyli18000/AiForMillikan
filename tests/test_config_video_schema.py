@@ -14,6 +14,11 @@ def test_default_config_loads():
     assert config["segment"]["stable_min_duration_s"] > 0
 
 
+def test_default_config_is_manual_platform_first_without_ocr():
+    config = load_config("configs/default.yaml")
+    assert "ocr" not in config
+
+
 def test_raw_video_inspect_reads_metadata():
     meta = inspect_video("raw_data/single.mp4")
     assert meta.readable is True
