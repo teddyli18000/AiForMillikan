@@ -9,7 +9,6 @@ This project analyzes Millikan oil drop experiment videos. The current backend i
 - `src/millikan_ai/video/`: OpenCV video metadata, frame sampling, and diagnostic frames.
 - `src/millikan_ai/api.py`: public backend API for CLI and future PySide6/Qt frontend integration.
 - `src/millikan_ai/calibration/`: screen/ROI/grid calibration and physical scale estimation.
-- `src/millikan_ai/ocr/`: local OpenCV/template voltage OCR; no Tesseract or deep OCR dependency.
 - `src/millikan_ai/tracking/`: non-ML droplet candidate detection, single-target tracking, scoring, and overlay rendering.
 - `src/millikan_ai/segments/`: voltage platform segmentation and terminal velocity fitting.
 - `src/millikan_ai/physics/`: physics-based single-drop charge inversion.
@@ -30,8 +29,8 @@ Use the local virtual environment:
 
 ```powershell
 .venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp_work -o cache_dir=runs\pytest_cache_work
+.venv\Scripts\python run_millikan.py
 .venv\Scripts\python -m millikan_ai.cli inspect raw_data\single.mp4
-.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
 ```
 
@@ -40,7 +39,8 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 ## Current Implementation Rules
 
 - All thresholds and physical constants should come from `configs/default.yaml`.
-- If OCR, ROI detection, or tracking confidence is low, write explicit flags and allow manual/config-driven correction.
+- Current `develop`/`main` is manual-platform-first and does not run voltage OCR. OCR experiment code is preserved on `feature/ocr-current-archive`; do not re-enable OCR on mainline without an explicit new plan.
+- If ROI detection or tracking confidence is low, write explicit flags and allow manual/config-driven correction.
 - Do not claim ML-based trajectory filtering is implemented in this stage.
 - Do not silently output physical results when fewer than two usable voltage platforms exist.
 - `analysis_report.md` is the user-facing report for the selected/default drop plus any configured multi-drop outputs; CSV/JSON/MP4 files remain the machine-readable contract.

@@ -30,7 +30,7 @@ def test_detect_vertical_grid_lines_on_synthetic_image():
 
 def test_segment_voltage_platforms_groups_stable_values():
     samples = [
-        VoltageSample(i * 10, i / 3, 100 if i < 6 else 180, 0.9, "template_ocr")
+        VoltageSample(i * 10, i / 3, 100 if i < 6 else 180, 0.9, "manual_test")
         for i in range(12)
     ]
     platforms = segment_voltage_platforms(samples, voltage_tolerance_V=5, min_duration_s=1.0)

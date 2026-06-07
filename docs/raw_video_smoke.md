@@ -7,9 +7,13 @@ This document records raw-video smoke tests run with manual voltage platforms. T
 Use the project-local environment:
 
 ```powershell
+.venv\Scripts\python run_millikan.py
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\<video>.mp4 --config <manual_config.yaml> --run-dir runs\<run_dir>
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
 .venv\Scripts\python -m millikan_ai.cli validate --run-dir runs\<run_dir> --config <manual_config.yaml>
 ```
+
+The current `develop`/`main` backend does not run voltage OCR. The platform values below must be entered manually through the root wizard, CLI flags, API, or a generated config.
 
 ## Results
 

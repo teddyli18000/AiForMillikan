@@ -24,6 +24,7 @@ result = analyze_video(
 The CLI remains the test harness for the same backend flow:
 
 ```powershell
+.venv\Scripts\python run_millikan.py
 .venv\Scripts\python -m millikan_ai.cli analyze --video <video_path> --config configs\default.yaml --interactive-platforms
 ```
 
@@ -145,14 +146,14 @@ The desktop UI should show these panels for each run:
 
 ## Manual Platform UI Contract
 
-Voltage OCR is not trusted for current raw videos. The UI should ask:
+Voltage OCR is not part of the current `develop`/`main` backend flow. The UI should ask:
 
 - number of voltage platforms
 - start frame
 - end frame
 - voltage in volts
 
-The backend validates frame ranges and records manual entries as non-OCR sources. The UI must not label manually entered voltages as automatic OCR.
+The backend validates frame ranges and records manual entries as non-OCR sources. The UI must not label manually entered voltages as automatic OCR. If no manual platforms are provided, the backend writes `requires_manual_platforms` and the run is not valid for q calculation.
 
 ## Candidate Quality Fields
 
