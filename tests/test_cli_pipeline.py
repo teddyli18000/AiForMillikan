@@ -266,6 +266,7 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     assert candidate_summary["q_valid"].astype(bool).sum() == multi_results["valid_drop_count"]
     drop_track_layer = next(layer for layer in layers["layers"] if layer["id"] == "drop_tracks")
     assert len(drop_track_layer["tracks"]) >= 2
+    assert all({"quality_score", "keep", "q_valid", "reject_reasons"}.issubset(track) for track in drop_track_layer["tracks"])
     checks = {check["id"]: check for check in validity["checks"]}
     assert checks["multi_drop_q_results"]["details"]["valid_drop_count"] == multi_results["valid_drop_count"]
     assert checks["elementary_charge_ready"]["details"]["required_drop_count"] == config["elementary"]["min_drops"]

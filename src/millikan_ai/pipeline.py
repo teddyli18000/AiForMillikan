@@ -295,10 +295,25 @@ def run_pipeline(
     segments.to_csv(target / output_cfg["best_track_segments_csv"], index=False)
     drop_segments.to_csv(target / output_cfg.get("drop_track_segments_csv", "drop_track_segments.csv"), index=False)
     overlay_written = False
-    diagnostic_overlay_written = render_diagnostic_overlay(video_path, best_track, grid, tracking_roi, target / output_cfg["diagnostic_overlay_jpg"])
+    diagnostic_overlay_written = render_diagnostic_overlay(
+        video_path,
+        best_track,
+        grid,
+        tracking_roi,
+        target / output_cfg["diagnostic_overlay_jpg"],
+        all_tracks=drop_tracks,
+        quality_scores=quality_rows,
+    )
     if not best_track.empty:
         _emit_progress(progress_callback, 0.76, "render overlay")
-        overlay_written = render_overlay(video_path, best_track, grid, target / output_cfg["overlay_mp4"])
+        overlay_written = render_overlay(
+            video_path,
+            best_track,
+            grid,
+            target / output_cfg["overlay_mp4"],
+            all_tracks=drop_tracks,
+            quality_scores=quality_rows,
+        )
     drop_result = selected_drop or compute_drop_result(segments, config)
     if not quality_rows.empty:
         quality_annotation = quality_rows.rename(
@@ -322,7 +337,16 @@ def run_pipeline(
     elementary = estimate_elementary_charge(kept_drop_results, config)
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
     _emit_progress(progress_callback, 0.86, "write visualization outputs")
-    visualization_layers = build_visualization_layers(meta, grid, tracking_roi, voltage_roi, best_track, platforms, drop_tracks)
+    visualization_layers = build_visualization_layers(
+        meta,
+        grid,
+        tracking_roi,
+        voltage_roi,
+        best_track,
+        platforms,
+        drop_tracks,
+        quality_rows,
+    )
     _write_json(target / output_cfg["visualization_layers_json"], visualization_layers)
     diagnostics = {
         "video": meta.to_dict(),
