@@ -72,6 +72,29 @@ elementary:
   bootstrap_samples: 50
   random_seed: 42
 
+quality:
+  mode: mock_rule_adapter
+  model_version: rules-v1
+  quality_threshold: 0.60
+  thresholds:
+    max_missing_ratio: 0.40
+    min_duration_s: 1.0
+    target_duration_s: 3.0
+    min_platforms: 2
+    min_speed_fit_r2: 0.75
+  trajectory_weights:
+    tracking: 0.20
+    continuity: 0.15
+    duration: 0.10
+    platforms: 0.20
+    fit: 0.20
+    drift: 0.05
+    grid_clear: 0.05
+    roi_clear: 0.05
+  stage_weights:
+    trajectory: 0.55
+    physics: 0.45
+
 output:
   voltage_samples_csv: voltage_samples.csv
   platforms_csv: platforms.csv
