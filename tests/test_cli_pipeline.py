@@ -81,6 +81,8 @@ def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     layers = json.loads((run_dir / "visualization_layers.json").read_text(encoding="utf-8"))
     validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
     assert diagnostics["track_rows"] > 0
+    assert diagnostics["compute"]["name"] in {"cpu", "opencv_cuda"}
+    assert isinstance(diagnostics["compute"]["accelerated_stages"], list)
     assert diagnostics["diagnostic_overlay_written"] is True
     assert (run_dir / "diagnostic_overlay.jpg").exists()
     assert (run_dir / "overlay_best_track.mp4").exists()
