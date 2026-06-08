@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+import pandas as pd
 
 from millikan_ai.calibration.grid import GridCalibration, Roi
+from millikan_ai.config import load_config
 from millikan_ai.tracking.detector import detect_blobs
 from millikan_ai.tracking.fusion import KalmanPointTracker, track_lk_bidirectional
+from millikan_ai.tracking.tracker import track_multiple_candidates
 
 
 def _grid() -> GridCalibration:
@@ -79,3 +82,47 @@ def test_bidirectional_lk_tracks_texture_and_rejects_disappearance():
     assert abs(tracked[0][1] - 46.0) < 0.5
     assert tracked[1] < 1.0
     assert disappeared is None
+
+
+def test_fusion_tracker_does_not_jump_to_distractor_during_occlusion(tmp_path):
+    video = tmp_path / "occlusion.mp4"
+    writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (220, 180))
+    for frame_idx in range(70):
+        frame = np.zeros((180, 220, 3), dtype=np.uint8)
+        target_y = int(45 + 0.7 * frame_idx)
+        if not 28 <= frame_idx <= 33:
+            cv2.circle(frame, (80, target_y), 5, (255, 255, 255), -1)
+            cv2.line(frame, (76, target_y), (84, target_y), (80, 80, 80), 1)
+        cv2.circle(frame, (101, 67), 4, (180, 180, 180), -1)
+        writer.write(frame)
+    writer.release()
+
+    config = load_config("configs/default.yaml")
+    config["tracking"].update(
+        {
+            "top_k_seeds": 2,
+            "max_drops": 2,
+            "min_grid_line_distance_px": 0,
+            "min_grid_clear_fraction": 0,
+            "min_tracking_roi_margin_px": 0,
+            "min_roi_clear_fraction": 0,
+            "max_missing_frames": 12,
+        }
+    )
+    tracks, _summary = track_multiple_candidates(
+        video,
+        "occlusion",
+        Roi(20, 20, 180, 140),
+        pd.DataFrame(),
+        config,
+    )
+
+    initial_points = tracks.sort_values("frame_idx").groupby("track_id").first()
+    target_track_id = (initial_points["x_px"] - 80.0).abs().idxmin()
+    selected = tracks[tracks["track_id"] == target_track_id].sort_values("frame_idx")
+    jumps = np.hypot(selected["x_px"].diff(), selected["y_px"].diff()).dropna()
+    after_occlusion = selected[selected["frame_idx"] == 36].iloc[0]
+    assert jumps.max() < 8.0
+    assert abs(float(after_occlusion["x_px"]) - 80.0) < 3.0
+    assert "detection" in set(selected["tracking_source"])
+    assert "kalman_prediction" in set(selected["tracking_source"])

@@ -10,11 +10,50 @@ import pandas as pd
 from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.segments.fitting import fit_line, select_stable_window
 from millikan_ai.tracking.detector import Blob, detect_blobs
+from millikan_ai.tracking.fusion import KalmanPointTracker, track_lk_bidirectional
 from millikan_ai.video.reader import inspect_video
 
 
 def _distance(a: Blob, b: Blob) -> float:
     return math.hypot(a.x_px - b.x_px, a.y_px - b.y_px)
+
+
+def _point_distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _select_detection(
+    blobs: list[Blob],
+    predicted: tuple[float, float],
+    lk_point: tuple[float, float] | None,
+    previous: Blob,
+    motion: KalmanPointTracker,
+    tracking_cfg: dict,
+) -> Blob | None:
+    max_radius = float(tracking_cfg["max_search_radius_px"])
+    mahalanobis_gate = float(tracking_cfg.get("mahalanobis_gate", 6.0))
+    lk_gate = float(tracking_cfg.get("lk_detection_gate_px", 12.0))
+    max_area_ratio = float(tracking_cfg.get("max_area_ratio", 3.0))
+    candidates: list[tuple[float, Blob]] = []
+    for blob in blobs:
+        predicted_distance = _point_distance((blob.x_px, blob.y_px), predicted)
+        if predicted_distance > max_radius:
+            continue
+        lk_distance = _point_distance((blob.x_px, blob.y_px), lk_point) if lk_point is not None else float("inf")
+        kalman_consistent = motion.mahalanobis_distance((blob.x_px, blob.y_px)) <= mahalanobis_gate
+        lk_consistent = lk_point is not None and lk_distance <= lk_gate
+        if not kalman_consistent and not lk_consistent:
+            continue
+        area_ratio = max(blob.area_px, previous.area_px) / max(min(blob.area_px, previous.area_px), 1e-6)
+        if area_ratio > max_area_ratio:
+            continue
+        if lk_point is not None and not lk_consistent and predicted_distance > max_radius / 2:
+            continue
+        morphology_penalty = abs(math.log(max(blob.area_px, 1e-6) / max(previous.area_px, 1e-6)))
+        lk_cost = lk_distance if lk_point is not None else 0.0
+        cost = predicted_distance + 0.5 * lk_cost + 3.0 * morphology_penalty - 2.0 * blob.confidence
+        candidates.append((cost, blob))
+    return min(candidates, key=lambda item: item[0])[1] if candidates else None
 
 
 def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, config: dict) -> tuple[int, float, float]:
@@ -105,16 +144,32 @@ def _track_seed_candidates(
     tracking_cfg = config["tracking"]
     min_area = float(tracking_cfg["min_blob_area_px"])
     max_area = float(tracking_cfg["max_blob_area_px"])
-    max_radius = float(tracking_cfg["max_search_radius_px"])
     min_grid_distance = float(tracking_cfg.get("min_grid_line_distance_px", 0))
     min_grid_clear = float(tracking_cfg.get("min_grid_clear_fraction", 0))
     min_roi_margin = float(tracking_cfg.get("min_tracking_roi_margin_px", 0))
     min_roi_clear = float(tracking_cfg.get("min_roi_clear_fraction", 0))
+    nms_distance = float(tracking_cfg.get("detection_nms_distance_px", 6))
+    lk_window = int(tracking_cfg.get("lk_window_size_px", 21))
+    lk_levels = int(tracking_cfg.get("lk_pyramid_levels", 3))
+    lk_fb_error = float(tracking_cfg.get("lk_max_forward_backward_error_px", 1.5))
+    lk_photo_error = float(tracking_cfg.get("lk_max_photometric_error", 30))
+    max_missing_frames = int(tracking_cfg.get("max_missing_frames", 15))
+    process_noise = float(tracking_cfg.get("kalman_process_noise", 1.0))
+    measurement_noise = float(tracking_cfg.get("kalman_measurement_noise", 2.0))
     ok, frame = cap.read()
     if not ok:
         cap.release()
         return pd.DataFrame(), pd.DataFrame()
-    seeds = detect_blobs(frame, microscope_roi, min_area, max_area)[: int(tracking_cfg["top_k_seeds"])]
+    seeds = detect_blobs(
+        frame,
+        microscope_roi,
+        min_area,
+        max_area,
+        grid=grid,
+        min_grid_distance_px=min_grid_distance,
+        min_roi_margin_px=min_roi_margin,
+        nms_distance_px=nms_distance,
+    )[: int(tracking_cfg["top_k_seeds"])]
     if not seeds:
         cap.release()
         return {}, [
@@ -134,19 +189,89 @@ def _track_seed_candidates(
     for seed_idx, seed in enumerate(seeds[: min(10, len(seeds))], start=1):
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         current = seed
+        motion = KalmanPointTracker(
+            seed.x_px,
+            seed.y_px,
+            dt=1.0 / meta.fps if meta.fps else 1.0 / 30.0,
+            process_noise=process_noise,
+            measurement_noise=measurement_noise,
+        )
+        previous_gray: np.ndarray | None = None
+        previous_point = (seed.x_px, seed.y_px)
         rows = []
         missing = 0
+        consecutive_missing = 0
         for frame_idx in range(meta.frame_count):
             ok, frame = cap.read()
             if not ok:
                 break
-            blobs = detect_blobs(frame, microscope_roi, min_area, max_area)
-            nearest = min(blobs, key=lambda blob: _distance(blob, current), default=None)
-            valid = nearest is not None and _distance(nearest, current) <= max_radius
-            if valid:
-                current = nearest
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            predicted = motion.predict()
+            lk_result = None
+            if previous_gray is not None:
+                lk_result = track_lk_bidirectional(
+                    previous_gray,
+                    gray,
+                    previous_point,
+                    window_size_px=lk_window,
+                    pyramid_levels=lk_levels,
+                    max_forward_backward_error_px=lk_fb_error,
+                    max_photometric_error=lk_photo_error,
+                )
+            lk_point = lk_result[0] if lk_result is not None else None
+            lk_prediction_gate = float(tracking_cfg.get("lk_prediction_gate_px", 12.0))
+            if lk_point is not None and _point_distance(lk_point, predicted) > lk_prediction_gate:
+                lk_point = None
+            blobs = detect_blobs(
+                frame,
+                microscope_roi,
+                min_area,
+                max_area,
+                grid=grid,
+                min_grid_distance_px=min_grid_distance,
+                min_roi_margin_px=min_roi_margin,
+                nms_distance_px=nms_distance,
+            )
+            detection = _select_detection(blobs, predicted, lk_point, current, motion, tracking_cfg)
+            if detection is not None:
+                current = detection
+                corrected = motion.correct((current.x_px, current.y_px))
+                previous_point = corrected
+                valid = True
+                tracking_source = "detection"
+                consecutive_missing = 0
+            elif lk_point is not None:
+                corrected = motion.correct(lk_point)
+                current = Blob(
+                    corrected[0],
+                    corrected[1],
+                    current.radius_px,
+                    current.area_px,
+                    current.brightness,
+                    current.contrast,
+                    current.circularity,
+                    current.confidence,
+                )
+                previous_point = corrected
+                valid = True
+                tracking_source = "lk"
+                consecutive_missing = 0
             else:
                 missing += 1
+                consecutive_missing += 1
+                current = Blob(
+                    predicted[0],
+                    predicted[1],
+                    current.radius_px,
+                    current.area_px,
+                    current.brightness,
+                    current.contrast,
+                    current.circularity,
+                    current.confidence,
+                )
+                previous_point = predicted
+                valid = False
+                tracking_source = "kalman_prediction"
             time_s = frame_idx / meta.fps if meta.fps else 0.0
             platform_id = ""
             voltage = np.nan
@@ -169,9 +294,12 @@ def _track_seed_candidates(
                     "voltage_V": voltage,
                     "platform_id": platform_id,
                     "is_valid_detection": valid,
-                    "tracking_source": "detection" if valid else "last_known",
+                    "tracking_source": tracking_source,
                 }
             )
+            previous_gray = gray
+            if consecutive_missing > max_missing_frames:
+                break
         missing_ratio = missing / max(len(rows), 1)
         total_duration = rows[-1]["time_s"] - rows[0]["time_s"] if len(rows) > 1 else 0.0
         platform_count = len({row["platform_id"] for row in rows if row["platform_id"]})
@@ -265,7 +393,7 @@ def track_multiple_candidates(
     for summary in summaries:
         candidate_id = str(summary["candidate_id"])
         rows = tracks.get(candidate_id, [])
-        if not rows or str(summary.get("reject_reason", "") or ""):
+        if not rows:
             continue
         if any(_trajectory_distance(rows, selected) < min_distance for selected in selected_tracks):
             summary["reject_reason"] = "duplicate_track"
