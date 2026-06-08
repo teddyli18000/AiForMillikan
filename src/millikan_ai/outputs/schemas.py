@@ -31,6 +31,23 @@ VOLTAGE_SAMPLE_COLUMNS = [
     "roi_h",
 ]
 
+AUTO_PLATFORM_SUGGESTION_COLUMNS = [
+    "platform_id",
+    "start_frame",
+    "end_frame",
+    "start_time_s",
+    "end_time_s",
+    "confidence",
+    "source",
+    "transition_start_frame",
+    "transition_end_frame",
+    "roi_x",
+    "roi_y",
+    "roi_w",
+    "roi_h",
+    "reject_reason",
+]
+
 BEST_TRACK_COLUMNS = [
     "video_id",
     "track_id",

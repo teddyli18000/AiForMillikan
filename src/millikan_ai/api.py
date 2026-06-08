@@ -7,6 +7,7 @@ from typing import Callable, Iterable
 
 from millikan_ai.config import load_config, save_config
 from millikan_ai.pipeline import run_pipeline, validate_run
+from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 from millikan_ai.video.reader import inspect_video
 
 ProgressCallback = Callable[[float, str], None]
@@ -73,6 +74,65 @@ def prepare_analysis_config(video_path: str | Path, config_path: str | Path, man
     meta = inspect_video(video_path)
     config["manual_platforms"] = manual_platform_rows(platforms, meta.fps, meta.frame_count)
     target = Path(config["project"]["run_root"]) / "manual_configs" / f"{Path(video_path).stem}_manual_platforms.yaml"
+    save_config(config, target)
+    return target
+
+
+def _clean_records(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    cleaned: list[dict[str, object]] = []
+    for record in records:
+        row: dict[str, object] = {}
+        for key, value in record.items():
+            if isinstance(value, float) and value != value:
+                row[key] = None
+            else:
+                row[key] = value
+        cleaned.append(row)
+    return cleaned
+
+
+def prepare_auto_platform_config(
+    video_path: str | Path,
+    config_path: str | Path,
+    expected_platform_count: int,
+    platform_values: Iterable[float],
+) -> Path:
+    values = [float(value) for value in platform_values]
+    if len(values) != expected_platform_count:
+        raise ValueError(f"expected {expected_platform_count} platform voltage values, got {len(values)}")
+    config = load_config(config_path)
+    meta = inspect_video(video_path)
+    suggestions, samples, diagnostics = detect_voltage_platform_changes(video_path, expected_platform_count, config)
+    if int(diagnostics.get("detected_platform_count", 0)) != expected_platform_count:
+        raise ValueError(f"auto platform detection found {diagnostics.get('detected_platform_count', 0)} platforms; expected {expected_platform_count}")
+    bad = [str(row.get("reject_reason", "")) for row in suggestions.to_dict("records") if str(row.get("reject_reason", ""))]
+    if bad:
+        raise ValueError("auto platform detection rejected suggestions: " + ",".join(sorted(set(bad))))
+    platform_rows: list[dict[str, object]] = []
+    for index, (suggestion, voltage) in enumerate(zip(suggestions.to_dict("records"), values), start=1):
+        platform_rows.append(
+            {
+                "platform_id": f"P{index:03d}",
+                "start_frame": int(suggestion["start_frame"]),
+                "end_frame": int(suggestion["end_frame"]),
+                "start_time_s": float(suggestion["start_time_s"]),
+                "end_time_s": float(suggestion["end_time_s"]),
+                "voltage_V": float(voltage),
+                "voltage_confidence": float(suggestion.get("confidence", 1.0) or 0.0),
+                "source": "auto_boundary_manual_voltage",
+            }
+        )
+    config["manual_platforms"] = manual_platform_rows(
+        [ManualPlatformInput(int(row["start_frame"]), int(row["end_frame"]), float(row["voltage_V"]), source=str(row["source"])) for row in platform_rows],
+        meta.fps,
+        meta.frame_count,
+    )
+    for row, confidence in zip(config["manual_platforms"], [row["voltage_confidence"] for row in platform_rows]):
+        row["voltage_confidence"] = confidence
+    config["auto_platform_suggestions"] = _clean_records(suggestions.to_dict("records"))
+    config["auto_voltage_samples"] = _clean_records(samples.to_dict("records"))
+    config["auto_platform_detection_result"] = diagnostics
+    target = Path(config["project"]["run_root"]) / "manual_configs" / f"{Path(video_path).stem}_auto_platforms.yaml"
     save_config(config, target)
     return target
 

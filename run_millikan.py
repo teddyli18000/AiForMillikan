@@ -8,8 +8,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from millikan_ai.api import AnalysisRequest, AnalysisResult, ManualPlatformInput, analyze_video
+from millikan_ai.api import AnalysisRequest, AnalysisResult, ManualPlatformInput, analyze_video, prepare_auto_platform_config
 from millikan_ai.config import load_config, save_config
+from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 from millikan_ai.video.reader import inspect_video
 
 
@@ -57,9 +58,9 @@ def _prompt_float_override(prompt: str, default: float) -> float:
     return _prompt_float(prompt, default)
 
 
-def _prompt_platforms(fps: float, frame_count: int) -> tuple[ManualPlatformInput, ...]:
+def _prompt_manual_platforms(fps: float, frame_count: int, count: int | None = None) -> tuple[ManualPlatformInput, ...]:
     print(f"视频帧范围: 0..{max(0, frame_count - 1)}；time_s = frame_idx / {fps:g}")
-    count = _prompt_int("电压平台数量")
+    count = _prompt_int("电压平台数量") if count is None else count
     if count <= 0:
         raise ValueError("电压平台数量必须大于 0")
     platforms: list[ManualPlatformInput] = []
@@ -78,6 +79,35 @@ def _prompt_platforms(fps: float, frame_count: int) -> tuple[ManualPlatformInput
         platforms.append(ManualPlatformInput(start_frame, end_frame, voltage, source="manual_cli"))
         previous_end = end_frame
     return tuple(platforms)
+
+
+def _prompt_platforms(fps: float, frame_count: int) -> tuple[ManualPlatformInput, ...]:
+    return _prompt_manual_platforms(fps, frame_count)
+
+
+def _print_auto_platform_suggestions(suggestions, fps: float) -> None:
+    print("\n自动平台边界建议")
+    for row in suggestions.to_dict("records"):
+        reject = str(row.get("reject_reason", ""))
+        suffix = f", reject={reject}" if reject else ""
+        print(
+            f"- {row['platform_id']}: frames {int(row['start_frame'])}-{int(row['end_frame'])}, "
+            f"time {float(row['start_time_s']):.3f}s-{float(row['end_time_s']):.3f}s, "
+            f"confidence={float(row.get('confidence', 0.0)):.2f}{suffix}"
+        )
+    print(f"时间公式: time_s = frame_idx / {fps:g}")
+
+
+def _confirm_auto_boundaries() -> bool:
+    answer = input("使用自动边界并只输入每个平台电压? [Y/n]: ").strip().lower()
+    return answer in {"", "y", "yes"}
+
+
+def _prompt_auto_platform_values(count: int) -> list[float]:
+    values: list[float] = []
+    for index in range(count):
+        values.append(_prompt_float(f"P{index + 1:03d} 电压 voltage_V"))
+    return values
 
 
 def _write_interactive_config(config_path: Path, video_path: Path, config: dict) -> Path:
@@ -103,8 +133,12 @@ def _confirm_run(video_path: Path, config_path: Path, platforms: tuple[ManualPla
     print(f"- measurement_distance_m: {config['calibration']['measurement_distance_m']}")
     print(f"- plate_distance_m: {config['physics']['plate_distance_m']}")
     print(f"- voltage_sign: {config['physics']['voltage_sign']}")
-    for index, platform in enumerate(platforms, start=1):
-        print(f"- P{index:03d}: frames {platform.start_frame}-{platform.end_frame}, voltage={platform.voltage_V:g} V")
+    if platforms:
+        for index, platform in enumerate(platforms, start=1):
+            print(f"- P{index:03d}: frames {platform.start_frame}-{platform.end_frame}, voltage={platform.voltage_V:g} V")
+    else:
+        for row in config.get("manual_platforms", []):
+            print(f"- {row['platform_id']}: frames {row['start_frame']}-{row['end_frame']}, voltage={float(row['voltage_V']):g} V, source={row['source']}")
     answer = input("开始分析? [y/N]: ").strip().lower()
     return answer in {"y", "yes"}
 
@@ -127,11 +161,36 @@ def run_interactive() -> int:
     config["physics"]["voltage_sign"] = _prompt_float_override("电压方向 voltage_sign", float(config["physics"]["voltage_sign"]))
     effective_config_path = _write_interactive_config(config_path, video_path, config)
 
+    platform_count = _prompt_int("电压平台数量")
+    platforms: tuple[ManualPlatformInput, ...] = ()
     try:
-        platforms = _prompt_platforms(meta.fps, meta.frame_count)
+        suggestions, _samples, diagnostics = detect_voltage_platform_changes(video_path, platform_count, config)
+        auto_ok = (
+            int(diagnostics.get("detected_platform_count", 0)) == platform_count
+            and len(suggestions) == platform_count
+            and not any(str(row.get("reject_reason", "")) for row in suggestions.to_dict("records"))
+        )
+        if auto_ok:
+            _print_auto_platform_suggestions(suggestions, meta.fps)
+            if _confirm_auto_boundaries():
+                values = _prompt_auto_platform_values(platform_count)
+                effective_config_path = prepare_auto_platform_config(video_path, effective_config_path, platform_count, values)
+                config = load_config(effective_config_path)
+            else:
+                platforms = _prompt_manual_platforms(meta.fps, meta.frame_count, platform_count)
+        else:
+            print(f"自动平台检测不可用，回退人工输入。原因: {diagnostics.get('flags', [])}")
+            platforms = _prompt_manual_platforms(meta.fps, meta.frame_count, platform_count)
     except ValueError as exc:
         print(f"输入错误: {exc}")
         return 2
+    except Exception as exc:
+        print(f"自动平台检测失败，回退人工输入。原因: {exc}")
+        try:
+            platforms = _prompt_manual_platforms(meta.fps, meta.frame_count, platform_count)
+        except ValueError as manual_exc:
+            print(f"输入错误: {manual_exc}")
+            return 2
     if not _confirm_run(video_path, effective_config_path, platforms, config):
         print("已取消。")
         return 1
