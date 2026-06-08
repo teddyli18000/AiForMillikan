@@ -76,6 +76,18 @@ CANDIDATE_SUMMARY_COLUMNS = [
     "reject_reason",
 ]
 
+QUALITY_SCORE_COLUMNS = [
+    "track_id",
+    "drop_id",
+    "trajectory_score",
+    "physics_quality_score",
+    "quality_score",
+    "hard_rule_pass",
+    "q_valid",
+    "keep",
+    "reject_reasons",
+]
+
 
 def validate_columns(path: str | Path, required_columns: list[str]) -> list[str]:
     csv_path = Path(path)
