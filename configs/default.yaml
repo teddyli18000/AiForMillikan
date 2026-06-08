@@ -2,6 +2,9 @@ project:
   name: millikan_ai
   run_root: runs
 
+compute:
+  backend: auto
+
 video:
   sample_frames: 8
   diagnostics_dir: diagnostics
