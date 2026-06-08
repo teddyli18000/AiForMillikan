@@ -345,6 +345,12 @@ def _track_seed_candidates(
                 break
         missing_ratio = missing / max(len(rows), 1)
         total_duration = rows[-1]["time_s"] - rows[0]["time_s"] if len(rows) > 1 else 0.0
+        x_values = np.asarray([float(row["x_px"]) for row in rows], dtype=float)
+        y_values = np.asarray([float(row["y_px"]) for row in rows], dtype=float)
+        steps = np.hypot(np.diff(x_values), np.diff(y_values))
+        path_length = float(steps.sum())
+        displacement = float(np.hypot(x_values[-1] - x_values[0], y_values[-1] - y_values[0])) if len(rows) > 1 else 0.0
+        areas = np.asarray([float(row["area_px"]) for row in rows if bool(row["is_valid_detection"])], dtype=float)
         platform_count = len({row["platform_id"] for row in rows if row["platform_id"]})
         fit_usable_count, mean_r2, drift_score = _platform_fit_score(rows, platforms, config)
         coverage_basis = fit_usable_count if not platforms.empty else platform_count
@@ -376,6 +382,10 @@ def _track_seed_candidates(
                 "drift_score": drift_score,
                 "grid_clear_fraction": grid_clear_fraction,
                 "roi_clear_fraction": roi_clear_fraction,
+                "max_step_px": float(steps.max()) if steps.size else 0.0,
+                "step_p95_px": float(np.percentile(steps, 95)) if steps.size else 0.0,
+                "path_efficiency": displacement / max(path_length, 1e-9),
+                "area_cv": float(areas.std() / max(areas.mean(), 1e-9)) if areas.size else 1.0,
                 "rank": 0,
                 "reject_reason": ",".join(reject_reasons),
                 "selected_for_multi_drop": False,

@@ -41,6 +41,10 @@ def _trajectory_score(row: dict[str, object], config: dict) -> tuple[float, list
         reasons.append("insufficient_stable_platforms")
     if fit_r2 < float(thresholds["min_speed_fit_r2"]):
         reasons.append("low_speed_fit_r2")
+    if float(row.get("max_step_px", 0.0) or 0.0) > float(thresholds["max_frame_jump_px"]):
+        reasons.append("excessive_frame_jump")
+    if float(row.get("area_cv", 0.0) or 0.0) > float(thresholds["max_area_cv"]):
+        reasons.append("unstable_blob_area")
     return _bounded(score), reasons
 
 
@@ -84,6 +88,8 @@ def score_drop_quality(
                         "track_too_short",
                         "insufficient_stable_platforms",
                         "low_speed_fit_r2",
+                        "excessive_frame_jump",
+                        "unstable_blob_area",
                     }
                     for reason in reasons
                 ),

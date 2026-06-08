@@ -82,6 +82,8 @@ quality:
     target_duration_s: 3.0
     min_platforms: 2
     min_speed_fit_r2: 0.75
+    max_frame_jump_px: 12
+    max_area_cv: 0.45
   trajectory_weights:
     tracking: 0.20
     continuity: 0.15
