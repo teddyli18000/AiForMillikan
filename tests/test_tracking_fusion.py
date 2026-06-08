@@ -5,6 +5,7 @@ import numpy as np
 
 from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.tracking.detector import detect_blobs
+from millikan_ai.tracking.fusion import KalmanPointTracker, track_lk_bidirectional
 
 
 def _grid() -> GridCalibration:
@@ -46,3 +47,35 @@ def test_detector_ranks_isolated_droplets_and_suppresses_grid_and_edges():
     assert abs(blobs[0].x_px - 90) <= 1
     assert all(abs(blob.y_px - 40) >= 6 for blob in blobs)
     assert all(blob.x_px >= 8 for blob in blobs)
+
+
+def test_kalman_point_tracker_predicts_constant_velocity():
+    tracker = KalmanPointTracker(10.0, 20.0, dt=0.1)
+    tracker.correct((10.0, 20.0))
+    tracker.predict()
+    tracker.correct((11.0, 20.5))
+
+    predicted = tracker.predict()
+
+    assert 11.5 <= predicted[0] <= 12.5
+    assert 20.7 <= predicted[1] <= 21.3
+    assert tracker.mahalanobis_distance((12.0, 21.0)) < 3.0
+    assert tracker.mahalanobis_distance((80.0, 90.0)) > 10.0
+
+
+def test_bidirectional_lk_tracks_texture_and_rejects_disappearance():
+    previous = np.zeros((100, 120), dtype=np.uint8)
+    current = np.zeros_like(previous)
+    cv2.circle(previous, (50, 45), 5, 255, -1)
+    cv2.line(previous, (46, 45), (54, 45), 80, 1)
+    cv2.circle(current, (52, 46), 5, 255, -1)
+    cv2.line(current, (48, 46), (56, 46), 80, 1)
+
+    tracked = track_lk_bidirectional(previous, current, (50.0, 45.0), max_forward_backward_error_px=1.0)
+    disappeared = track_lk_bidirectional(previous, np.zeros_like(previous), (50.0, 45.0), max_forward_backward_error_px=1.0)
+
+    assert tracked is not None
+    assert abs(tracked[0][0] - 52.0) < 0.5
+    assert abs(tracked[0][1] - 46.0) < 0.5
+    assert tracked[1] < 1.0
+    assert disappeared is None
