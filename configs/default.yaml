@@ -33,6 +33,9 @@ auto_platform_detection:
   change_threshold_sigma: 3.0
   min_change_separation_s: 1.0
   roi_expand_px: 10
+  max_voltage_text_width_px: 380
+  dynamic_roi_per_sample: true
+  max_dynamic_roi_shift_px: 120
   descriptor_width: 96
   descriptor_height: 32
 

@@ -70,6 +70,7 @@ def test_detect_voltage_platform_changes_with_jitter_and_unstable_transitions(tm
     config["auto_platform_detection"]["sample_stride_frames"] = 3
     config["auto_platform_detection"]["min_platform_duration_s"] = 0.8
     config["auto_platform_detection"]["transition_padding_s"] = 0.1
+    config["roi"]["voltage_roi"] = [180, 0, 170, 92]
 
     suggestions, samples, diagnostics = detect_voltage_platform_changes(video, expected_platform_count=3, config=config)
 
