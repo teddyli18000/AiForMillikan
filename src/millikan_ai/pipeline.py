@@ -10,7 +10,6 @@ import pandas as pd
 
 from millikan_ai.calibration.grid import Roi, calibrate_grid, default_voltage_roi
 from millikan_ai.config import load_config, save_config
-from millikan_ai.compute import select_compute_backend
 from millikan_ai.elementary.estimate import estimate_elementary_charge
 from millikan_ai.outputs.schemas import (
     BEST_TRACK_COLUMNS,
@@ -115,7 +114,6 @@ def _build_run_manifest(
             "physical_y_velocity": "vy_px_s * scale_y_m_per_px",
         },
         "video": diagnostics.get("video", {}),
-        "compute": diagnostics.get("compute", {}),
         "roi": diagnostics.get("roi", {}),
         "grid": diagnostics.get("grid", {}),
         "visualizations": diagnostics.get("visualizations", {}),
@@ -236,7 +234,6 @@ def run_pipeline(
     target = Path(run_dir) if run_dir else _run_dir(config, video_path)
     target.mkdir(parents=True, exist_ok=True)
     output_cfg = config["output"]
-    compute_backend = select_compute_backend(config.get("compute", {}).get("backend", "auto"))
     _emit_progress(progress_callback, 0.02, "inspect video")
     meta = inspect_video(video_path)
     save_config(config, target / "run_config.yaml")
@@ -353,7 +350,6 @@ def run_pipeline(
     _write_json(target / output_cfg["visualization_layers_json"], visualization_layers)
     diagnostics = {
         "video": meta.to_dict(),
-        "compute": compute_backend.to_dict(),
         "roi": {
             "microscope_roi": grid.roi.to_list(),
             "tracking_roi": tracking_roi.to_list(),
