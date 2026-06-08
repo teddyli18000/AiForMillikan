@@ -26,6 +26,7 @@ The CLI remains the test harness for the same backend flow:
 ```powershell
 .venv\Scripts\python run_millikan.py
 .venv\Scripts\python -m millikan_ai.cli analyze --video <video_path> --config configs\default.yaml --interactive-platforms
+.venv\Scripts\python -m millikan_ai.cli detect-platforms --video <video_path> --config configs\default.yaml --count 3
 ```
 
 For non-interactive CLI integration, a caller can create or request manual platform rows and run:
@@ -76,6 +77,7 @@ Each run should also expose:
 - `drop_track_segments.csv`: fitted stable velocity windows for all selected droplets.
 - `candidate_tracks_summary.csv`: ranked candidate droplet quality table.
 - `platforms.csv`: voltage platform boundaries and values.
+- `auto_platform_suggestions.csv`: visual voltage-display boundary suggestions before user voltage values are bound.
 - `drop_results.json`: physical `q` calculation result.
 - `multi_drop_results.json`: per-drop physical `q` results and valid drop counts.
 - `quality_scores.json`: deterministic quality-adapter metadata and aggregate counts.
@@ -90,7 +92,7 @@ Each run should also expose:
 - detected vertical and horizontal grid lines
 - measurement start/end lines
 - `+X` and `+Y` pixel axes
-- voltage platform time intervals
+- voltage platform time intervals and auto platform suggestions when available
 - selected droplet marker
 - selected droplet trajectory
 - all selected droplet trajectories in the `drop_tracks` layer when more than one track is selected
@@ -151,11 +153,12 @@ The desktop UI should show these panels for each run:
 Voltage OCR is not part of the current `develop`/`main` backend flow. The UI should ask:
 
 - number of voltage platforms
-- start frame
-- end frame
+- start frame and end frame, or accept auto-detected boundary suggestions
 - voltage in volts
 
-The backend validates frame ranges and records manual entries as non-OCR sources. The UI must not label manually entered voltages as automatic OCR. If no manual platforms are provided, the backend writes `requires_manual_platforms` and the run is not valid for q calculation.
+The backend can detect visual voltage-display changes with the user-provided platform count and write `auto_platform_suggestions.csv`. The UI should show suggested stable intervals and transition windows, then ask the user to enter or confirm voltage values. Accepted rows are written to `platforms.csv` with `source=auto_boundary_manual_voltage`.
+
+The backend validates frame ranges and records manual entries as non-OCR sources. The UI must not label manually entered voltages as automatic OCR. If no manual platforms are provided, the backend writes `requires_manual_platforms`; if suggestions exist without accepted voltage values, it writes `requires_manual_platform_voltages`.
 
 ## Candidate Quality Fields
 
