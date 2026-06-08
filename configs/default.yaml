@@ -27,7 +27,7 @@ auto_platform_detection:
   enabled: true
   sample_stride_frames: 5
   search_region: [0.45, 0.0, 0.55, 0.32]
-  min_platform_duration_s: 1.0
+  min_platform_duration_s: 2.0
   transition_padding_s: 0.2
   min_change_score: 0.08
   change_threshold_sigma: 3.0

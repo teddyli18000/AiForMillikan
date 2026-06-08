@@ -110,7 +110,8 @@ def locate_voltage_change_roi(frame: np.ndarray, config: dict[str, Any]) -> Roi:
                 if score > row_best_score:
                     row_best_score = score
                     row_best_members = x_members
-            if row_best_members and sum(component["area"] for component in row_best_members) >= 600:
+            median_height = float(np.median([component["h"] for component in row_best_members])) if row_best_members else 0.0
+            if row_best_members and sum(component["area"] for component in row_best_members) >= 600 and median_height >= 18.0:
                 selected_components = row_best_members
                 break
             if not row_best_members:

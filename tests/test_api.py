@@ -54,6 +54,8 @@ def test_prepare_auto_platform_config_binds_user_voltage_values(tmp_path: Path):
     config = load_config("configs/default.yaml")
     config["project"]["run_root"] = str(tmp_path / "runs")
     config["auto_platform_detection"]["sample_stride_frames"] = 3
+    config["auto_platform_detection"]["min_platform_duration_s"] = 0.8
+    config["roi"]["voltage_roi"] = [180, 0, 170, 92]
     config_path = tmp_path / "config.yaml"
     save_config(config, config_path)
 
