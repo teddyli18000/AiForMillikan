@@ -36,6 +36,7 @@ def build_visualization_layers(
     best_track: pd.DataFrame,
     platforms: pd.DataFrame,
     drop_tracks: pd.DataFrame | None = None,
+    quality_scores: pd.DataFrame | None = None,
 ) -> dict[str, object]:
     axis_origin = [tracking_roi.x + 25, tracking_roi.y + 35]
     layers: list[dict[str, object]] = [
@@ -102,8 +103,15 @@ def build_visualization_layers(
             }
         )
     if drop_tracks is not None and not drop_tracks.empty:
+        quality_by_track = {}
+        if quality_scores is not None and not quality_scores.empty:
+            quality_by_track = {
+                str(row["track_id"]): row
+                for row in quality_scores.to_dict("records")
+            }
         tracks = []
         for track_id, track in drop_tracks.groupby("track_id", sort=False):
+            quality = quality_by_track.get(str(track_id), {})
             points = [
                 {
                     "frame_idx": int(row["frame_idx"]),
@@ -116,7 +124,17 @@ def build_visualization_layers(
                 }
                 for row in track.to_dict("records")
             ]
-            tracks.append({"track_id": str(track_id), "points": points})
+            tracks.append(
+                {
+                    "track_id": str(track_id),
+                    "drop_id": str(quality.get("drop_id", "")),
+                    "quality_score": _clean(quality.get("quality_score")),
+                    "keep": bool(quality.get("keep", False)),
+                    "q_valid": bool(quality.get("q_valid", False)),
+                    "reject_reasons": str(quality.get("reject_reasons", "")),
+                    "points": points,
+                }
+            )
         layers.append(
             {
                 "id": "drop_tracks",

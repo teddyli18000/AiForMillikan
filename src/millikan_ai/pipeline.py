@@ -15,6 +15,7 @@ from millikan_ai.outputs.schemas import (
     BEST_TRACK_COLUMNS,
     CANDIDATE_SUMMARY_COLUMNS,
     PLATFORMS_COLUMNS,
+    QUALITY_SCORE_COLUMNS,
     SEGMENT_COLUMNS,
     VOLTAGE_SAMPLE_COLUMNS,
     validate_columns,
@@ -22,6 +23,7 @@ from millikan_ai.outputs.schemas import (
 from millikan_ai.outputs.validity import build_validity_report
 from millikan_ai.outputs.visualization import build_visualization_layers
 from millikan_ai.physics.charge import compute_drop_result
+from millikan_ai.quality.rules import filter_kept_drop_results, score_drop_quality
 from millikan_ai.reporting.markdown import write_analysis_report
 from millikan_ai.segments.fitting import fit_track_segments
 from millikan_ai.tracking.overlay import render_diagnostic_overlay, render_overlay
@@ -100,6 +102,7 @@ def _build_run_manifest(
             "platforms": int(diagnostics.get("platform_count", 0)),
             "drops": int(diagnostics.get("drop_count", 0)),
             "valid_drops": int(quality_scores.get("valid_drop_count", 0)),
+            "quality_kept_drops": int(quality_scores.get("kept_track_count", 0)),
             "track_rows": int(diagnostics.get("track_rows", 0)),
             "segments": int(diagnostics.get("segment_rows", 0)),
         },
@@ -133,6 +136,7 @@ def _build_run_manifest(
             {"id": "charge_result", "source": files.get("drop_results_json")},
             {"id": "multi_drop_results", "source": files.get("multi_drop_results_json")},
             {"id": "quality", "source": files.get("quality_scores_json")},
+            {"id": "quality_scores", "source": files.get("trajectory_quality_scores_csv")},
             {"id": "validity", "source": files.get("validity_report_json")},
         ],
     }
@@ -275,7 +279,10 @@ def run_pipeline(
         drop_segments = pd.DataFrame(columns=SEGMENT_COLUMNS)
     _emit_progress(progress_callback, 0.68, "compute charge results")
     drop_results, multi_drop_results = _compute_multi_drop_results(drop_segments, config)
-    best_track_id, selected_drop = _select_primary_drop(drop_results, candidate_summary, fallback_track_id)
+    candidate_summary = _annotate_candidate_physics(candidate_summary, drop_results)
+    quality_rows, quality_scores = score_drop_quality(candidate_summary, drop_results, config)
+    kept_drop_results = filter_kept_drop_results(drop_results, quality_rows)
+    best_track_id, selected_drop = _select_primary_drop(kept_drop_results or drop_results, candidate_summary, fallback_track_id)
     if best_track_id and not drop_tracks.empty:
         best_track = drop_tracks[drop_tracks["track_id"] == best_track_id].copy()
     else:
@@ -288,30 +295,58 @@ def run_pipeline(
     segments.to_csv(target / output_cfg["best_track_segments_csv"], index=False)
     drop_segments.to_csv(target / output_cfg.get("drop_track_segments_csv", "drop_track_segments.csv"), index=False)
     overlay_written = False
-    diagnostic_overlay_written = render_diagnostic_overlay(video_path, best_track, grid, tracking_roi, target / output_cfg["diagnostic_overlay_jpg"])
+    diagnostic_overlay_written = render_diagnostic_overlay(
+        video_path,
+        best_track,
+        grid,
+        tracking_roi,
+        target / output_cfg["diagnostic_overlay_jpg"],
+        all_tracks=drop_tracks,
+        quality_scores=quality_rows,
+    )
     if not best_track.empty:
         _emit_progress(progress_callback, 0.76, "render overlay")
-        overlay_written = render_overlay(video_path, best_track, grid, target / output_cfg["overlay_mp4"])
+        overlay_written = render_overlay(
+            video_path,
+            best_track,
+            grid,
+            target / output_cfg["overlay_mp4"],
+            all_tracks=drop_tracks,
+            quality_scores=quality_rows,
+        )
     drop_result = selected_drop or compute_drop_result(segments, config)
-    candidate_summary = _annotate_candidate_physics(candidate_summary, drop_results)
+    if not quality_rows.empty:
+        quality_annotation = quality_rows.rename(
+            columns={
+                "track_id": "candidate_id",
+                "quality_score": "filter_quality_score",
+                "keep": "quality_keep",
+                "reject_reasons": "quality_reject_reasons",
+            }
+        )[["candidate_id", "filter_quality_score", "quality_keep", "quality_reject_reasons"]]
+        candidate_summary = candidate_summary.merge(quality_annotation, on="candidate_id", how="left")
     candidate_summary.to_csv(target / output_cfg["candidate_tracks_summary_csv"], index=False)
+    quality_rows.to_csv(target / output_cfg["trajectory_quality_scores_csv"], index=False)
     _write_json(target / output_cfg["drop_results_json"], drop_result)
     _write_json(target / output_cfg.get("multi_drop_results_json", "multi_drop_results.json"), multi_drop_results)
-    quality_scores = {
-        "implemented": "non_ml_hard_rule_summary",
-        "ml_training": False,
-        "best_candidate": candidate_summary.head(1).to_dict("records"),
-        "valid_drop_count": int(multi_drop_results["valid_drop_count"]),
-        "total_drop_count": int(multi_drop_results["num_total_drops"]),
-        "ml_filtering": "not_in_scope",
-        "drop_valid": bool(drop_result.get("valid")),
-        "drop_flags": drop_result.get("flags", []),
-    }
+    quality_scores["valid_drop_count"] = int(multi_drop_results["valid_drop_count"])
+    quality_scores["total_drop_count"] = int(multi_drop_results["num_total_drops"])
+    quality_scores["drop_valid"] = bool(drop_result.get("valid"))
+    quality_scores["drop_flags"] = drop_result.get("flags", [])
     _write_json(target / output_cfg["quality_scores_json"], quality_scores)
-    elementary = estimate_elementary_charge(drop_results or [drop_result], config)
+    elementary = estimate_elementary_charge(kept_drop_results, config)
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
     _emit_progress(progress_callback, 0.86, "write visualization outputs")
-    visualization_layers = build_visualization_layers(meta, grid, tracking_roi, voltage_roi, best_track, platforms, drop_tracks)
+    visualization_layers = build_visualization_layers(
+        meta,
+        grid,
+        tracking_roi,
+        voltage_roi,
+        best_track,
+        platforms,
+        drop_tracks,
+        quality_rows,
+    )
     _write_json(target / output_cfg["visualization_layers_json"], visualization_layers)
     diagnostics = {
         "video": meta.to_dict(),
@@ -375,6 +410,7 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
     errors.extend(validate_columns(root / output["best_track_segments_csv"], SEGMENT_COLUMNS))
     errors.extend(validate_columns(root / output.get("drop_track_segments_csv", "drop_track_segments.csv"), SEGMENT_COLUMNS))
     errors.extend(validate_columns(root / output["candidate_tracks_summary_csv"], CANDIDATE_SUMMARY_COLUMNS))
+    errors.extend(validate_columns(root / output["trajectory_quality_scores_csv"], QUALITY_SCORE_COLUMNS))
     for key in [
         "diagnostics_json",
         "drop_results_json",
