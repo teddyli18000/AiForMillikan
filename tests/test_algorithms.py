@@ -8,6 +8,7 @@ from millikan_ai.elementary.estimate import estimate_elementary_charge
 from millikan_ai.physics.charge import compute_drop_result
 from millikan_ai.segments.fitting import fit_line, fit_track_segments, select_stable_window
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
+from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 
 
 def test_detect_horizontal_grid_lines_on_synthetic_image():
@@ -35,6 +36,52 @@ def test_segment_voltage_platforms_groups_stable_values():
     ]
     platforms = segment_voltage_platforms(samples, voltage_tolerance_V=5, min_duration_s=1.0)
     assert list(platforms["voltage_V"]) == [100, 180]
+
+
+def _make_voltage_change_video(path):
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (360, 240))
+    for idx in range(150):
+        frame = np.zeros((240, 360, 3), dtype=np.uint8)
+        shift_x = int(round(2 * np.sin(idx / 17)))
+        shift_y = int(round(1 * np.cos(idx / 19)))
+        x0, y0 = 190 + shift_x, 12 + shift_y
+        cv2.rectangle(frame, (x0, y0), (x0 + 145, y0 + 78), (210, 210, 230), 1)
+        cv2.line(frame, (x0, y0 + 52), (x0 + 120, y0 + 52), (210, 210, 230), 1)
+        if idx < 50:
+            text = "+000V"
+        elif idx < 58:
+            text = "+090V" if idx % 2 else "+175V"
+        elif idx < 105:
+            text = "+175V"
+        elif idx < 114:
+            text = "+200V" if idx % 2 else "+248V"
+        else:
+            text = "+248V"
+        cv2.putText(frame, text, (x0 + 12, y0 + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (230, 230, 255), 2)
+        cv2.putText(frame, f"{idx / 30:04.1f}S", (x0 + 28, y0 + 74), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 230, 255), 1)
+        writer.write(frame)
+    writer.release()
+
+
+def test_detect_voltage_platform_changes_with_jitter_and_unstable_transitions(tmp_path):
+    video = tmp_path / "voltage_changes.mp4"
+    _make_voltage_change_video(video)
+    config = load_config("configs/default.yaml")
+    config["auto_platform_detection"]["sample_stride_frames"] = 3
+    config["auto_platform_detection"]["min_platform_duration_s"] = 0.8
+    config["auto_platform_detection"]["transition_padding_s"] = 0.1
+
+    suggestions, samples, diagnostics = detect_voltage_platform_changes(video, expected_platform_count=3, config=config)
+
+    assert diagnostics["detected_platform_count"] == 3
+    assert diagnostics["roi"]["w"] > 0
+    assert len(samples) > 20
+    assert list(suggestions["platform_id"]) == ["P001", "P002", "P003"]
+    assert suggestions.iloc[0]["end_frame"] < 55
+    assert suggestions.iloc[1]["start_frame"] > 50
+    assert suggestions.iloc[1]["end_frame"] < 110
+    assert suggestions.iloc[2]["start_frame"] > 105
+    assert (suggestions["source"] == "auto_change_detector").all()
 
 
 def test_fit_line_recovers_velocity():
