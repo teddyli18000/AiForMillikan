@@ -12,6 +12,7 @@ from millikan_ai.calibration.grid import Roi, calibrate_grid, default_voltage_ro
 from millikan_ai.config import load_config, save_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
 from millikan_ai.outputs.schemas import (
+    AUTO_PLATFORM_SUGGESTION_COLUMNS,
     BEST_TRACK_COLUMNS,
     CANDIDATE_SUMMARY_COLUMNS,
     PLATFORMS_COLUMNS,
@@ -53,6 +54,16 @@ def _write_json(path: Path, data: dict) -> None:
 def _load_manual_platforms(config: dict) -> pd.DataFrame:
     rows = config.get("manual_platforms") or []
     return pd.DataFrame(rows, columns=PLATFORMS_COLUMNS) if rows else pd.DataFrame(columns=PLATFORMS_COLUMNS)
+
+
+def _load_auto_platform_suggestions(config: dict) -> pd.DataFrame:
+    rows = config.get("auto_platform_suggestions") or []
+    return pd.DataFrame(rows, columns=AUTO_PLATFORM_SUGGESTION_COLUMNS) if rows else pd.DataFrame(columns=AUTO_PLATFORM_SUGGESTION_COLUMNS)
+
+
+def _load_auto_voltage_samples(config: dict) -> pd.DataFrame:
+    rows = config.get("auto_voltage_samples") or []
+    return pd.DataFrame(rows, columns=VOLTAGE_SAMPLE_COLUMNS) if rows else pd.DataFrame(columns=VOLTAGE_SAMPLE_COLUMNS)
 
 
 def _emit_progress(callback: ProgressCallback | None, percent: float, label: str) -> None:
@@ -130,6 +141,7 @@ def _build_run_manifest(
             {"id": "diagnostic_overlay", "source": files.get("diagnostic_overlay_jpg")},
             {"id": "track_overlay_video", "source": files.get("overlay_mp4")},
             {"id": "platform_editor", "source": files.get("platforms_csv")},
+            {"id": "auto_platform_suggestions", "source": files.get("auto_platform_suggestions_csv")},
             {"id": "candidate_tracks", "source": files.get("candidate_tracks_summary_csv")},
             {"id": "stable_segments", "source": files.get("best_track_segments_csv")},
             {"id": "multi_drop_segments", "source": files.get("drop_track_segments_csv")},
@@ -252,13 +264,15 @@ def run_pipeline(
         float(config["calibration"]["measurement_distance_m"]),
         int(config["calibration"]["min_grid_lines"]),
     )
-    _emit_progress(progress_callback, 0.24, "load manual voltage platforms")
+    _emit_progress(progress_callback, 0.24, "load voltage platforms")
     manual_platforms = _load_manual_platforms(config)
-    voltage_samples = pd.DataFrame(columns=VOLTAGE_SAMPLE_COLUMNS)
+    auto_platform_suggestions = _load_auto_platform_suggestions(config)
+    voltage_samples = _load_auto_voltage_samples(config)
     platforms = manual_platforms
     if platforms.empty:
         platforms = pd.DataFrame(columns=PLATFORMS_COLUMNS)
     voltage_samples.to_csv(target / output_cfg.get("voltage_samples_csv", "voltage_samples.csv"), index=False)
+    auto_platform_suggestions.to_csv(target / output_cfg.get("auto_platform_suggestions_csv", "auto_platform_suggestions.csv"), index=False)
     platforms.to_csv(target / output_cfg["platforms_csv"], index=False)
     tracking_roi = _tracking_roi_from_grid(grid, config)
     _emit_progress(progress_callback, 0.36, "tracking droplets")
@@ -358,6 +372,13 @@ def run_pipeline(
         },
         "grid": grid.to_dict(),
         "platform_count": int(len(platforms)),
+        "auto_platform_detection": {
+            "suggestion_count": int(len(auto_platform_suggestions)),
+            "expected_platform_count": config.get("auto_platform_detection_result", {}).get("expected_platform_count"),
+            "detected_platform_count": config.get("auto_platform_detection_result", {}).get("detected_platform_count"),
+            "roi": config.get("auto_platform_detection_result", {}).get("roi"),
+            "flags": config.get("auto_platform_detection_result", {}).get("flags", []),
+        },
         "drop_count": int(multi_drop_results["num_total_drops"]),
         "track_rows": int(len(best_track)),
         "all_track_rows": int(len(drop_tracks)),
@@ -374,7 +395,10 @@ def run_pipeline(
         "flags": [],
     }
     if platforms.empty:
-        diagnostics["flags"].append("requires_manual_platforms")
+        if auto_platform_suggestions.empty:
+            diagnostics["flags"].append("requires_manual_platforms")
+        else:
+            diagnostics["flags"].append("requires_manual_platform_voltages")
     if grid.scale_y_m_per_px is None:
         diagnostics["flags"].append("requires_manual_grid_calibration")
     _write_json(target / output_cfg["diagnostics_json"], diagnostics)

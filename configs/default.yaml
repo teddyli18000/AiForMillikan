@@ -112,6 +112,7 @@ quality:
 
 output:
   voltage_samples_csv: voltage_samples.csv
+  auto_platform_suggestions_csv: auto_platform_suggestions.csv
   platforms_csv: platforms.csv
   best_track_csv: best_track.csv
   drop_tracks_csv: drop_tracks.csv

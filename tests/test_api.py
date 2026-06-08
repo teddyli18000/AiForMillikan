@@ -5,7 +5,9 @@ import cv2
 import numpy as np
 
 from millikan_ai.api import AnalysisRequest, ManualPlatformInput, analyze_video, manual_platform_rows, parse_manual_platform_spec, prepare_analysis_config
+from millikan_ai.api import prepare_auto_platform_config
 from millikan_ai.config import load_config, save_config
+from tests.test_algorithms import _make_voltage_change_video
 
 
 def _make_synthetic_video(path: Path) -> None:
@@ -44,6 +46,25 @@ def test_prepare_analysis_config_writes_manual_platforms(tmp_path: Path):
     assert prepared.name == "synthetic_manual_platforms.yaml"
     assert len(prepared_config["manual_platforms"]) == 2
     assert prepared_config["manual_platforms"][0]["source"] == "manual_ui"
+
+
+def test_prepare_auto_platform_config_binds_user_voltage_values(tmp_path: Path):
+    video = tmp_path / "auto_platform.mp4"
+    _make_voltage_change_video(video)
+    config = load_config("configs/default.yaml")
+    config["project"]["run_root"] = str(tmp_path / "runs")
+    config["auto_platform_detection"]["sample_stride_frames"] = 3
+    config_path = tmp_path / "config.yaml"
+    save_config(config, config_path)
+
+    prepared = prepare_auto_platform_config(video, config_path, expected_platform_count=3, platform_values=[0.0, 175.0, 248.0])
+    prepared_config = load_config(prepared)
+
+    assert prepared.name == "auto_platform_auto_platforms.yaml"
+    assert len(prepared_config["auto_platform_suggestions"]) == 3
+    assert len(prepared_config["manual_platforms"]) == 3
+    assert [row["voltage_V"] for row in prepared_config["manual_platforms"]] == [0.0, 175.0, 248.0]
+    assert prepared_config["manual_platforms"][0]["source"] == "auto_boundary_manual_voltage"
 
 
 def test_analyze_video_returns_manifest_for_frontend(tmp_path: Path):

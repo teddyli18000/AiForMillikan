@@ -97,6 +97,34 @@ def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     assert "drop_q_valid" in {check["id"] for check in validity["checks"]}
 
 
+def test_pipeline_writes_auto_platform_suggestions_contract(tmp_path: Path):
+    video = tmp_path / "synthetic.mp4"
+    _make_synthetic_video(video)
+    config = load_config("configs/default.yaml")
+    config["roi"]["microscope_roi"] = [20, 20, 240, 200]
+    config["manual_platforms"] = [
+        {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "auto_boundary_manual_voltage"},
+        {"platform_id": "P002", "start_frame": 60, "end_frame": 119, "start_time_s": 2.0, "end_time_s": 3.97, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "auto_boundary_manual_voltage"},
+    ]
+    config["auto_platform_suggestions"] = [
+        {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "confidence": 1.0, "source": "auto_change_detector", "transition_start_frame": 60, "transition_end_frame": 65, "roi_x": 200, "roi_y": 0, "roi_w": 100, "roi_h": 50, "reject_reason": ""},
+        {"platform_id": "P002", "start_frame": 66, "end_frame": 119, "start_time_s": 2.2, "end_time_s": 3.97, "confidence": 1.0, "source": "auto_change_detector", "transition_start_frame": -1, "transition_end_frame": -1, "roi_x": 200, "roi_y": 0, "roi_w": 100, "roi_h": 50, "reject_reason": ""},
+    ]
+    config["segment"]["stable_min_duration_s"] = 0.5
+    config["segment"]["transient_drop_s"] = 0.1
+    config["segment"]["min_valid_points"] = 10
+    config_path = tmp_path / "config.yaml"
+    save_config(config, config_path)
+
+    run_dir = run_pipeline(video, config_path, tmp_path / "run")
+    suggestions = pd.read_csv(run_dir / "auto_platform_suggestions.csv")
+    diagnostics = json.loads((run_dir / "diagnostics.json").read_text(encoding="utf-8"))
+
+    assert len(suggestions) == 2
+    assert suggestions.iloc[0]["source"] == "auto_change_detector"
+    assert diagnostics["auto_platform_detection"]["suggestion_count"] == 2
+
+
 def test_pipeline_mainline_no_longer_exposes_ocr_sampling():
     assert not hasattr(pipeline, "_sample_voltage_series")
     assert not hasattr(pipeline, "read_voltage_from_frame")
