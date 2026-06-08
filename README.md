@@ -77,6 +77,7 @@ Each run directory writes:
 
 - `run_config.yaml`
 - `voltage_samples.csv`
+- `auto_platform_suggestions.csv`
 - `platforms.csv`
 - `best_track.csv`
 - `drop_tracks.csv`
@@ -97,7 +98,7 @@ Each run directory writes:
 - `summary.txt`
 - `analysis_report.md`
 
-Current `develop`/`main` does not run voltage OCR. If no manual platform rows are supplied, `diagnostics.json` includes `requires_manual_platforms`. The run still records video metadata, grid calibration, candidate tracking, overlay, and validation-safe output files.
+Current `develop`/`main` does not run voltage OCR. It can automatically suggest voltage-platform boundaries by detecting visual changes in the voltage display, but the user still supplies the actual voltage values. If no usable platform rows are supplied, `diagnostics.json` includes `requires_manual_platforms` or `requires_manual_platform_voltages`. The run still records video metadata, grid calibration, candidate tracking, overlay, and validation-safe output files.
 
 ## Manual Platform Input
 
@@ -116,6 +117,20 @@ For guided input, use:
 ```
 
 The guided flow asks for the number of voltage platforms, then each platform's start frame, end frame, and voltage.
+
+For videos with a visible voltage display, the root wizard first asks for the expected platform count, tries to detect stable platform boundaries, discards short/unstable transition intervals, and then asks only for the voltage value of each accepted platform. If the detected count does not match the user-provided count, or a suggested platform is too short, the wizard falls back to manual frame ranges.
+
+To inspect automatic boundary suggestions without running the full droplet pipeline:
+
+```powershell
+.venv\Scripts\python -m millikan_ai.cli detect-platforms --video raw_data\5.mp4 --config configs\default.yaml --count 3
+```
+
+To run non-interactively with auto-detected boundaries and user-provided voltage values:
+
+```powershell
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\5.mp4 --config configs\default.yaml --auto-platform-count 3 --platform-value 0 --platform-value 150 --platform-value 259
+```
 
 You can also add `manual_platforms` to a config file:
 
@@ -139,7 +154,7 @@ manual_platforms:
     source: manual
 ```
 
-The backend records `source=manual`, `source=manual_cli`, or `source=manual_ui` in `platforms.csv`; it does not pretend manually entered voltages came from OCR.
+The backend records `source=manual`, `source=manual_cli`, `source=manual_ui`, or `source=auto_boundary_manual_voltage` in `platforms.csv`; it does not pretend manually entered voltages came from OCR. Automatic boundary evidence is written to `auto_platform_suggestions.csv`.
 
 ## Backend API
 
