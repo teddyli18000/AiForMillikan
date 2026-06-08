@@ -126,3 +126,40 @@ def test_fusion_tracker_does_not_jump_to_distractor_during_occlusion(tmp_path):
     assert abs(float(after_occlusion["x_px"]) - 80.0) < 3.0
     assert "detection" in set(selected["tracking_source"])
     assert "kalman_prediction" in set(selected["tracking_source"])
+
+
+def test_multi_keyframe_seeding_tracks_droplet_that_enters_late(tmp_path):
+    video = tmp_path / "late_entry.mp4"
+    writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (220, 180))
+    for frame_idx in range(90):
+        frame = np.zeros((180, 220, 3), dtype=np.uint8)
+        if frame_idx >= 20:
+            cv2.circle(frame, (80, int(35 + 0.5 * (frame_idx - 20))), 5, (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+    config = load_config("configs/default.yaml")
+    config["tracking"].update(
+        {
+            "top_k_seeds": 8,
+            "max_drops": 5,
+            "seed_sample_frames": 6,
+            "min_grid_line_distance_px": 0,
+            "min_grid_clear_fraction": 0,
+            "min_tracking_roi_margin_px": 0,
+            "min_roi_clear_fraction": 0,
+        }
+    )
+
+    tracks, summary = track_multiple_candidates(
+        video,
+        "late_entry",
+        Roi(20, 20, 180, 140),
+        pd.DataFrame(),
+        config,
+    )
+
+    assert not tracks.empty
+    assert int(tracks["frame_idx"].min()) >= 15
+    assert abs(float(tracks.iloc[0]["x_px"]) - 80.0) < 3.0
+    assert summary["selected_for_multi_drop"].astype(bool).any()

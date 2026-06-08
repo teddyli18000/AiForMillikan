@@ -25,11 +25,27 @@ segment:
 
 tracking:
   top_k_seeds: 30
-  max_drops: 1
+  seed_sample_frames: 6
+  seed_merge_distance_px: 18
+  seed_min_grid_line_distance_px: 0
+  max_drops: 20
   multi_drop_min_trajectory_distance_px: 20
   max_search_radius_px: 35
+  max_missing_frames: 15
   min_blob_area_px: 3
   max_blob_area_px: 180
+  detection_nms_distance_px: 6
+  kalman_process_noise: 1.0
+  kalman_measurement_noise: 2.0
+  mahalanobis_gate: 6.0
+  max_area_ratio: 3.0
+  lk_window_size_px: 21
+  lk_pyramid_levels: 3
+  lk_max_forward_backward_error_px: 1.5
+  lk_max_photometric_error: 30
+  lk_detection_gate_px: 12
+  lk_prediction_gate_px: 12
+  lk_measurement_weight: 0.25
   best_track_min_score: 0.45
   restrict_to_measurement_grid: true
   min_grid_line_distance_px: 8

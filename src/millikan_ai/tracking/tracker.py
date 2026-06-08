@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -12,6 +13,12 @@ from millikan_ai.segments.fitting import fit_line, select_stable_window
 from millikan_ai.tracking.detector import Blob, detect_blobs
 from millikan_ai.tracking.fusion import KalmanPointTracker, track_lk_bidirectional
 from millikan_ai.video.reader import inspect_video
+
+
+@dataclass(frozen=True)
+class TrackSeed:
+    blob: Blob
+    start_frame: int
 
 
 def _distance(a: Blob, b: Blob) -> float:
@@ -54,6 +61,49 @@ def _select_detection(
         cost = predicted_distance + 0.5 * lk_cost + 3.0 * morphology_penalty - 2.0 * blob.confidence
         candidates.append((cost, blob))
     return min(candidates, key=lambda item: item[0])[1] if candidates else None
+
+
+def _collect_track_seeds(
+    cap: cv2.VideoCapture,
+    frame_count: int,
+    microscope_roi: Roi,
+    grid: GridCalibration | None,
+    tracking_cfg: dict,
+) -> list[TrackSeed]:
+    sample_count = max(1, min(int(tracking_cfg.get("seed_sample_frames", 6)), frame_count))
+    frame_indices = sorted(set(np.linspace(0, max(frame_count - 1, 0), sample_count, dtype=int).tolist()))
+    min_area = float(tracking_cfg["min_blob_area_px"])
+    max_area = float(tracking_cfg["max_blob_area_px"])
+    min_grid_distance = float(tracking_cfg.get("seed_min_grid_line_distance_px", 0))
+    min_roi_margin = float(tracking_cfg.get("min_tracking_roi_margin_px", 0))
+    nms_distance = float(tracking_cfg.get("detection_nms_distance_px", 6))
+    candidates: list[TrackSeed] = []
+    for frame_idx in frame_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        blobs = detect_blobs(
+            frame,
+            microscope_roi,
+            min_area,
+            max_area,
+            grid=grid,
+            min_grid_distance_px=min_grid_distance,
+            min_roi_margin_px=min_roi_margin,
+            nms_distance_px=nms_distance,
+        )
+        candidates.extend(TrackSeed(blob=blob, start_frame=frame_idx) for blob in blobs)
+    candidates.sort(key=lambda seed: (seed.start_frame, -seed.blob.confidence))
+    merge_distance = float(tracking_cfg.get("seed_merge_distance_px", 18))
+    seeds: list[TrackSeed] = []
+    for candidate in candidates:
+        if any(_distance(candidate.blob, existing.blob) < merge_distance for existing in seeds):
+            continue
+        seeds.append(candidate)
+        if len(seeds) >= int(tracking_cfg["top_k_seeds"]):
+            break
+    return seeds
 
 
 def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, config: dict) -> tuple[int, float, float]:
@@ -156,20 +206,7 @@ def _track_seed_candidates(
     max_missing_frames = int(tracking_cfg.get("max_missing_frames", 15))
     process_noise = float(tracking_cfg.get("kalman_process_noise", 1.0))
     measurement_noise = float(tracking_cfg.get("kalman_measurement_noise", 2.0))
-    ok, frame = cap.read()
-    if not ok:
-        cap.release()
-        return pd.DataFrame(), pd.DataFrame()
-    seeds = detect_blobs(
-        frame,
-        microscope_roi,
-        min_area,
-        max_area,
-        grid=grid,
-        min_grid_distance_px=min_grid_distance,
-        min_roi_margin_px=min_roi_margin,
-        nms_distance_px=nms_distance,
-    )[: int(tracking_cfg["top_k_seeds"])]
+    seeds = _collect_track_seeds(cap, meta.frame_count, microscope_roi, grid, tracking_cfg)
     if not seeds:
         cap.release()
         return {}, [
@@ -186,8 +223,9 @@ def _track_seed_candidates(
         ]
     tracks: dict[str, list[dict[str, object]]] = {}
     summaries = []
-    for seed_idx, seed in enumerate(seeds[: min(10, len(seeds))], start=1):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    for seed_idx, track_seed in enumerate(seeds, start=1):
+        seed = track_seed.blob
+        cap.set(cv2.CAP_PROP_POS_FRAMES, track_seed.start_frame)
         current = seed
         motion = KalmanPointTracker(
             seed.x_px,
@@ -201,7 +239,7 @@ def _track_seed_candidates(
         rows = []
         missing = 0
         consecutive_missing = 0
-        for frame_idx in range(meta.frame_count):
+        for frame_idx in range(track_seed.start_frame, meta.frame_count):
             ok, frame = cap.read()
             if not ok:
                 break
@@ -241,7 +279,12 @@ def _track_seed_candidates(
                 tracking_source = "detection"
                 consecutive_missing = 0
             elif lk_point is not None:
-                corrected = motion.correct(lk_point)
+                lk_weight = float(tracking_cfg.get("lk_measurement_weight", 0.25))
+                fused_point = (
+                    (1.0 - lk_weight) * predicted[0] + lk_weight * lk_point[0],
+                    (1.0 - lk_weight) * predicted[1] + lk_weight * lk_point[1],
+                )
+                corrected = motion.correct(fused_point)
                 current = Blob(
                     corrected[0],
                     corrected[1],
@@ -339,7 +382,17 @@ def _track_seed_candidates(
             }
         )
     cap.release()
-    summaries.sort(key=lambda row: row["score_total"], reverse=True)
+    summaries.sort(
+        key=lambda row: (
+            int(row["fit_usable_platform_count"]),
+            int(row["usable_platform_count"]),
+            float(row["total_duration_s"]),
+            -float(row["missing_ratio"]),
+            float(row["mean_speed_fit_r2"]),
+            float(row["score_total"]),
+        ),
+        reverse=True,
+    )
     for rank, row in enumerate(summaries, start=1):
         row["rank"] = rank
     return tracks, summaries
