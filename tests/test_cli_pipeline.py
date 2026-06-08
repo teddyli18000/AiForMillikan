@@ -7,12 +7,13 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from millikan_ai.cli.__main__ import _parse_platform_spec, _prompt_platform_rows
+from millikan_ai.cli.__main__ import _parse_platform_spec, _prompt_platform_rows, main as cli_main
 from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.config import load_config, save_config
 from millikan_ai import pipeline
 from millikan_ai.pipeline import _select_primary_drop, _tracking_roi_from_grid, run_pipeline, validate_run
 from millikan_ai.tracking.tracker import _grid_clear_fraction, _roi_clear_fraction, track_multiple_candidates
+from tests.test_algorithms import _make_voltage_change_video
 
 
 def _make_synthetic_video(path: Path) -> None:
@@ -123,6 +124,22 @@ def test_pipeline_writes_auto_platform_suggestions_contract(tmp_path: Path):
     assert len(suggestions) == 2
     assert suggestions.iloc[0]["source"] == "auto_change_detector"
     assert diagnostics["auto_platform_detection"]["suggestion_count"] == 2
+
+
+def test_cli_detect_platforms_command_outputs_suggestions(tmp_path: Path, capsys):
+    video = tmp_path / "voltage_changes.mp4"
+    _make_voltage_change_video(video)
+    config = load_config("configs/default.yaml")
+    config["auto_platform_detection"]["sample_stride_frames"] = 3
+    config_path = tmp_path / "config.yaml"
+    save_config(config, config_path)
+
+    exit_code = cli_main(["detect-platforms", "--video", str(video), "--config", str(config_path), "--count", "3"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["diagnostics"]["detected_platform_count"] == 3
+    assert len(payload["suggestions"]) == 3
 
 
 def test_pipeline_mainline_no_longer_exposes_ocr_sampling():

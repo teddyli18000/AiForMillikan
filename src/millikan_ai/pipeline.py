@@ -428,6 +428,7 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
     output = config["output"]
     errors: list[str] = []
     errors.extend(validate_columns(root / output.get("voltage_samples_csv", "voltage_samples.csv"), VOLTAGE_SAMPLE_COLUMNS))
+    errors.extend(validate_columns(root / output.get("auto_platform_suggestions_csv", "auto_platform_suggestions.csv"), AUTO_PLATFORM_SUGGESTION_COLUMNS))
     errors.extend(validate_columns(root / output["platforms_csv"], PLATFORMS_COLUMNS))
     errors.extend(validate_columns(root / output["best_track_csv"], BEST_TRACK_COLUMNS))
     errors.extend(validate_columns(root / output.get("drop_tracks_csv", "drop_tracks.csv"), BEST_TRACK_COLUMNS))

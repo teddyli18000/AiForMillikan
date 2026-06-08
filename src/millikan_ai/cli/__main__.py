@@ -4,9 +4,18 @@ import argparse
 import json
 from pathlib import Path
 
-from millikan_ai.api import AnalysisRequest, ManualPlatformInput, analyze_video, manual_platform_row, parse_manual_platform_spec, prepare_analysis_config
+from millikan_ai.api import (
+    AnalysisRequest,
+    ManualPlatformInput,
+    analyze_video,
+    manual_platform_row,
+    parse_manual_platform_spec,
+    prepare_analysis_config,
+    prepare_auto_platform_config,
+)
 from millikan_ai.config import load_config
 from millikan_ai.pipeline import validate_run, write_summary
+from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 from millikan_ai.video.reader import inspect_video, save_diagnostic_frame
 
 
@@ -69,7 +78,11 @@ def _prompt_platform_rows(fps: float, frame_count: int, start_index: int = 1) ->
 def _prepare_config(args: argparse.Namespace) -> str:
     platforms = [parse_manual_platform_spec(spec, source="manual_cli") for spec in list(args.platform or [])]
     use_interactive = getattr(args, "interactive_platforms", False)
+    auto_count = getattr(args, "auto_platform_count", None)
+    platform_values = [float(value) for value in list(getattr(args, "platform_value", None) or [])]
     if not platforms and not use_interactive:
+        if auto_count is not None:
+            return str(prepare_auto_platform_config(args.video, args.config, int(auto_count), platform_values))
         return args.config
     meta = inspect_video(args.video)
     if use_interactive:
@@ -78,6 +91,22 @@ def _prepare_config(args: argparse.Namespace) -> str:
         platforms.extend(_prompt_platform_inputs(meta.fps, meta.frame_count))
     target = prepare_analysis_config(args.video, args.config, platforms)
     return str(target)
+
+
+def _cmd_detect_platforms(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    suggestions, samples, diagnostics = detect_voltage_platform_changes(args.video, int(args.count), config)
+    payload = {
+        "diagnostics": diagnostics,
+        "suggestions": suggestions.to_dict("records"),
+        "sample_count": int(len(samples)),
+    }
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    if int(diagnostics.get("detected_platform_count", 0)) != int(args.count):
+        return 2
+    if any(str(row.get("reject_reason", "")) for row in suggestions.to_dict("records")):
+        return 2
+    return 0
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
@@ -151,6 +180,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--run-dir")
     run.add_argument("--non-interactive", action="store_true")
     run.add_argument("--platform", action="append", help="Manual platform as START_FRAME:END_FRAME:VOLTAGE; repeat for multiple platforms.")
+    run.add_argument("--auto-platform-count", type=int, help="Detect voltage display changes and bind boundaries to --platform-value entries.")
+    run.add_argument("--platform-value", action="append", help="Voltage value for an auto-detected platform; repeat in platform order.")
     run.add_argument("--interactive-platforms", action="store_true", help="Prompt for manual platform ranges before running.")
     run.set_defaults(func=_cmd_run)
     analyze = sub.add_parser("analyze")
@@ -158,8 +189,15 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--config", default="configs/default.yaml")
     analyze.add_argument("--run-dir")
     analyze.add_argument("--platform", action="append", help="Manual platform as START_FRAME:END_FRAME:VOLTAGE; repeat for multiple platforms.")
+    analyze.add_argument("--auto-platform-count", type=int, help="Detect voltage display changes and bind boundaries to --platform-value entries.")
+    analyze.add_argument("--platform-value", action="append", help="Voltage value for an auto-detected platform; repeat in platform order.")
     analyze.add_argument("--interactive-platforms", action="store_true", help="Prompt for manual platform ranges before running.")
     analyze.set_defaults(func=_cmd_analyze)
+    detect = sub.add_parser("detect-platforms")
+    detect.add_argument("--video", required=True)
+    detect.add_argument("--config", default="configs/default.yaml")
+    detect.add_argument("--count", type=int, required=True)
+    detect.set_defaults(func=_cmd_detect_platforms)
     validate = sub.add_parser("validate")
     validate.add_argument("--run-dir", required=True)
     validate.add_argument("--config", default="configs/default.yaml")
