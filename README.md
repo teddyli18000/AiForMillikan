@@ -7,10 +7,10 @@ This stage implements a non-ML backend framework:
 - OpenCV video inspection and diagnostic frames
 - automatic microscope ROI and grid scale calibration
 - manual voltage platform input for trusted voltage/time ranges
-- non-ML bright-blob droplet tracking and best-candidate selection
+- multi-keyframe droplet detection with Kalman + bidirectional LK optical flow + detection fusion
 - terminal velocity fitting
 - physics-based single-drop charge inversion
-- opt-in multi-drop backend outputs while preserving the selected/default drop contract
+- adaptive multi-drop q inversion and explainable rule-based quality filtering
 - non-ML elementary charge grid-search estimator
 - run output validation and summaries
 
@@ -87,6 +87,7 @@ Each run directory writes:
 - `drop_results.json`
 - `multi_drop_results.json`
 - `quality_scores.json`
+- `trajectory_quality_scores.csv`
 - `elementary_charge_result.json`
 - `validity_report.json`
 - `visualization_layers.json`
@@ -190,8 +191,10 @@ Within each voltage platform, the backend fits the best stable sub-window after 
 
 For a single oil drop, elementary-charge blind estimation is intentionally reported as underdetermined because it needs multiple independent `q_i` values.
 
-By default, `tracking.max_drops` is `1` so raw-video smoke tests stay conservative. Raising it enables multi-drop candidate selection and per-track q calculation outputs in `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json`. `drop_results.json` remains the selected/default drop result for backward compatibility.
+By default, `tracking.max_drops` is `20`. The tracker samples multiple keyframes, deduplicates trajectories, and evaluates each selected track through the real q pipeline. `drop_results.json` remains the selected/default drop result for backward compatibility.
 
 Tracked droplets and physically valid droplets are distinct. `candidate_tracks_summary.csv` records post-physics fields such as `q_valid`, `physics_flags`, `charge_abs_C`, and `radius_m`; `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` are the authoritative valid-droplet counts for reports and frontend display.
+
+The quality adapter is deterministic and reports `trained=false`. Only tracks with `trajectory_quality_scores.csv.keep=true` and `q_valid=true` enter elementary-charge estimation.
 
 When multiple selected tracks are evaluated, `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` use the highest-ranked physically valid drop. If no selected drop has valid q, they fall back to the highest-ranked evaluated candidate and report explicit physics flags.

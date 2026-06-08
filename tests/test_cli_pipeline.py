@@ -246,6 +246,8 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     drop_segments = pd.read_csv(run_dir / "drop_track_segments.csv")
     candidate_summary = pd.read_csv(run_dir / "candidate_tracks_summary.csv")
     multi_results = json.loads((run_dir / "multi_drop_results.json").read_text(encoding="utf-8"))
+    quality = json.loads((run_dir / "quality_scores.json").read_text(encoding="utf-8"))
+    quality_rows = pd.read_csv(run_dir / "trajectory_quality_scores.csv")
     manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     layers = json.loads((run_dir / "visualization_layers.json").read_text(encoding="utf-8"))
     validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
@@ -256,10 +258,15 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     assert len(multi_results["drops"]) >= 2
     assert manifest["counts"]["drops"] >= 2
     assert manifest["counts"]["valid_drops"] == multi_results["valid_drop_count"]
+    assert manifest["counts"]["quality_kept_drops"] == int(quality_rows["keep"].astype(bool).sum())
+    assert quality["mode"] == "mock_rule_adapter"
+    assert quality["trained"] is False
+    assert {"track_id", "trajectory_score", "physics_quality_score", "quality_score", "keep", "reject_reasons"}.issubset(quality_rows.columns)
     assert {"drop_id", "q_valid", "physics_flags", "charge_abs_C"}.issubset(candidate_summary.columns)
     assert candidate_summary["q_valid"].astype(bool).sum() == multi_results["valid_drop_count"]
     drop_track_layer = next(layer for layer in layers["layers"] if layer["id"] == "drop_tracks")
     assert len(drop_track_layer["tracks"]) >= 2
+    assert all({"quality_score", "keep", "q_valid", "reject_reasons"}.issubset(track) for track in drop_track_layer["tracks"])
     checks = {check["id"]: check for check in validity["checks"]}
     assert checks["multi_drop_q_results"]["details"]["valid_drop_count"] == multi_results["valid_drop_count"]
     assert checks["elementary_charge_ready"]["details"]["required_drop_count"] == config["elementary"]["min_drops"]
@@ -293,11 +300,12 @@ def test_pipeline_estimates_elementary_charge_from_three_valid_drops(tmp_path: P
 
     elementary = json.loads((run_dir / "elementary_charge_result.json").read_text(encoding="utf-8"))
     multi = json.loads((run_dir / "multi_drop_results.json").read_text(encoding="utf-8"))
+    quality_rows = pd.read_csv(run_dir / "trajectory_quality_scores.csv")
     validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert multi["valid_drop_count"] == 3
     assert elementary["valid"] is True
-    assert elementary["num_used_drops"] == 3
+    assert elementary["num_used_drops"] == int(quality_rows["keep"].astype(bool).sum()) == 3
     assert validity["overall_valid_for_elementary_charge"] is True
     assert manifest["status"]["valid_for_elementary_charge"] is True
 

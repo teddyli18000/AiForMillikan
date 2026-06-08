@@ -9,7 +9,8 @@ This project analyzes Millikan oil drop experiment videos. The current backend i
 - `src/millikan_ai/video/`: OpenCV video metadata, frame sampling, and diagnostic frames.
 - `src/millikan_ai/api.py`: public backend API for CLI and future PySide6/Qt frontend integration.
 - `src/millikan_ai/calibration/`: screen/ROI/grid calibration and physical scale estimation.
-- `src/millikan_ai/tracking/`: non-ML droplet candidate detection, single-target tracking, scoring, and overlay rendering.
+- `src/millikan_ai/tracking/`: scored detection, Kalman/LK/detection fusion, adaptive multi-drop tracking, deduplication, and overlays.
+- `src/millikan_ai/quality/`: deterministic runtime quality adapter; training remains under `training_quality_filter/`.
 - `src/millikan_ai/segments/`: voltage platform segmentation and terminal velocity fitting.
 - `src/millikan_ai/physics/`: physics-based single-drop charge inversion.
 - `src/millikan_ai/elementary/`: non-ML elementary charge estimation from computed drop results.
@@ -41,7 +42,7 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - All thresholds and physical constants should come from `configs/default.yaml`.
 - Current `develop`/`main` is manual-platform-first and does not run voltage OCR. OCR experiment code is preserved on `feature/ocr-current-archive`; do not re-enable OCR on mainline without an explicit new plan.
 - If ROI detection or tracking confidence is low, write explicit flags and allow manual/config-driven correction.
-- Do not claim ML-based trajectory filtering is implemented in this stage.
+- Do not claim a trained ML filter is implemented. The runtime adapter must report `mode=mock_rule_adapter`, `trained=false`.
 - Do not silently output physical results when fewer than two usable voltage platforms exist.
 - `analysis_report.md` is the user-facing report for the selected/default drop plus any configured multi-drop outputs; CSV/JSON/MP4 files remain the machine-readable contract.
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
@@ -54,7 +55,9 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - `validity_report.json` is the frontend-facing legality/reasonableness checklist. Add explicit checks there when adding new q, tracking, or multi-drop prerequisites.
 - `visualization_layers.json` is the frontend-facing structured drawing contract. Prefer adding reusable layer objects there over encoding new UI-only information only in rendered images.
 - `diagnostic_overlay.jpg` is the frontend-facing static visualization contract: it should show pixel `+X/+Y`, microscope ROI, tracking ROI, grid lines, measurement lines, selected droplet, and trajectory. Keep `docs/frontend_backend_interface.md` in sync when this contract changes.
-- Multi-drop tracking is opt-in through `tracking.max_drops`; default remains `1` for conservative single-drop behavior. When enabled, the backend writes `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json` while preserving `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for the selected/default drop.
+- Multi-drop tracking defaults to the safety cap `tracking.max_drops: 20`; preserve the selected/default drop files for compatibility.
+- Elementary-charge estimation may only consume drops with both `trajectory_quality_scores.csv.keep=true` and `q_valid=true`.
+- Keep the backend CPU-only. GPU/OpenCV CUDA work requires a separately approved dependency plan.
 - `candidate_tracks_summary.csv` may include post-physics columns such as `drop_id`, `q_valid`, `physics_flags`, `charge_abs_C`, and `radius_m`. Treat `selected_for_multi_drop=true` as "tracked for evaluation"; use `q_valid=true` or `multi_drop_results.valid_drop_count` for physically valid droplets.
 - The selected/default drop should prefer the highest-ranked `q_valid=true` result. Do not use tracking rank alone when a lower-ranked selected candidate has a valid q and the top candidate is physically invalid.
 - Segment rows for short or transient-cropped platforms must preserve the source `track_id`; blank `track_id` rows in `drop_track_segments.csv` can create fake drops in `multi_drop_results.json`.

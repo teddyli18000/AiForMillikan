@@ -78,6 +78,8 @@ Each run should also expose:
 - `platforms.csv`: voltage platform boundaries and values.
 - `drop_results.json`: physical `q` calculation result.
 - `multi_drop_results.json`: per-drop physical `q` results and valid drop counts.
+- `quality_scores.json`: deterministic quality-adapter metadata and aggregate counts.
+- `trajectory_quality_scores.csv`: per-track trajectory score, physics score, keep decision, and reject reasons.
 - `analysis_report.md`: user-facing full report.
 
 `visualization_layers.json` currently contains layers for:
@@ -172,7 +174,7 @@ These fields explain why bright grid intersections, watermarks, borders, edge hi
 
 ## Multi-Drop Contract
 
-The current default remains conservative single-drop behavior with `tracking.max_drops: 1`. When `tracking.max_drops` is raised, the backend selects multiple distinct non-rejected trajectories and computes q per selected track. Existing selected/default drop fields remain stable:
+The current default tracks up to `tracking.max_drops: 20` distinct trajectories and computes q per selected track. Existing selected/default drop fields remain stable:
 
 - keep `run_manifest.json.schema_version` versioned
 - keep `primary_results` for the selected/default drop
@@ -180,9 +182,9 @@ The current default remains conservative single-drop behavior with `tracking.max
 - keep `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for that selected/default drop
 - use `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json` for all selected drops
 - use `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` for the valid-droplet count
-- use `elementary_charge_result.json` for the estimator over all valid independent `charge_abs_C` values
+- use `elementary_charge_result.json` for the estimator over independent results with both `keep=true` and `q_valid=true`
 - keep single-drop reports valid when only one droplet is found
 
-## Current Non-ML Scope
+## Current Quality Scope
 
-The backend performs non-ML hard-rule quality filtering and single-droplet tracking. ML trajectory filtering remains out of scope for the current backend and should be represented as disabled or future work in the UI.
+The backend uses Kalman + bidirectional LK + detection fusion and an explainable rule adapter. The adapter is not trained and exposes `mode=mock_rule_adapter`, `trained=false`. The UI should display `quality_score`, `keep`, `q_valid`, and `reject_reasons`.
