@@ -7,7 +7,7 @@ This stage implements a non-ML backend framework:
 - OpenCV video inspection and diagnostic frames
 - automatic microscope ROI and grid scale calibration
 - manual voltage platform input for trusted voltage/time ranges
-- multi-keyframe droplet detection with Kalman + bidirectional LK optical flow + detection fusion
+- multi-keyframe droplet detection with Kalman + local-patch bidirectional LK optical flow + detection fusion
 - terminal velocity fitting
 - physics-based single-drop charge inversion
 - adaptive multi-drop q inversion and explainable rule-based quality filtering
@@ -63,6 +63,14 @@ Generate the user-facing single-drop analysis report:
 ```powershell
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
 ```
+
+For the current `raw_data\2.mp4` demo video, use the guide voltages with automatic platform-boundary suggestions:
+
+```powershell
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2.mp4 --config configs\default.yaml --auto-platform-count 3 --platform-value 0 --platform-value 239 --platform-value 362
+```
+
+The `run` and `analyze` commands print stage progress while the backend is working.
 
 Validate and summarize a run:
 
@@ -182,13 +190,13 @@ The API writes the same output contract as the CLI, including `run_manifest.json
 
 ## Current Raw Video Behavior
 
-`raw_data/2u.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md` when manual platforms are supplied. With manual platforms, the backend can select a stable single droplet and compute a real physics-based `q`. Without manual platforms, the run is explicitly invalid for q calculation.
+`raw_data/2.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md` when auto-detected platform boundaries are combined with the guide voltage values. With platform values supplied, the backend can select stable droplets and compute real physics-based `q`. Without platform values, the run is explicitly invalid for q calculation.
 
-Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection. Candidate ranking also penalizes tracks that stay too close to grid lines or tracking ROI edges, which reduces false positives from grid intersections and edge highlights.
+Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection. Candidate ranking also penalizes tracks that stay too close to grid lines or tracking ROI edges, which reduces false positives from grid intersections and edge highlights. The tracker shares per-frame blob detection across active seeds and runs LK optical flow on a local patch around each tracked point to keep 1080p videos responsive on CPU.
 
 For frontend review, each run writes `run_manifest.json`, `validity_report.json`, `visualization_layers.json`, and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; the validity report lists pass/fail checks; the layer JSON provides structured drawing data for interactive frontend overlays, including multi-drop tracks when `tracking.max_drops > 1`; the diagnostic image is a rendered preview. See `docs/frontend_backend_interface.md` for the desktop UI contract.
 
-Raw smoke-test findings for `2u.mp4`, `3u1.mp4`, and `3u2.mp4` are recorded in `docs/raw_video_smoke.md`.
+Raw smoke-test findings for the current `1.mp4` through `8.mp4` samples and older archived videos are recorded in `docs/raw_video_smoke.md`.
 
 With reliable platform data, the single-drop calculation uses:
 

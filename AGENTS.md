@@ -18,11 +18,7 @@ This project analyzes Millikan oil drop experiment videos. The current backend i
 
 ## Raw Data
 
-`raw_data/` contains local smoke-test videos:
-
-- `single.mp4`: one droplet with no voltage change; useful for inspect and failure-path testing.
-- `2u.mp4`: two-voltage experiment video.
-- `3u1.mp4`, `3u2.mp4`: three-voltage experiment videos.
+`raw_data/` contains the current local smoke-test videos `1.mp4` through `8.mp4`; `raw_data/AGENTS.md` records the guide voltage values. Older sample videos may live under `raw_data_old/`.
 
 ## Commands
 
@@ -31,8 +27,8 @@ Use the local virtual environment:
 ```powershell
 .venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp_work -o cache_dir=runs\pytest_cache_work
 .venv\Scripts\python run_millikan.py
-.venv\Scripts\python -m millikan_ai.cli inspect raw_data\single.mp4
-.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
+.venv\Scripts\python -m millikan_ai.cli inspect raw_data\2.mp4
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2.mp4 --config configs\default.yaml --auto-platform-count 3 --platform-value 0 --platform-value 239 --platform-value 362
 ```
 
 All project dependencies must stay inside the project-local `.venv/`. Do not install Python packages globally or into the user's base Conda environment.
@@ -49,6 +45,7 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
 - Platform velocity fitting should use the best stable sub-window inside each voltage platform, not blindly fit the whole platform.
 - Candidate tracking and segment validation must reject stationary grid/bright-spot candidates using `segment.min_motion_displacement_px`.
+- Tracking must process each video frame once for shared blob detection across active seeds; LK optical flow should run on a local patch around the tracked point rather than the full video frame.
 - Candidate tracking must stay inside the detected grid/tracking ROI so watermarks, manufacturer text, and border highlights are not eligible droplets.
 - Candidate ranking should penalize candidates too close to grid lines or tracking ROI edges using `tracking.min_grid_line_distance_px`, `tracking.min_grid_clear_fraction`, `tracking.min_tracking_roi_margin_px`, and `tracking.min_roi_clear_fraction`.
 - CLI manual platform inputs use `--platform START_FRAME:END_FRAME:VOLTAGE`; generated configs are written under `runs/manual_configs/` and platforms use `source=manual_cli`. Auto-boundary runs use `--auto-platform-count N` plus repeated `--platform-value V` and write platform rows with `source=auto_boundary_manual_voltage`.
