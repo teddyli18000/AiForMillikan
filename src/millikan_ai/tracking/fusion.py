@@ -4,6 +4,24 @@ import cv2
 import numpy as np
 
 
+def _local_patch(
+    image: np.ndarray,
+    point: tuple[float, float],
+    radius_px: int,
+) -> tuple[np.ndarray, tuple[int, int], tuple[float, float]] | None:
+    height, width = image.shape[:2]
+    x, y = float(point[0]), float(point[1])
+    if x < 0 or y < 0 or x >= width or y >= height:
+        return None
+    x0 = max(0, int(np.floor(x - radius_px)))
+    y0 = max(0, int(np.floor(y - radius_px)))
+    x1 = min(width, int(np.ceil(x + radius_px + 1)))
+    y1 = min(height, int(np.ceil(y + radius_px + 1)))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return image[y0:y1, x0:x1], (x0, y0), (x - x0, y - y0)
+
+
 class KalmanPointTracker:
     def __init__(
         self,
@@ -88,7 +106,16 @@ def track_lk_bidirectional(
     max_forward_backward_error_px: float = 1.5,
     max_photometric_error: float = 30.0,
 ) -> tuple[tuple[float, float], float] | None:
-    previous_point = np.array([[[point[0], point[1]]]], dtype=np.float32)
+    patch_radius = max(int(window_size_px) * max(2, int(pyramid_levels)), int(window_size_px) + 8)
+    patch = _local_patch(previous_gray, point, patch_radius)
+    if patch is None:
+        return None
+    previous_patch, offset, local_point = patch
+    x0, y0 = offset
+    current_patch = current_gray[y0 : y0 + previous_patch.shape[0], x0 : x0 + previous_patch.shape[1]]
+    if current_patch.shape != previous_patch.shape or min(current_patch.shape[:2]) < max(3, int(window_size_px)):
+        return None
+    previous_point = np.array([[[local_point[0], local_point[1]]]], dtype=np.float32)
     criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)
     options = {
         "winSize": (int(window_size_px), int(window_size_px)),
@@ -96,8 +123,8 @@ def track_lk_bidirectional(
         "criteria": criteria,
     }
     forward, forward_status, forward_error = cv2.calcOpticalFlowPyrLK(
-        previous_gray,
-        current_gray,
+        previous_patch,
+        current_patch,
         previous_point,
         None,
         **options,
@@ -105,8 +132,8 @@ def track_lk_bidirectional(
     if forward is None or forward_status is None or not bool(forward_status[0, 0]):
         return None
     backward, backward_status, _ = cv2.calcOpticalFlowPyrLK(
-        current_gray,
-        previous_gray,
+        current_patch,
+        previous_patch,
         forward,
         None,
         **options,
@@ -122,4 +149,4 @@ def track_lk_bidirectional(
     forward_backward_error = float(np.linalg.norm(backward_xy - previous_point[0, 0]))
     if forward_backward_error > max_forward_backward_error_px:
         return None
-    return (float(forward_xy[0]), float(forward_xy[1])), forward_backward_error
+    return (float(forward_xy[0] + x0), float(forward_xy[1] + y0)), forward_backward_error

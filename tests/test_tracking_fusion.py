@@ -6,7 +6,8 @@ import pandas as pd
 
 from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.config import load_config
-from millikan_ai.tracking.detector import detect_blobs
+from millikan_ai.tracking import tracker as tracker_module
+from millikan_ai.tracking.detector import Blob, detect_blobs
 from millikan_ai.tracking.fusion import KalmanPointTracker, track_lk_bidirectional
 from millikan_ai.tracking.tracker import track_multiple_candidates
 
@@ -82,6 +83,24 @@ def test_bidirectional_lk_tracks_texture_and_rejects_disappearance():
     assert abs(tracked[0][1] - 46.0) < 0.5
     assert tracked[1] < 1.0
     assert disappeared is None
+
+
+def test_bidirectional_lk_uses_local_patch_for_large_frames(monkeypatch):
+    previous = np.zeros((1000, 1000), dtype=np.uint8)
+    current = np.zeros_like(previous)
+    input_shapes = []
+
+    def fake_lk(previous_image, current_image, points, *_args, **_kwargs):
+        input_shapes.append(previous_image.shape)
+        return points.copy(), np.array([[1]], dtype=np.uint8), np.array([[0.0]], dtype=np.float32)
+
+    monkeypatch.setattr(cv2, "calcOpticalFlowPyrLK", fake_lk)
+
+    tracked = track_lk_bidirectional(previous, current, (500.0, 500.0), window_size_px=21, pyramid_levels=3)
+
+    assert tracked is not None
+    assert input_shapes
+    assert all(max(shape) <= 160 for shape in input_shapes)
 
 
 def test_fusion_tracker_does_not_jump_to_distractor_during_occlusion(tmp_path):
@@ -163,3 +182,52 @@ def test_multi_keyframe_seeding_tracks_droplet_that_enters_late(tmp_path):
     assert int(tracks["frame_idx"].min()) >= 15
     assert abs(float(tracks.iloc[0]["x_px"]) - 80.0) < 3.0
     assert summary["selected_for_multi_drop"].astype(bool).any()
+
+
+def test_tracking_reuses_frame_detections_across_multiple_seeds(tmp_path, monkeypatch):
+    video = tmp_path / "many_seeds.mp4"
+    frame_count = 12
+    writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (160, 120))
+    for _frame_idx in range(frame_count):
+        writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+    writer.release()
+
+    config = load_config("configs/default.yaml")
+    config["tracking"].update(
+        {
+            "top_k_seeds": 3,
+            "max_drops": 3,
+            "seed_sample_frames": 3,
+            "seed_merge_distance_px": 10,
+            "min_grid_line_distance_px": 0,
+            "min_grid_clear_fraction": 0,
+            "min_tracking_roi_margin_px": 0,
+            "min_roi_clear_fraction": 0,
+            "max_missing_frames": 20,
+            "max_search_radius_px": 80,
+        }
+    )
+    calls = {"detect": 0}
+
+    def fake_detect_blobs(*_args, **_kwargs):
+        calls["detect"] += 1
+        return [
+            Blob(35.0, 50.0, 4.0, 50.0, 255.0, confidence=0.9),
+            Blob(75.0, 50.0, 4.0, 50.0, 255.0, confidence=0.8),
+            Blob(115.0, 50.0, 4.0, 50.0, 255.0, confidence=0.7),
+        ]
+
+    monkeypatch.setattr(tracker_module, "detect_blobs", fake_detect_blobs)
+    monkeypatch.setattr(tracker_module, "track_lk_bidirectional", lambda *_args, **_kwargs: None)
+
+    tracks, summary = track_multiple_candidates(
+        video,
+        "many_seeds",
+        Roi(0, 0, 160, 120),
+        pd.DataFrame(),
+        config,
+    )
+
+    assert len(summary) == 3
+    assert not tracks.empty
+    assert calls["detect"] <= frame_count + config["tracking"]["seed_sample_frames"] + 1
