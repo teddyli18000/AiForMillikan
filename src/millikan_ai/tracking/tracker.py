@@ -223,27 +223,64 @@ def _track_seed_candidates(
         ]
     tracks: dict[str, list[dict[str, object]]] = {}
     summaries = []
+    seeds_by_frame: dict[int, list[tuple[int, TrackSeed]]] = {}
     for seed_idx, track_seed in enumerate(seeds, start=1):
-        seed = track_seed.blob
-        cap.set(cv2.CAP_PROP_POS_FRAMES, track_seed.start_frame)
-        current = seed
-        motion = KalmanPointTracker(
-            seed.x_px,
-            seed.y_px,
-            dt=1.0 / meta.fps if meta.fps else 1.0 / 30.0,
-            process_noise=process_noise,
-            measurement_noise=measurement_noise,
+        seeds_by_frame.setdefault(track_seed.start_frame, []).append((seed_idx, track_seed))
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    active: list[dict[str, object]] = []
+    completed: list[dict[str, object]] = []
+    for frame_idx in range(meta.frame_count):
+        starting_seeds = seeds_by_frame.get(frame_idx, [])
+        if not active and not starting_seeds:
+            cap.grab()
+            continue
+        ok, frame = cap.read()
+        if not ok:
+            break
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blobs = detect_blobs(
+            frame,
+            microscope_roi,
+            min_area,
+            max_area,
+            grid=grid,
+            min_grid_distance_px=min_grid_distance,
+            min_roi_margin_px=min_roi_margin,
+            nms_distance_px=nms_distance,
         )
-        previous_gray: np.ndarray | None = None
-        previous_point = (seed.x_px, seed.y_px)
-        rows = []
-        missing = 0
-        consecutive_missing = 0
-        for frame_idx in range(track_seed.start_frame, meta.frame_count):
-            ok, frame = cap.read()
-            if not ok:
-                break
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        for seed_idx, track_seed in starting_seeds:
+            seed = track_seed.blob
+            active.append(
+                {
+                    "seed_idx": seed_idx,
+                    "current": seed,
+                    "motion": KalmanPointTracker(
+                        seed.x_px,
+                        seed.y_px,
+                        dt=1.0 / meta.fps if meta.fps else 1.0 / 30.0,
+                        process_noise=process_noise,
+                        measurement_noise=measurement_noise,
+                    ),
+                    "previous_gray": None,
+                    "previous_point": (seed.x_px, seed.y_px),
+                    "rows": [],
+                    "missing": 0,
+                    "consecutive_missing": 0,
+                }
+            )
+
+        next_active: list[dict[str, object]] = []
+        for state in active:
+            seed_idx = int(state["seed_idx"])
+            current = state["current"]
+            motion = state["motion"]
+            previous_gray = state["previous_gray"]
+            previous_point = state["previous_point"]
+            missing = int(state["missing"])
+            consecutive_missing = int(state["consecutive_missing"])
+            assert isinstance(current, Blob)
+            assert isinstance(motion, KalmanPointTracker)
             predicted = motion.predict()
             lk_result = None
             if previous_gray is not None:
@@ -260,16 +297,6 @@ def _track_seed_candidates(
             lk_prediction_gate = float(tracking_cfg.get("lk_prediction_gate_px", 12.0))
             if lk_point is not None and _point_distance(lk_point, predicted) > lk_prediction_gate:
                 lk_point = None
-            blobs = detect_blobs(
-                frame,
-                microscope_roi,
-                min_area,
-                max_area,
-                grid=grid,
-                min_grid_distance_px=min_grid_distance,
-                min_roi_margin_px=min_roi_margin,
-                nms_distance_px=nms_distance,
-            )
             detection = _select_detection(blobs, predicted, lk_point, current, motion, tracking_cfg)
             if detection is not None:
                 current = detection
@@ -323,6 +350,8 @@ def _track_seed_candidates(
                 if not hit.empty:
                     platform_id = str(hit.iloc[0]["platform_id"])
                     voltage = float(hit.iloc[0]["voltage_V"])
+            rows = state["rows"]
+            assert isinstance(rows, list)
             rows.append(
                 {
                     "video_id": video_id,
@@ -340,9 +369,25 @@ def _track_seed_candidates(
                     "tracking_source": tracking_source,
                 }
             )
-            previous_gray = gray
+            state["current"] = current
+            state["previous_gray"] = gray
+            state["previous_point"] = previous_point
+            state["missing"] = missing
+            state["consecutive_missing"] = consecutive_missing
             if consecutive_missing > max_missing_frames:
-                break
+                completed.append(state)
+            else:
+                next_active.append(state)
+        active = next_active
+    completed.extend(active)
+
+    for state in completed:
+        seed_idx = int(state["seed_idx"])
+        rows = state["rows"]
+        missing = int(state["missing"])
+        assert isinstance(rows, list)
+        if not rows:
+            continue
         missing_ratio = missing / max(len(rows), 1)
         total_duration = rows[-1]["time_s"] - rows[0]["time_s"] if len(rows) > 1 else 0.0
         x_values = np.asarray([float(row["x_px"]) for row in rows], dtype=float)

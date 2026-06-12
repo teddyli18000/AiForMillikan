@@ -11,6 +11,7 @@ Use the project-local environment:
 .venv\Scripts\python -m millikan_ai.cli detect-platforms --video raw_data\<video>.mp4 --config configs\default.yaml --count 3
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\<video>.mp4 --config <manual_config.yaml> --run-dir runs\<run_dir>
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\5.mp4 --config configs\default.yaml --auto-platform-count 3 --platform-value 0 --platform-value 150 --platform-value 259
+.venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2.mp4 --config configs\default.yaml --auto-platform-count 3 --platform-value 0 --platform-value 239 --platform-value 362
 .venv\Scripts\python -m millikan_ai.cli analyze --video raw_data\2u.mp4 --config configs\default.yaml --platform 0:180:0 --platform 181:468:175
 .venv\Scripts\python -m millikan_ai.cli validate --run-dir runs\<run_dir> --config <manual_config.yaml>
 ```
@@ -34,10 +35,12 @@ The current `develop`/`main` backend does not run voltage OCR. It may suggest pl
 | 2026-06-08 | `raw_data/6.mp4` | guide values `0,131,334` | auto boundary rejected | Suggested first platform was too short; use manual boundary input. |
 | 2026-06-08 | `raw_data/7.mp4` | guide values `0,172,257` | auto boundary accepted with caution | `0-93`, `112-198`, `217-914`; early platforms are short for downstream fitting review. |
 | 2026-06-08 | `raw_data/8.mp4` | guide values `0,165,269` | auto boundary rejected | Suggested middle platform was too short; use manual boundary input. |
+| 2026-06-12 | `raw_data/2.mp4` | auto boundaries plus guide values `0,239,362` | valid q, 20 tracked, 13 q-valid, 7 kept | `runs\debug_2_fixed` validated with no schema errors; selected/default drop was q-valid. CLI progress output was visible through all pipeline stages. |
 
 ## Current Interpretation
 
-- `raw_data/2.mp4` and `raw_data/5.mp4` are the current positive smoke cases for automatic voltage-boundary suggestions.
+- `raw_data/2.mp4` is the current primary demo case for automatic voltage-boundary suggestions plus full multi-drop q calculation.
+- `raw_data/5.mp4` is also a positive smoke case for automatic voltage-boundary suggestions.
 - `2u.mp4` in `raw_data_old/` was the earlier positive raw smoke case for real q calculation.
 - `3u1.mp4` and `3u2.mp4` are useful negative/stability tests. They should not be reported as valid unless platform choices, direction convention, or tracking evidence changes enough to satisfy the physics checks.
 - Auto boundary suggestions are accepted only when the detected count matches the user-provided count and no suggested platform has a reject reason. Rejected suggestions should fall back to manual boundary input.

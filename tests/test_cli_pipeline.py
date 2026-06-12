@@ -1,5 +1,6 @@
 import json
 import subprocess
+from types import SimpleNamespace
 from pathlib import Path
 
 import cv2
@@ -14,6 +15,7 @@ from millikan_ai import pipeline
 from millikan_ai.pipeline import _select_primary_drop, _tracking_roi_from_grid, run_pipeline, validate_run
 from millikan_ai.tracking.tracker import _grid_clear_fraction, _roi_clear_fraction, track_multiple_candidates
 from tests.test_algorithms import _make_voltage_change_video
+import millikan_ai.cli.__main__ as cli_module
 
 
 def _make_synthetic_video(path: Path) -> None:
@@ -96,6 +98,25 @@ def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     assert isinstance(validity["overall_valid_for_q"], bool)
     assert isinstance(validity["blocking_failed_checks"], list)
     assert "drop_q_valid" in {check["id"] for check in validity["checks"]}
+
+
+def test_cli_analyze_passes_progress_callback(monkeypatch, tmp_path: Path, capsys):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    monkeypatch.setattr(cli_module, "_prepare_config", lambda _args: "configs/default.yaml")
+
+    def fake_analyze_video(request):
+        assert request.progress_callback is not None
+        request.progress_callback(0.36, "tracking droplets")
+        return SimpleNamespace(run_dir=run_dir, config_path=Path("configs/default.yaml"), validation_errors=[])
+
+    monkeypatch.setattr(cli_module, "analyze_video", fake_analyze_video)
+
+    assert cli_main(["analyze", "--video", "raw_data/2.mp4"]) == 0
+    captured = capsys.readouterr()
+    assert "tracking droplets" in captured.out
+    assert "analysis_report=" in captured.out
 
 
 def test_pipeline_writes_auto_platform_suggestions_contract(tmp_path: Path):

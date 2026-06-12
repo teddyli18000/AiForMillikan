@@ -75,6 +75,14 @@ def _prompt_platform_rows(fps: float, frame_count: int, start_index: int = 1) ->
     return [manual_platform_row(platform, fps, index, frame_count) for index, platform in enumerate(_prompt_platform_inputs(fps, frame_count), start=start_index)]
 
 
+def _print_progress(percent: float, label: str) -> None:
+    width = 20
+    clamped = max(0.0, min(1.0, float(percent)))
+    filled = int(round(width * clamped))
+    bar = "#" * filled + "." * (width - filled)
+    print(f"[{bar}] {clamped * 100:5.1f}% {label}", flush=True)
+
+
 def _prepare_config(args: argparse.Namespace) -> str:
     platforms = [parse_manual_platform_spec(spec, source="manual_cli") for spec in list(args.platform or [])]
     use_interactive = getattr(args, "interactive_platforms", False)
@@ -124,7 +132,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"platform_input_error={exc}")
         return 2
-    result = analyze_video(AnalysisRequest(args.video, config_path, args.run_dir))
+    result = analyze_video(AnalysisRequest(args.video, config_path, args.run_dir, progress_callback=_print_progress))
     print(f"run_dir={result.run_dir}")
     print(f"config={result.config_path}")
     errors = result.validation_errors
@@ -140,7 +148,7 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"platform_input_error={exc}")
         return 2
-    result = analyze_video(AnalysisRequest(args.video, config_path, args.run_dir))
+    result = analyze_video(AnalysisRequest(args.video, config_path, args.run_dir, progress_callback=_print_progress))
     report = Path(result.run_dir) / "analysis_report.md"
     print(f"run_dir={result.run_dir}")
     print(f"config={result.config_path}")
