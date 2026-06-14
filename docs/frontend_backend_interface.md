@@ -73,8 +73,8 @@ Each run should also expose:
 - `validity_report.json`: machine-readable legality and reasonableness checks.
 - `best_track.csv`: per-frame selected droplet coordinates.
 - `drop_tracks.csv`: per-frame coordinates for all selected droplets when multi-drop tracking is enabled.
-- `best_track_segments.csv`: fitted stable velocity windows.
-- `drop_track_segments.csv`: fitted stable velocity windows for all selected droplets.
+- `best_track_segments.csv`: per-platform terminal-velocity fits for the selected/default droplet.
+- `drop_track_segments.csv`: per-platform terminal-velocity fits for all selected droplets.
 - `candidate_tracks_summary.csv`: ranked candidate droplet quality table.
 - `platforms.csv`: voltage platform boundaries and values.
 - `auto_platform_suggestions.csv`: visual voltage-display boundary suggestions before user voltage values are bound.
@@ -142,7 +142,7 @@ The desktop UI should show these panels for each run:
 4. Track overlay video from `overlay_best_track.mp4`.
 5. Platform editor table backed by `platforms.csv`.
 6. Candidate ranking table backed by `candidate_tracks_summary.csv`.
-7. Stable velocity segments backed by `best_track_segments.csv`.
+7. Per-platform terminal-velocity fits backed by `best_track_segments.csv`.
 8. Physics calculation backed by `drop_results.json`.
 9. Multi-drop track and segment tables backed by `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json`.
 10. Flags and failure reasons from `diagnostics.json`, `drop_results.json`, and `elementary_charge_result.json`.

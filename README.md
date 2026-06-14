@@ -209,7 +209,7 @@ eta_eff(r) = eta / (1 + b / (p * r))
 r and |q| are computed from alpha, gamma, eta_eff, and plate distance d
 ```
 
-Within each voltage platform, the backend fits the best stable sub-window after dropping the transient interval. It does not blindly fit the whole platform when early motion is unstable.
+Within each voltage platform, the downstream velocity fitter uses the whole confirmed constant-voltage platform by default. It may apply `segment.boundary_guard_frames` when configured, but it no longer drops a fixed mechanical transient interval or chooses the highest-R2 sub-window as the default calculation path. R2, first/second-half slopes, residual autocorrelation, and fit warnings are diagnostics rather than universal hard filters.
 
 For a single oil drop, elementary-charge blind estimation is intentionally reported as underdetermined because it needs multiple independent `q_i` values.
 

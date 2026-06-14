@@ -1,12 +1,13 @@
 import cv2
 import numpy as np
 import pandas as pd
+import pytest
 
 from millikan_ai.calibration.grid import detect_horizontal_grid_lines, detect_vertical_grid_lines
 from millikan_ai.config import load_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
 from millikan_ai.physics.charge import compute_drop_result
-from millikan_ai.segments.fitting import fit_line, fit_track_segments, select_stable_window
+from millikan_ai.segments.fitting import fit_line, fit_terminal_velocity, fit_track_segments, select_stable_window
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
 from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 
@@ -93,15 +94,75 @@ def test_fit_line_recovers_velocity():
     assert fit["r2"] > 0.999
 
 
-def test_select_stable_window_skips_noisy_platform_prefix():
+def test_select_stable_window_keeps_full_platform_by_default():
     t = np.arange(0, 5, 0.1)
     y = 2.0 * t + 4.0
     y[:20] += np.sin(np.arange(20)) * 8
     frame = pd.DataFrame({"time_s": t, "y_px": y, "x_px": np.zeros_like(t), "is_valid_detection": True})
     stable = select_stable_window(frame, min_duration_s=1.5, min_points=15)
-    fit = fit_line(stable["time_s"].to_numpy(float), stable["y_px"].to_numpy(float))
-    assert stable["time_s"].min() >= 1.0
-    assert fit["r2"] > 0.95
+    assert stable["time_s"].min() == 0.0
+    assert stable["time_s"].max() == t[-1]
+
+
+def test_fit_terminal_velocity_handles_upward_and_equilibrium_motion():
+    t = np.linspace(0.0, 4.0, 41)
+    upward = fit_terminal_velocity(t, 12.0 - 3.0 * t, bootstrap_samples=0)
+    equilibrium = fit_terminal_velocity(t, np.full_like(t, 7.0), bootstrap_samples=0)
+
+    assert upward["velocity_px_s"] == pytest.approx(-3.0)
+    assert upward["fit_method"] == "robust_huber"
+    assert equilibrium["velocity_px_s"] == pytest.approx(0.0)
+    assert equilibrium["r2_diagnostic"] == 1.0
+
+
+def test_fit_terminal_velocity_bootstrap_is_reproducible():
+    rng = np.random.default_rng(123)
+    t = np.linspace(0.0, 5.0, 80)
+    y = 4.0 + 1.5 * t + rng.normal(0, 0.2, len(t))
+
+    first = fit_terminal_velocity(t, y, bootstrap_samples=80, random_seed=99)
+    second = fit_terminal_velocity(t, y, bootstrap_samples=80, random_seed=99)
+
+    assert first["uncertainty_method"] == "block_bootstrap"
+    assert first["sigma_velocity_random_px_s"] > 0
+    assert first["velocity_ci_95_px_s"] == pytest.approx(second["velocity_ci_95_px_s"])
+
+
+def test_fit_track_segments_uses_zero_transient_and_boundary_guard_frames():
+    config = load_config("configs/default.yaml")
+    config["segment"]["boundary_guard_frames"] = 2
+    config["segment"]["min_valid_points"] = 2
+    config["segment"]["stable_min_duration_s"] = 0.0
+    config["segment"]["min_fit_r2"] = -1.0
+    track = pd.DataFrame(
+        {
+            "video_id": ["synthetic"] * 10,
+            "track_id": ["candidate_001"] * 10,
+            "frame_idx": np.arange(10),
+            "time_s": np.arange(10) / 10.0,
+            "x_px": np.zeros(10),
+            "y_px": np.arange(10, dtype=float),
+            "is_valid_detection": True,
+        }
+    )
+    platforms = pd.DataFrame(
+        [
+            {
+                "platform_id": "P001",
+                "start_frame": 0,
+                "end_frame": 9,
+                "start_time_s": 0.0,
+                "end_time_s": 0.9,
+                "voltage_V": 0.0,
+            }
+        ]
+    )
+
+    segments = fit_track_segments(track, platforms, scale_y_m_per_px=1e-6, config=config)
+
+    assert segments.iloc[0]["start_time_s"] == pytest.approx(0.2)
+    assert segments.iloc[0]["end_time_s"] == pytest.approx(0.7)
+    assert segments.iloc[0]["num_points"] == 6
 
 
 def test_fit_track_segments_preserves_track_id_for_transient_cropped_short_platform():
