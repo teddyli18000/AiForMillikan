@@ -154,6 +154,103 @@ def _profile_interval(fit: QuantizedFit) -> list[float]:
     return [float(np.min(fit.profile_e_C[mask])), float(np.max(fit.profile_e_C[mask]))]
 
 
+def _fit_gmm(values: np.ndarray, max_components: int, seed: int) -> dict[str, Any]:
+    rng = np.random.default_rng(seed)
+    best: dict[str, Any] | None = None
+    values = np.asarray(values, dtype=float)
+    n = len(values)
+    variance_floor = max(float(np.var(values)) * 1e-4, 1e-60)
+    for k in range(1, max(1, max_components) + 1):
+        if k == 1:
+            weights = np.array([1.0])
+            means = np.array([float(np.mean(values))])
+            variances = np.array([max(float(np.var(values)), variance_floor)])
+        else:
+            quantiles = np.linspace(0.1, 0.9, k)
+            means = np.quantile(values, quantiles)
+            means = means + rng.normal(0.0, math.sqrt(variance_floor), size=k)
+            variances = np.full(k, max(float(np.var(values)), variance_floor))
+            weights = np.full(k, 1.0 / k)
+            for _ in range(80):
+                sigma = np.sqrt(variances)
+                log_resp = np.log(weights[None, :]) + _normal_logpdf(values[:, None], means[None, :], sigma[None, :])
+                log_norm = logsumexp(log_resp, axis=1)
+                resp = np.exp(log_resp - log_norm[:, None])
+                nk = np.maximum(resp.sum(axis=0), 1e-12)
+                weights = nk / n
+                means = (resp * values[:, None]).sum(axis=0) / nk
+                variances = np.maximum((resp * np.square(values[:, None] - means[None, :])).sum(axis=0) / nk, variance_floor)
+        ll = _continuous_log_likelihood(values, np.zeros_like(values), {"weights": weights, "means": means, "variances": variances})
+        params = 3 * k - 1
+        bic = -2 * ll + params * math.log(max(n, 2))
+        model = {"weights": weights, "means": means, "variances": variances, "components": k, "log_likelihood": ll, "bic": bic}
+        if best is None or bic < best["bic"]:
+            best = model
+    assert best is not None
+    return best
+
+
+def _continuous_log_likelihood(charges: np.ndarray, sigmas: np.ndarray, model: dict[str, Any]) -> float:
+    weights = np.asarray(model["weights"], dtype=float)
+    means = np.asarray(model["means"], dtype=float)
+    variances = np.asarray(model["variances"], dtype=float)
+    total_sigma = np.sqrt(variances[None, :] + np.square(sigmas[:, None]))
+    log_components = np.log(weights[None, :]) + _normal_logpdf(charges[:, None], means[None, :], total_sigma)
+    return float(np.sum(logsumexp(log_components, axis=1)))
+
+
+def _predictive_model_comparison(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[str, Any]) -> dict[str, object]:
+    if len(charges) < 3:
+        return {
+            "continuous_model": "error_convolved_gmm",
+            "comparison_method": "insufficient_drops",
+            "quantized_elpd": math.nan,
+            "continuous_elpd": math.nan,
+            "delta_elpd": math.nan,
+            "evidence_label": "insufficient",
+        }
+    seed = int(cfg.get("random_seed", 42))
+    quantized_scores = []
+    continuous_scores = []
+    for held_out in range(len(charges)):
+        mask = np.ones(len(charges), dtype=bool)
+        mask[held_out] = False
+        train_charges = charges[mask]
+        train_sigmas = sigmas[mask]
+        test_charge = charges[~mask]
+        test_sigma = sigmas[~mask]
+        q_fit = _fit_quantized_profile(train_charges, train_sigmas, cfg)
+        e_min = float(_cfg_value(cfg, "e_search_min_C", "e_min_C", 0.5e-19))
+        nmax = max(1, int(math.ceil(float(max(np.max(train_charges), np.max(test_charge))) / e_min)) + 1)
+        quantized_scores.append(
+            _quantized_log_likelihood(test_charge, test_sigma, q_fit.e_C, q_fit.tau_C, q_fit.lambda_decay, nmax)
+        )
+        max_components = min(4, max(1, len(train_charges) // 3))
+        c_model = _fit_gmm(train_charges, max_components=max_components, seed=seed + held_out)
+        continuous_scores.append(_continuous_log_likelihood(test_charge, test_sigma, c_model))
+    quantized_elpd = float(np.sum(quantized_scores))
+    continuous_elpd = float(np.sum(continuous_scores))
+    delta = quantized_elpd - continuous_elpd
+    if delta > 5.0:
+        label = "strong"
+    elif delta > 2.0:
+        label = "moderate"
+    elif delta > 0.0:
+        label = "weak"
+    else:
+        label = "insufficient"
+    final_model = _fit_gmm(charges, max_components=min(4, max(1, len(charges) // 3)), seed=seed)
+    return {
+        "continuous_model": "error_convolved_gmm",
+        "continuous_components": int(final_model["components"]),
+        "comparison_method": "leave_one_out_predictive_likelihood" if len(charges) < 20 else "leave_one_out_predictive_likelihood",
+        "quantized_elpd": quantized_elpd,
+        "continuous_elpd": continuous_elpd,
+        "delta_elpd": delta,
+        "evidence_label": label,
+    }
+
+
 def _bootstrap_e(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[str, Any]) -> list[float]:
     samples = int(cfg.get("e_bootstrap_samples_quick", 0))
     if samples <= 0:
@@ -214,6 +311,7 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
     ci = [float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))] if boot else [fit.e_C, fit.e_C]
     e_min = float(_cfg_value(cfg, "e_search_min_C", "e_min_C", 0.5e-19))
     e_max = float(_cfg_value(cfg, "e_search_max_C", "e_max_C", 2.5e-19))
+    comparison = _predictive_model_comparison(charges, sigmas, cfg)
     return {
         "valid": True,
         "num_total_drops": len(drop_results),
@@ -240,6 +338,7 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
             ),
             "method": "bounded_profile_quantized_likelihood",
             "log_likelihood": float(fit.log_likelihood),
+            **comparison,
         },
         "flags": ["harmonic_ambiguity"] if harmonic else [],
     }

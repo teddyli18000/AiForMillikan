@@ -260,3 +260,32 @@ def test_elementary_charge_reports_harmonic_ambiguity_for_even_multiples():
     assert result["valid"] is True
     assert result["harmonic_analysis"]["harmonic_ambiguity"] is True
     assert len(result["harmonic_analysis"]["candidate_modes"]) >= 2
+
+
+def test_elementary_model_comparison_scores_clear_quantization_positive():
+    config = load_config("configs/default.yaml")
+    config["elementary"]["profile_grid_points"] = 500
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e + offset, "sigma_charge_C": 0.05e-19}}
+        for i, (n, offset) in enumerate(zip([2, 3, 4, 5, 6, 7], [0.01e-19, -0.02e-19, 0.0, 0.02e-19, -0.01e-19, 0.0]))
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["model_comparison"]["continuous_model"] == "error_convolved_gmm"
+    assert result["model_comparison"]["delta_elpd"] > 0
+
+
+def test_elementary_model_comparison_does_not_overstate_continuous_sample():
+    config = load_config("configs/default.yaml")
+    config["elementary"]["profile_grid_points"] = 400
+    values = np.array([2.2, 2.7, 3.1, 3.8, 4.4, 5.0]) * 1e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": float(value), "sigma_charge_C": 0.08e-19}}
+        for i, value in enumerate(values)
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["model_comparison"]["evidence_label"] != "strong"
