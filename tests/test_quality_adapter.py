@@ -105,7 +105,7 @@ def test_mock_quality_adapter_is_deterministic_and_explainable():
     assert "unstable_blob_area" in jumpy["reject_reasons"]
 
 
-def test_elementary_input_only_contains_kept_valid_drops():
+def test_quality_filter_kept_results_remains_adapter_only():
     config = load_config("configs/default.yaml")
     scores, _report = score_drop_quality(_candidate_summary(), _drop_results(), config)
 

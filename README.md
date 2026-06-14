@@ -217,6 +217,6 @@ By default, `tracking.max_drops` is `20`. The tracker samples multiple keyframes
 
 Tracked droplets and physically valid droplets are distinct. `candidate_tracks_summary.csv` records post-physics fields such as `q_valid`, `physics_flags`, `charge_abs_C`, and `radius_m`; `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` are the authoritative valid-droplet counts for reports and frontend display.
 
-The quality adapter is deterministic and reports `trained=false`. Only tracks with `trajectory_quality_scores.csv.keep=true` and `q_valid=true` enter elementary-charge estimation.
+The quality adapter is deterministic and reports `trained=false`. It is diagnostic/frontend-facing; elementary-charge estimation consumes every successfully computed `q_valid=true` drop rather than applying a second `keep=true` quality gate.
 
 When multiple selected tracks are evaluated, `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` use the highest-ranked physically valid drop. If no selected drop has valid q, they fall back to the highest-ranked evaluated candidate and report explicit physics flags.

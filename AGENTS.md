@@ -56,7 +56,7 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - `visualization_layers.json` is the frontend-facing structured drawing contract. Prefer adding reusable layer objects there over encoding new UI-only information only in rendered images.
 - `diagnostic_overlay.jpg` is the frontend-facing static visualization contract: it should show pixel `+X/+Y`, microscope ROI, tracking ROI, grid lines, measurement lines, selected droplet, and trajectory. Keep `docs/frontend_backend_interface.md` in sync when this contract changes.
 - Multi-drop tracking defaults to the safety cap `tracking.max_drops: 20`; preserve the selected/default drop files for compatibility.
-- Elementary-charge estimation may only consume drops with both `trajectory_quality_scores.csv.keep=true` and `q_valid=true`.
+- Elementary-charge estimation consumes every successfully computed `q_valid=true` drop. The mock quality adapter is diagnostic/frontend-facing and must not be a second gate for e estimation.
 - Keep the backend CPU-only. GPU/OpenCV CUDA work requires a separately approved dependency plan.
 - `candidate_tracks_summary.csv` may include post-physics columns such as `drop_id`, `q_valid`, `physics_flags`, `charge_abs_C`, and `radius_m`. Treat `selected_for_multi_drop=true` as "tracked for evaluation"; use `q_valid=true` or `multi_drop_results.valid_drop_count` for physically valid droplets.
 - The selected/default drop should prefer the highest-ranked `q_valid=true` result. Do not use tracking rank alone when a lower-ranked selected candidate has a valid q and the top candidate is physically invalid.

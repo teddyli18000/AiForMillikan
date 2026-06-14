@@ -348,7 +348,7 @@ def run_pipeline(
     quality_scores["drop_valid"] = bool(drop_result.get("valid"))
     quality_scores["drop_flags"] = drop_result.get("flags", [])
     _write_json(target / output_cfg["quality_scores_json"], quality_scores)
-    elementary = estimate_elementary_charge(kept_drop_results, config)
+    elementary = estimate_elementary_charge(drop_results, config)
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
     _emit_progress(progress_callback, 0.86, "write visualization outputs")
     visualization_layers = build_visualization_layers(

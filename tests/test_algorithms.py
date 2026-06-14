@@ -217,6 +217,7 @@ def test_compute_drop_result_for_synthetic_segments():
 
 def test_elementary_charge_estimator_on_integer_multiples():
     config = load_config("configs/default.yaml")
+    config["elementary"]["profile_grid_points"] = 900
     e = 1.6e-19
     drops = [
         {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.04e-19}}
@@ -225,3 +226,37 @@ def test_elementary_charge_estimator_on_integer_multiples():
     result = estimate_elementary_charge(drops, config)
     assert result["valid"] is True
     assert abs(result["elementary_charge"]["e_hat_C"] - e) < 0.03e-19
+    assert result["elementary_charge"]["search_interval_C"] == [0.5e-19, 2.5e-19]
+    assert result["model_comparison"]["method"] == "bounded_profile_quantized_likelihood"
+
+
+def test_elementary_charge_uses_all_successful_q_without_quality_gate():
+    config = load_config("configs/default.yaml")
+    config["elementary"]["profile_grid_points"] = 500
+    e = 1.6e-19
+    drops = [
+        {"drop_id": "d1", "valid": True, "quality_score": 0.0, "result": {"charge_abs_C": 2 * e, "sigma_charge_C": 0.04e-19}},
+        {"drop_id": "d2", "valid": True, "quality_score": 0.0, "result": {"charge_abs_C": 3 * e, "sigma_charge_C": 0.04e-19}},
+        {"drop_id": "d3", "valid": True, "quality_score": 0.0, "result": {"charge_abs_C": 5 * e, "sigma_charge_C": 0.04e-19}},
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["valid"] is True
+    assert result["num_used_drops"] == 3
+
+
+def test_elementary_charge_reports_harmonic_ambiguity_for_even_multiples():
+    config = load_config("configs/default.yaml")
+    config["elementary"]["profile_grid_points"] = 900
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.03e-19}}
+        for i, n in enumerate([2, 4, 6, 8, 10])
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["valid"] is True
+    assert result["harmonic_analysis"]["harmonic_ambiguity"] is True
+    assert len(result["harmonic_analysis"]["candidate_modes"]) >= 2

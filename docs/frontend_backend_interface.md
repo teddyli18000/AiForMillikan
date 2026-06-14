@@ -185,7 +185,7 @@ The current default tracks up to `tracking.max_drops: 20` distinct trajectories 
 - keep `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for that selected/default drop
 - use `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json` for all selected drops
 - use `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` for the valid-droplet count
-- use `elementary_charge_result.json` for the estimator over independent results with both `keep=true` and `q_valid=true`
+- use `elementary_charge_result.json` for the estimator over all independent results with `q_valid=true`; `keep` remains a diagnostic quality-adapter field
 - keep single-drop reports valid when only one droplet is found
 
 ## Current Quality Scope

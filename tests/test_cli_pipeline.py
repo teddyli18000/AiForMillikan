@@ -372,7 +372,7 @@ def test_pipeline_estimates_elementary_charge_from_three_valid_drops(tmp_path: P
     manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert multi["valid_drop_count"] == 3
     assert elementary["valid"] is True
-    assert elementary["num_used_drops"] == int(quality_rows["keep"].astype(bool).sum()) == 3
+    assert elementary["num_used_drops"] == multi["valid_drop_count"] == 3
     assert validity["overall_valid_for_elementary_charge"] is True
     assert manifest["status"]["valid_for_elementary_charge"] is True
 
