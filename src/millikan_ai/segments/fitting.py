@@ -55,7 +55,7 @@ def fit_track_segments(
     rows = []
     default_video_id = str(track["video_id"].iloc[0]) if "video_id" in track and not track.empty else ""
     default_track_id = str(track["track_id"].iloc[0]) if "track_id" in track and not track.empty else ""
-    transient = float(config["segment"]["transient_drop_s"])
+    transient = float(config["segment"].get("transient_drop_s", 0.0))
     min_duration = float(config["segment"]["stable_min_duration_s"])
     min_points = int(config["segment"]["min_valid_points"])
     min_r2 = float(config["segment"]["min_fit_r2"])

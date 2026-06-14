@@ -44,7 +44,7 @@ Start the guided interactive workflow from the repository root:
 .venv\Scripts\python run_millikan.py
 ```
 
-The wizard asks for the video path, config path, measurement distance, plate distance, voltage sign, and manual voltage platform ranges. It shows stage progress while running and prints the final run directory, report path, manifest path, and overlay path.
+The wizard asks for the video path, config path, measurement distance, plate distance, and manual voltage platform ranges. The backend uses the fixed experiment convention `+Y` downward and positive voltage pushing droplets upward; it no longer asks for a configurable voltage sign. It shows stage progress while running and prints the final run directory, report path, manifest path, and overlay path.
 
 Inspect a raw video:
 
@@ -198,16 +198,15 @@ For frontend review, each run writes `run_manifest.json`, `validity_report.json`
 
 Raw smoke-test findings for the current `1.mp4` through `8.mp4` samples and older archived videos are recorded in `docs/raw_video_smoke.md`.
 
-With reliable platform data, the single-drop calculation uses:
+With reliable platform data, the downstream physics path uses the fixed sign convention:
 
 ```text
 time_s = frame_idx / fps
 v_y_m_s = v_y_px_s * scale_y_m_per_px
-E = voltage_sign * U / d
-v = alpha + beta * E
+v = alpha - gamma * U
+eta(T) = Sutherland air viscosity from viscosity.air_temperature_C, unless direct viscosity is configured
 eta_eff(r) = eta / (1 + b / (p * r))
-r = sqrt(9 * eta_eff(r) * alpha / (2 * rho * g))
-q = 6 * pi * eta_eff(r) * r * beta
+r and |q| are computed from alpha, gamma, eta_eff, and plate distance d
 ```
 
 Within each voltage platform, the backend fits the best stable sub-window after dropping the transient interval. It does not blindly fit the whole platform when early motion is unstable.

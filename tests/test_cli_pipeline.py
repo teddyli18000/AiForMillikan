@@ -219,11 +219,10 @@ def test_root_interactive_entry_collects_manual_platforms(monkeypatch, tmp_path:
     answers = iter(
         [
             str(video),
-            str(config_path),
-            "",
-            "",
-            "",
-            "2",
+                str(config_path),
+                "",
+                "",
+                "2",
             "0",
             "59",
             "0",

@@ -18,7 +18,10 @@ def _raw_smoke_video() -> Path:
 def test_default_config_loads():
     config = load_config("configs/default.yaml")
     assert config["physics"]["plate_distance_m"] == 0.005
-    assert config["segment"]["stable_min_duration_s"] > 0
+    assert config["segment"]["boundary_guard_frames"] == 0
+    assert "transient_drop_s" not in config["segment"]
+    assert "voltage_sign" not in config["physics"]
+    assert config["viscosity"]["source"] == "temperature"
 
 
 def test_default_config_is_manual_platform_first_without_ocr():

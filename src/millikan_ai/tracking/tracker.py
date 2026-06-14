@@ -110,7 +110,7 @@ def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, 
     if not rows or platforms.empty:
         return 0, 0.0, 0.0
     frame = pd.DataFrame(rows)
-    transient = float(config["segment"]["transient_drop_s"])
+    transient = float(config["segment"].get("transient_drop_s", 0.0))
     min_duration = float(config["segment"]["stable_min_duration_s"])
     min_points = int(config["segment"]["min_valid_points"])
     min_r2 = float(config["segment"]["min_fit_r2"])

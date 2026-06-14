@@ -5,6 +5,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from millikan_ai.physics.viscosity import resolve_air_viscosity
+
 
 def eta_eff(radius_m: float, eta: float, pressure: float, cunningham_b: float) -> float:
     return eta / (1.0 + cunningham_b / (pressure * max(radius_m, 1e-18)))
@@ -14,7 +16,7 @@ def solve_radius_with_cunningham(alpha: float, constants: dict) -> tuple[float |
     flags: list[str] = []
     if alpha <= 0:
         return None, ["non_positive_alpha"]
-    eta = float(constants["air_viscosity_Pa_s"])
+    eta = float(resolve_air_viscosity({"physics": constants}).get("air_viscosity_Pa_s"))
     rho = float(constants["oil_density_kg_m3"])
     gravity = float(constants["gravity_m_s2"])
     pressure = float(constants["pressure_Pa"])
@@ -47,9 +49,9 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
             "quality_score": 0.0,
         }
     constants = config["physics"]
+    viscosity = resolve_air_viscosity(config)
     d = float(constants["plate_distance_m"])
-    voltage_sign = float(constants.get("voltage_sign", 1.0))
-    e_field = voltage_sign * stable["voltage_V"].to_numpy(float) / d
+    e_field = stable["voltage_V"].to_numpy(float) / d
     velocity = stable["vy_m_s"].to_numpy(float)
     if len(set(np.round(e_field, 6))) < 2:
         flags.append("insufficient_distinct_voltages")
@@ -69,7 +71,7 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
             "result": {},
             "quality_score": 0.2,
         }
-    eff = eta_eff(radius, float(constants["air_viscosity_Pa_s"]), float(constants["pressure_Pa"]), float(constants["cunningham_b_Pa_m"]))
+    eff = eta_eff(radius, float(viscosity["air_viscosity_Pa_s"]), float(constants["pressure_Pa"]), float(constants["cunningham_b_Pa_m"]))
     charge = 6 * math.pi * eff * radius * beta
     residuals = (velocity - (beta * e_field + alpha)).tolist()
     valid = not flags
@@ -77,7 +79,7 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
         "drop_id": "drop_001",
         "valid": valid,
         "method": "multi_voltage_terminal_velocity_fitting",
-        "constants": constants,
+        "constants": {**constants, **viscosity},
         "platforms": stable.to_dict("records"),
         "fit": {"alpha": alpha, "beta": beta, "covariance": cov.tolist(), "residuals": residuals},
         "result": {

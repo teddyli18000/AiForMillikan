@@ -2,6 +2,8 @@ project:
   name: millikan_ai
   run_root: runs
 
+analysis_mode: quick
+
 video:
   sample_frames: 8
   diagnostics_dir: diagnostics
@@ -16,8 +18,8 @@ calibration:
   min_grid_lines: 4
 
 segment:
+  boundary_guard_frames: 0
   stable_min_duration_s: 2.0
-  transient_drop_s: 0.5
   min_valid_points: 45
   max_missing_ratio: 0.15
   min_fit_r2: 0.90
@@ -70,15 +72,21 @@ tracking:
   min_roi_clear_fraction: 0.70
 
 physics:
-  voltage_sign: 1
   plate_distance_m: 0.005
   oil_density_kg_m3: 981.0
-  air_viscosity_Pa_s: 0.0000181
   pressure_Pa: 101325.0
   cunningham_b_Pa_m: 0.0000082
   gravity_m_s2: 9.80665
   radius_tolerance_m: 1.0e-12
   max_radius_iterations: 80
+
+viscosity:
+  source: temperature
+  air_temperature_C: 20.0
+  direct_air_viscosity_Pa_s: null
+  reference_temperature_K: 293.15
+  reference_viscosity_Pa_s: 1.81e-5
+  sutherland_constant_K: 110.4
 
 elementary:
   min_drops: 3
