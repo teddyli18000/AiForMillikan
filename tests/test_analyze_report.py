@@ -48,10 +48,12 @@ def test_analyze_generates_markdown_report_with_real_q(tmp_path: Path):
     assert (run_dir / "analysis_report.md").exists()
     assert drop["valid"] is True
     assert drop["result"]["charge_abs_C"] > 0
-    assert "q 计算" in report
+    assert "运行状态：" in report
+    assert "单颗油滴结果" in report
     assert "距离标定" in report
     assert "时间计算" in report
     assert "insufficient_independent_drops" in report
+    assert "视频是否合法" not in report
     assert elementary["flags"] == ["insufficient_independent_drops"]
 
 
@@ -72,7 +74,7 @@ def test_single_platform_report_is_invalid(tmp_path: Path):
     validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
 
     assert drop["valid"] is False
-    assert "insufficient_stable_platforms" in report
-    assert "视频是否合法: false" in report
+    assert "insufficient_platforms" in report
+    assert "运行状态：FAILED" in report
     assert validity["overall_valid_for_q"] is False
     assert "enough_voltage_platforms" in validity["blocking_failed_checks"] or "distinct_voltage_values" in validity["blocking_failed_checks"]
