@@ -41,6 +41,8 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - If ROI detection or tracking confidence is low, write explicit flags and allow manual/config-driven correction.
 - Do not claim a trained ML filter is implemented. The runtime adapter must report `mode=mock_rule_adapter`, `trained=false`.
 - Do not silently output physical results when fewer than two usable voltage platforms exist.
+- Single-drop physics uses the fixed convention `+Y` downward and positive voltage pushing droplets upward, fitting `v = alpha - gamma U`. Cunningham radius solving uses the closed-form positive root, not fixed-point iteration.
+- Physical q results must not invent a fixed `quality_score`; downstream diagnostics and the quality adapter may report adapter scores separately.
 - `analysis_report.md` is the user-facing report for the selected/default drop plus any configured multi-drop outputs; CSV/JSON/MP4 files remain the machine-readable contract.
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
 - Platform velocity fitting should use the best stable sub-window inside each voltage platform, not blindly fit the whole platform.
