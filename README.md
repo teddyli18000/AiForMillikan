@@ -95,6 +95,11 @@ Each run directory writes:
 - `diagnostics.json`
 - `drop_results.json`
 - `multi_drop_results.json`
+- `platform_velocity_results.csv`
+- `drop_charge_results.csv`
+- `drop_charge_failures.json`
+- `model_comparison.json`
+- `uncertainty_details.json`
 - `quality_scores.json`
 - `trajectory_quality_scores.csv`
 - `elementary_charge_result.json`

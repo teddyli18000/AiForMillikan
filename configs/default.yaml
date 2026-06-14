@@ -134,6 +134,11 @@ output:
   diagnostics_json: diagnostics.json
   drop_results_json: drop_results.json
   multi_drop_results_json: multi_drop_results.json
+  platform_velocity_results_csv: platform_velocity_results.csv
+  drop_charge_results_csv: drop_charge_results.csv
+  drop_charge_failures_json: drop_charge_failures.json
+  model_comparison_json: model_comparison.json
+  uncertainty_details_json: uncertainty_details.json
   quality_scores_json: quality_scores.json
   elementary_charge_result_json: elementary_charge_result.json
   validity_report_json: validity_report.json

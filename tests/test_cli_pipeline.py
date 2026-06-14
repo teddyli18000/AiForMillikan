@@ -367,10 +367,20 @@ def test_pipeline_estimates_elementary_charge_from_three_valid_drops(tmp_path: P
 
     elementary = json.loads((run_dir / "elementary_charge_result.json").read_text(encoding="utf-8"))
     multi = json.loads((run_dir / "multi_drop_results.json").read_text(encoding="utf-8"))
+    charge_results = pd.read_csv(run_dir / "drop_charge_results.csv")
+    failures = json.loads((run_dir / "drop_charge_failures.json").read_text(encoding="utf-8"))
+    platform_velocity = pd.read_csv(run_dir / "platform_velocity_results.csv")
+    model_comparison = json.loads((run_dir / "model_comparison.json").read_text(encoding="utf-8"))
+    uncertainty = json.loads((run_dir / "uncertainty_details.json").read_text(encoding="utf-8"))
     quality_rows = pd.read_csv(run_dir / "trajectory_quality_scores.csv")
     validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert multi["valid_drop_count"] == 3
+    assert len(charge_results) == multi["valid_drop_count"]
+    assert failures["failures"] == []
+    assert platform_velocity["track_id"].nunique() == 3
+    assert model_comparison["method"] == "bounded_profile_quantized_likelihood"
+    assert uncertainty["status"] in {"partial", "complete"}
     assert elementary["valid"] is True
     assert elementary["num_used_drops"] == multi["valid_drop_count"] == 3
     assert validity["overall_valid_for_elementary_charge"] is True

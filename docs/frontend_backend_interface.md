@@ -80,6 +80,11 @@ Each run should also expose:
 - `auto_platform_suggestions.csv`: visual voltage-display boundary suggestions before user voltage values are bound.
 - `drop_results.json`: physical `q` calculation result.
 - `multi_drop_results.json`: per-drop physical `q` results and valid drop counts.
+- `platform_velocity_results.csv`: normalized per-platform terminal velocity results for downstream physics UI panels.
+- `drop_charge_results.csv`: one row per successfully computed q; every row enters elementary-charge estimation.
+- `drop_charge_failures.json`: explicit physics failure records for drops that did not produce q.
+- `model_comparison.json`: elementary-charge quantized-vs-continuous predictive comparison summary.
+- `uncertainty_details.json`: current uncertainty summary and implemented/pending uncertainty methods.
 - `quality_scores.json`: deterministic quality-adapter metadata and aggregate counts.
 - `trajectory_quality_scores.csv`: per-track trajectory score, physics score, keep decision, and reject reasons.
 - `analysis_report.md`: user-facing full report.
