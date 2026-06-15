@@ -48,7 +48,7 @@ def _compute_drop_results(drop_segments: pd.DataFrame, config: dict[str, Any]) -
     return drops, {
         "schema_version": 1,
         "num_total_drops": len(drops),
-        "valid_drop_count": sum(1 for drop in drops if bool(drop.get("valid"))),
+        "valid_drop_count": sum(1 for drop in drops if bool(drop.get("valid")) and drop.get("status", "success") == "success"),
         "drops": drops,
     }
 
@@ -87,7 +87,7 @@ def _write_charge_outputs(run_dir: Path, drop_results: list[dict[str, Any]]) -> 
     for drop in drop_results:
         fit = drop.get("fit", {}) or {}
         result = drop.get("result", {}) or {}
-        if bool(drop.get("valid")):
+        if bool(drop.get("valid")) and drop.get("status", "success") == "success":
             rows.append(
                 {
                     "drop_id": drop.get("drop_id", ""),
@@ -106,12 +106,22 @@ def _write_charge_outputs(run_dir: Path, drop_results: list[dict[str, Any]]) -> 
                     "charge_abs_C": result.get("charge_abs_C"),
                     "charge_1e_minus_19_C": result.get("charge_abs_C") / 1e-19 if result.get("charge_abs_C") is not None else None,
                     "sigma_charge_random_C": result.get("sigma_charge_random_C"),
+                    "sigma_charge_random_1e_minus_19_C": result.get("sigma_charge_random_C") / 1e-19 if result.get("sigma_charge_random_C") is not None else None,
+                    "sigma_charge_systematic_C": result.get("sigma_charge_systematic_C"),
+                    "sigma_charge_systematic_1e_minus_19_C": result.get("sigma_charge_systematic_C") / 1e-19 if result.get("sigma_charge_systematic_C") is not None else None,
                     "sigma_charge_total_C": result.get("sigma_charge_total_C", result.get("sigma_charge_C")),
+                    "sigma_charge_total_1e_minus_19_C": (
+                        result.get("sigma_charge_total_C", result.get("sigma_charge_C")) / 1e-19
+                        if result.get("sigma_charge_total_C", result.get("sigma_charge_C")) is not None
+                        else None
+                    ),
                     "charge_ci95_low_C": result.get("charge_ci95_low_C"),
                     "charge_ci95_high_C": result.get("charge_ci95_high_C"),
                     "voltage_span_V": fit.get("voltage_span_V"),
                     "intercept_extrapolation_ratio": fit.get("intercept_extrapolation_ratio"),
                     "design_matrix_condition_number": fit.get("design_matrix_condition_number"),
+                    "raw_design_matrix_condition_number": fit.get("raw_design_matrix_condition_number"),
+                    "standardized_design_matrix_condition_number": fit.get("standardized_design_matrix_condition_number"),
                     "warnings": ";".join(str(flag) for flag in drop.get("flags", []) if str(flag)),
                 }
             )
@@ -121,8 +131,9 @@ def _write_charge_outputs(run_dir: Path, drop_results: list[dict[str, Any]]) -> 
                     "drop_id": drop.get("drop_id", ""),
                     "track_id": drop.get("track_id", ""),
                     "stage": "single_drop_physics",
+                    "status": drop.get("status", "failed"),
                     "errors": list(drop.get("flags", []) or []),
-                    "diagnostics": {"fit": fit},
+                    "diagnostics": {"fit": fit, "result": result},
                 }
             )
     charges = pd.DataFrame(rows)
@@ -168,8 +179,24 @@ def _compute_q_from_fit(alpha: float, gamma: float, constants: dict[str, Any], v
     return float(radius), float(charge)
 
 
-def _build_uncertainty_details(drop_results: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
-    valid_drops = [drop for drop in drop_results if bool(drop.get("valid"))]
+def _systematic_estimator_config(config: dict[str, Any]) -> dict[str, Any]:
+    cfg = json.loads(json.dumps(config))
+    elementary = cfg.setdefault("elementary", {})
+    profile_points = int(elementary.get("systematic_e_profile_grid_points", min(80, int(elementary.get("profile_grid_points", 800)))))
+    elementary["profile_grid_points"] = max(40, profile_points)
+    elementary["comparison_profile_grid_points"] = max(40, min(60, profile_points))
+    elementary["tau_lambda_profile_optimize_points"] = int(elementary.get("systematic_tau_lambda_profile_optimize_points", 2))
+    elementary["tau_lambda_optimizer_maxiter"] = int(elementary.get("systematic_tau_lambda_optimizer_maxiter", 20))
+    elementary["e_bootstrap_samples"] = 0
+    elementary["measurement_mc_samples"] = 0
+    elementary["null_simulation_samples"] = 0
+    elementary["skip_model_comparison"] = True
+    elementary["skip_stability_diagnostics"] = True
+    return cfg
+
+
+def _build_uncertainty_details(drop_results: list[dict[str, Any]], config: dict[str, Any], elementary: dict[str, Any]) -> dict[str, Any]:
+    valid_drops = [drop for drop in drop_results if bool(drop.get("valid")) and drop.get("status", "success") == "success"]
     samples = int(config.get("physics", {}).get("systematic_mc_samples", 0))
     if not valid_drops or samples <= 0:
         return {
@@ -183,10 +210,13 @@ def _build_uncertainty_details(drop_results: list[dict[str, Any]], config: dict[
     radius_samples: dict[str, list[float]] = {str(drop.get("drop_id", "")): [] for drop in valid_drops}
     charge_samples: dict[str, list[float]] = {str(drop.get("drop_id", "")): [] for drop in valid_drops}
     combined_samples: dict[str, list[float]] = {str(drop.get("drop_id", "")): [] for drop in valid_drops}
+    e_systematic_samples: list[float] = []
+    estimator_cfg = _systematic_estimator_config(config)
     for _sample in range(samples):
         draw_cfg, scale_factor, voltage_factor = _systematic_draw_config(config, rng)
         viscosity = resolve_air_viscosity(draw_cfg)
         constants = {**draw_cfg["physics"], **viscosity}
+        sampled_drops: list[dict[str, Any]] = []
         for drop in valid_drops:
             drop_id = str(drop.get("drop_id", ""))
             fit = drop.get("fit", {}) or {}
@@ -201,6 +231,23 @@ def _build_uncertainty_details(drop_results: list[dict[str, Any]], config: dict[
             charge_samples[drop_id].append(charge)
             sigma_random = float((drop.get("result", {}) or {}).get("sigma_charge_random_C", 0.0) or 0.0)
             combined_samples[drop_id].append(max(1e-30, float(rng.normal(charge, sigma_random))) if sigma_random > 0 else charge)
+            sampled_drops.append(
+                {
+                    "drop_id": drop_id,
+                    "track_id": drop.get("track_id", ""),
+                    "valid": True,
+                    "status": "success",
+                    "result": {
+                        "charge_abs_C": charge,
+                        "sigma_charge_C": max(1e-30, sigma_random),
+                    },
+                }
+            )
+        if len(sampled_drops) == len(valid_drops):
+            sample_elementary = estimate_elementary_charge(sampled_drops, estimator_cfg)
+            e_sample = sample_elementary.get("elementary_charge", {}).get("e_hat_C")
+            if sample_elementary.get("valid") and e_sample is not None and math.isfinite(float(e_sample)):
+                e_systematic_samples.append(float(e_sample))
     per_drop = []
     min_used = samples
     for drop in valid_drops:
@@ -246,6 +293,7 @@ def _build_uncertainty_details(drop_results: list[dict[str, Any]], config: dict[
                     "combined_charge_ci95_high_C": math.nan,
                 }
             )
+    e_summary = _summarize_systematic_e(e_systematic_samples, elementary)
     return {
         "status": "complete" if min_used >= max(2, samples // 2) else "partial",
         "random_uncertainty": "per-drop random q uncertainty uses joint alpha-gamma Monte Carlo",
@@ -256,8 +304,65 @@ def _build_uncertainty_details(drop_results: list[dict[str, Any]], config: dict[
             "seed": int(seed),
             "inputs": config.get("physics", {}).get("systematic_uncertainty", {}),
         },
+        "elementary_charge_systematic": e_summary,
+        **e_summary,
         "per_drop": per_drop,
     }
+
+
+def _summarize_systematic_e(samples: list[float], elementary: dict[str, Any]) -> dict[str, Any]:
+    if len(samples) < 2:
+        return {
+            "systematic_e_samples_used": int(len(samples)),
+            "sigma_e_systematic_C": math.inf,
+            "e_systematic_ci95_low_C": math.nan,
+            "e_systematic_ci95_high_C": math.nan,
+            "e_combined_ci95_low_C": math.nan,
+            "e_combined_ci95_high_C": math.nan,
+        }
+    arr = np.asarray(samples, dtype=float)
+    e_nominal = float(elementary.get("elementary_charge", {}).get("e_hat_C", np.nan))
+    random_sigma = float(elementary.get("elementary_charge", {}).get("sigma_e_C", 0.0) or 0.0)
+    if not math.isfinite(random_sigma) or random_sigma < 0:
+        random_sigma = 0.0
+    if random_sigma > 0:
+        rng = np.random.default_rng(271828)
+        combined = arr + rng.normal(0.0, random_sigma, len(arr))
+    else:
+        combined = arr
+    return {
+        "systematic_e_samples_used": int(len(arr)),
+        "sigma_e_systematic_C": float(np.std(arr, ddof=1)),
+        "e_systematic_ci95_low_C": float(np.percentile(arr, 2.5)),
+        "e_systematic_ci95_high_C": float(np.percentile(arr, 97.5)),
+        "e_combined_ci95_low_C": float(np.percentile(combined, 2.5)),
+        "e_combined_ci95_high_C": float(np.percentile(combined, 97.5)),
+        "e_nominal_C": e_nominal,
+    }
+
+
+def _annotate_systematic_uncertainty(drop_results: list[dict[str, Any]], uncertainty_details: dict[str, Any]) -> None:
+    by_drop = {str(row.get("drop_id", "")): row for row in uncertainty_details.get("per_drop", [])}
+    for drop in drop_results:
+        drop_id = str(drop.get("drop_id", ""))
+        result = drop.get("result", {}) or {}
+        row = by_drop.get(drop_id)
+        if not row or not result:
+            continue
+        sigma_sys = float(row.get("sigma_charge_systematic_C", math.nan))
+        if math.isfinite(sigma_sys):
+            result["sigma_charge_systematic_C"] = sigma_sys
+            sigma_random = float(result.get("sigma_charge_random_C", result.get("sigma_charge_C", math.nan)))
+            if math.isfinite(sigma_random):
+                result["sigma_charge_total_C"] = float(math.sqrt(sigma_random**2 + sigma_sys**2))
+        for source, target in [
+            ("charge_systematic_ci95_low_C", "charge_systematic_ci95_low_C"),
+            ("charge_systematic_ci95_high_C", "charge_systematic_ci95_high_C"),
+            ("combined_charge_ci95_low_C", "charge_combined_ci95_low_C"),
+            ("combined_charge_ci95_high_C", "charge_combined_ci95_high_C"),
+        ]:
+            if source in row:
+                result[target] = row[source]
 
 
 def _write_report(run_dir: Path, result: dict[str, Any]) -> None:
@@ -273,6 +378,8 @@ def _write_report(run_dir: Path, result: dict[str, Any]) -> None:
         f"- status: `{status}`",
         f"- valid q count: `{result['multi_drop_results']['valid_drop_count']}`",
         f"- failed q count: `{len(result['charge_failures']['failures'])}`",
+        "- trajectory input assumption: upstream has already extracted and accepted the trajectories.",
+        "- current upstream direction: prefer the longest continuous segment that does not touch grid-line neighborhoods.",
         "",
         "## Per-Drop r and q",
         "",
@@ -280,7 +387,26 @@ def _write_report(run_dir: Path, result: dict[str, Any]) -> None:
     if charges.empty:
         lines.append("_No successful q results._")
     else:
-        view = charges[["drop_id", "track_id", "radius_um", "charge_1e_minus_19_C", "sigma_charge_total_C", "warnings"]]
+        view = charges[
+            [
+                "drop_id",
+                "track_id",
+                "radius_um",
+                "charge_1e_minus_19_C",
+                "sigma_charge_random_1e_minus_19_C",
+                "sigma_charge_systematic_1e_minus_19_C",
+                "sigma_charge_total_1e_minus_19_C",
+                "warnings",
+            ]
+        ].rename(
+            columns={
+                "radius_um": "radius_um",
+                "charge_1e_minus_19_C": "charge_1e_minus_19_C",
+                "sigma_charge_random_1e_minus_19_C": "random_sigma_q_1e_minus_19_C",
+                "sigma_charge_systematic_1e_minus_19_C": "systematic_sigma_q_1e_minus_19_C",
+                "sigma_charge_total_1e_minus_19_C": "total_sigma_q_1e_minus_19_C",
+            }
+        )
         lines.extend(_markdown_table(view))
     lines.extend(
         [
@@ -290,6 +416,8 @@ def _write_report(run_dir: Path, result: dict[str, Any]) -> None:
             f"- valid: `{elementary.get('valid')}`",
             f"- used q count: `{elementary.get('num_used_drops', 0)}`",
             f"- e_hat (1e-19 C): `{_scale_e(elementary)}`",
+            f"- profile intervals C: `{elementary.get('elementary_charge', {}).get('profile_intervals_C', [])}`",
+            f"- systematic e interval C: `{result['uncertainty_details'].get('elementary_charge_systematic', {}).get('e_systematic_ci95_low_C')}` to `{result['uncertainty_details'].get('elementary_charge_systematic', {}).get('e_systematic_ci95_high_C')}`",
             "",
             "## Quantized-vs-Continuous Comparison",
             "",
@@ -361,7 +489,8 @@ def run_downstream_analysis(
     drop_results, multi_drop_results = _compute_drop_results(drop_segments, config)
     elementary = estimate_elementary_charge(drop_results, config)
     model_comparison = elementary.get("model_comparison", {})
-    uncertainty_details = _build_uncertainty_details(drop_results, config)
+    uncertainty_details = _build_uncertainty_details(drop_results, config, elementary)
+    _annotate_systematic_uncertainty(drop_results, uncertainty_details)
     plots_data = {
         "elementary_profile": {
             "candidate_modes": elementary.get("harmonic_analysis", {}).get("candidate_modes", []),

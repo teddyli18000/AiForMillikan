@@ -162,3 +162,43 @@ def test_downstream_shared_systematic_monte_carlo_outputs_correlated_uncertainty
     assert len(per_drop) == 3
     assert all(row["sigma_charge_systematic_C"] > 0 for row in per_drop)
     assert all(row["combined_charge_ci95_low_C"] < row["charge_abs_C"] < row["combined_charge_ci95_high_C"] for row in per_drop)
+    elementary_systematic = uncertainty["elementary_charge_systematic"]
+    assert elementary_systematic["systematic_e_samples_used"] >= 100
+    assert elementary_systematic["sigma_e_systematic_C"] > 0
+    assert elementary_systematic["e_systematic_ci95_low_C"] < elementary_systematic["e_nominal_C"] < elementary_systematic["e_systematic_ci95_high_C"]
+    assert uncertainty["e_combined_ci95_low_C"] < elementary_systematic["e_nominal_C"] < uncertainty["e_combined_ci95_high_C"]
+
+    repeat = run_downstream_analysis(
+        trajectories=trajectories,
+        platforms=platforms,
+        scale_y_m_per_px=scale,
+        config=config,
+        run_dir=tmp_path / "repeat",
+    )
+    assert repeat["uncertainty_details"]["elementary_charge_systematic"] == elementary_systematic
+
+
+def test_downstream_report_uses_human_units_and_input_provenance(tmp_path: Path):
+    config = load_config("configs/default.yaml")
+    config["elementary"]["e_bootstrap_samples"] = 0
+    config["elementary"]["measurement_mc_samples"] = 0
+    config["elementary"]["null_simulation_samples"] = 0
+    e = 1.6e-19
+    trajectories, platforms, scale = _trajectories_for_drops(config, [2 * e, 3 * e, 5 * e])
+
+    run_downstream_analysis(
+        trajectories=trajectories,
+        platforms=platforms,
+        scale_y_m_per_px=scale,
+        config=config,
+        run_dir=tmp_path / "report",
+    )
+
+    report = (tmp_path / "report" / "analysis_report.md").read_text(encoding="utf-8")
+    assert "trajectory input assumption" in report
+    assert "longest continuous segment" in report
+    assert "radius_um" in report
+    assert "charge_1e_minus_19_C" in report
+    assert "random_sigma_q_1e_minus_19_C" in report
+    assert "sigma_charge_total_C" not in report
+    assert report.count("## Per-Drop r and q") == 1

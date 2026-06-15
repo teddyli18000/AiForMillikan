@@ -50,6 +50,7 @@ result = run_downstream_analysis(
 ```
 
 This standalone path does not require a video path and must not call tracking, candidate generation, or overlays. Raw-video runs remain diagnostic integration checks, not elementary-charge scientific validation.
+The downstream entry point assumes trajectories have already been accepted by upstream extraction/filtering. Future upstream experiments may provide a longest grid-line-avoiding segment or an upstream-associated multi-segment trajectory, but this contract does not add a stitching API in the downstream branch.
 
 `manual_platforms` rows use the schema written to `platforms.csv`:
 
@@ -98,7 +99,7 @@ Each run should also expose:
 - `multi_drop_results.json`: per-drop physical `q` results and valid drop counts.
 - `platform_velocity_results.csv`: normalized per-platform terminal velocity results for downstream physics UI panels.
 - `drop_charge_results.csv`: one row per successfully computed q; every row enters elementary-charge estimation.
-- `drop_charge_failures.json`: explicit physics failure records for drops that did not produce q.
+- `drop_charge_failures.json`: explicit physics failure records for drops that did not produce a formal q, including `point_estimate_only` rows when q and radius exist but finite positive random q uncertainty is unavailable.
 - `model_comparison.json`: elementary-charge quantized-vs-continuous predictive comparison summary.
 - `uncertainty_details.json`: current uncertainty summary and implemented/pending uncertainty methods.
 - `plots_data.json`: machine-readable data for downstream scientific plots.
@@ -201,9 +202,9 @@ These fields explain why bright grid intersections, watermarks, borders, edge hi
 
 ## Downstream Scientific Output Units
 
-Standalone downstream reports display radius in micrometres and charge in `1e-19 C`. Machine CSV/JSON files keep SI values such as `radius_m` and `charge_abs_C`, and may include display columns such as `radius_um` and `charge_1e_minus_19_C`.
+Standalone downstream reports display radius in micrometres and charge/sigma charge in `1e-19 C`. Machine CSV/JSON files keep SI values such as `radius_m`, `charge_abs_C`, and `sigma_charge_random_C`, and may include display columns such as `radius_um`, `charge_1e_minus_19_C`, and `sigma_charge_total_1e_minus_19_C`.
 
-`uncertainty_details.json` reports random per-drop uncertainty, optional shared systematic Monte Carlo, and combined charge intervals. Shared systematic draws reuse one sampled set of scale, plate distance, voltage calibration, viscosity/temperature, pressure, oil density, and Cunningham `b` values across all drops.
+`uncertainty_details.json` reports random per-drop uncertainty, optional shared systematic Monte Carlo, combined charge intervals, and e-level systematic intervals. Shared systematic draws reuse one sampled set of scale, plate distance, voltage calibration, viscosity/temperature, pressure, oil density, and Cunningham `b` values across all drops, then rerun the elementary estimator on the full sampled q set.
 
 ## Multi-Drop Contract
 

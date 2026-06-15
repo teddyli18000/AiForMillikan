@@ -95,6 +95,29 @@ def test_fit_velocity_voltage_without_sigma_uses_explicit_unweighted_fallback():
     assert fit["velocity_uncertainty_source"] == "unavailable_unweighted"
 
 
+@pytest.mark.parametrize(
+    ("voltages", "expected_ratio"),
+    [
+        ((0.0, 362.0), 0.0),
+        ((100.0, 250.0), 100.0 / 150.0),
+        ((100.0, 101.0), 100.0),
+    ],
+)
+def test_fit_velocity_voltage_intercept_extrapolation_ratio_and_standardized_condition(voltages, expected_ratio):
+    rows = pd.DataFrame(
+        [
+            {"voltage_V": voltage, "vy_m_s": 2.0e-4 - 5.0e-7 * voltage, "sigma_vy": 2.0e-6}
+            for voltage in voltages
+        ]
+    )
+
+    fit = fit_velocity_voltage(rows)
+
+    assert fit["intercept_extrapolation_ratio"] == pytest.approx(expected_ratio)
+    assert fit["raw_design_matrix_condition_number"] > fit["standardized_design_matrix_condition_number"]
+    assert fit["design_matrix_condition_number"] == pytest.approx(fit["standardized_design_matrix_condition_number"])
+
+
 def test_compute_drop_result_recovers_known_radius_and_charge():
     config = load_config("configs/default.yaml")
     constants = _physics_constants(config)
@@ -153,6 +176,37 @@ def test_compute_drop_result_known_truth_voltage_scenarios(voltages):
     assert result["fit"]["gamma_m_s_V"] > 0
     assert result["result"]["radius_m"] == pytest.approx(radius, rel=1e-9)
     assert result["result"]["charge_abs_C"] == pytest.approx(charge, rel=1e-9)
+
+
+def test_compute_drop_result_without_uncertainty_is_point_estimate_only():
+    config = load_config("configs/default.yaml")
+    config["physics"]["random_mc_samples"] = 100
+    radius = 0.72e-6
+    charge = 4.8e-19
+    rows = _synthetic_segments_for_radius_charge(config, radius, charge, (100.0, 250.0)).drop(columns=["sigma_vy"])
+
+    result = compute_drop_result(rows, config)
+
+    assert result["valid"] is False
+    assert result["status"] == "point_estimate_only"
+    assert result["result"]["charge_abs_C"] == pytest.approx(charge, rel=1e-9)
+    assert math.isinf(result["result"]["sigma_charge_C"])
+    assert "uncertainty_unavailable" in result["flags"]
+
+
+def test_compute_drop_result_mc_failure_with_point_q_is_not_formal_success():
+    config = load_config("configs/default.yaml")
+    config["physics"]["random_mc_samples"] = 1
+    radius = 0.72e-6
+    charge = 4.8e-19
+    rows = _synthetic_segments_for_radius_charge(config, radius, charge, (0.0, 180.0, 360.0))
+
+    result = compute_drop_result(rows, config)
+
+    assert result["valid"] is True
+    assert result["status"] == "success"
+    assert result["result"]["formal_uncertainty_method"] == "analytic_alpha_gamma_fallback"
+    assert result["result"]["sigma_charge_C"] > 0
 
 
 def test_compute_drop_result_joint_monte_carlo_uncertainty_outputs():

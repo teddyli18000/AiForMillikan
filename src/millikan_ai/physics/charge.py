@@ -92,8 +92,21 @@ def fit_velocity_voltage(platforms: pd.DataFrame) -> dict[str, object]:
     chi_square = float(np.sum(np.square(residuals / sigma))) if valid_sigma else math.nan
     dof = max(0, len(voltage) - 2)
     voltage_span = float(np.max(voltage) - np.min(voltage))
-    condition = float(np.linalg.cond(design))
-    intercept_ratio = float(max(abs(np.min(voltage)), abs(np.max(voltage))) / voltage_span) if voltage_span > 0 else math.inf
+    raw_condition = float(np.linalg.cond(design))
+    if voltage_span > 0:
+        min_voltage = float(np.min(voltage))
+        max_voltage = float(np.max(voltage))
+        zero_distance = 0.0 if min_voltage <= 0.0 <= max_voltage else min(abs(min_voltage), abs(max_voltage))
+        intercept_ratio = float(zero_distance / voltage_span)
+    else:
+        intercept_ratio = math.inf
+    voltage_std = float(np.std(voltage))
+    if voltage_std > 0:
+        standardized_voltage = (voltage - float(np.mean(voltage))) / voltage_std
+        standardized_design = np.column_stack([np.ones(len(voltage)), -standardized_voltage])
+        standardized_condition = float(np.linalg.cond(standardized_design))
+    else:
+        standardized_condition = math.inf
     sigma_alpha = math.sqrt(max(0.0, float(covariance[0, 0]))) if math.isfinite(float(covariance[0, 0])) else math.inf
     sigma_gamma = math.sqrt(max(0.0, float(covariance[1, 1]))) if math.isfinite(float(covariance[1, 1])) else math.inf
     return {
@@ -111,7 +124,9 @@ def fit_velocity_voltage(platforms: pd.DataFrame) -> dict[str, object]:
         "validation_level": "two_platform" if len(voltage) == 2 else "multi_platform",
         "voltage_span_V": voltage_span,
         "intercept_extrapolation_ratio": intercept_ratio,
-        "design_matrix_condition_number": condition,
+        "raw_design_matrix_condition_number": raw_condition,
+        "standardized_design_matrix_condition_number": standardized_condition,
+        "design_matrix_condition_number": standardized_condition,
     }
 
 
@@ -222,11 +237,47 @@ def _invalid_result(flags: list[str], platforms: pd.DataFrame, fit: dict[str, ob
     return {
         "drop_id": "drop_001",
         "valid": False,
+        "status": "failed",
         "method": "multi_voltage_terminal_velocity_fitting",
         "flags": flags,
         "platforms": platforms.to_dict("records") if not platforms.empty else [],
         "fit": fit or {},
         "result": {},
+    }
+
+
+def _point_estimate_only_result(
+    flags: list[str],
+    platforms: pd.DataFrame,
+    fit: dict[str, object],
+    constants: dict[str, object],
+    radius: float,
+    charge_abs: float,
+    random_mc: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "drop_id": "drop_001",
+        "valid": False,
+        "status": "point_estimate_only",
+        "method": "multi_voltage_terminal_velocity_fitting",
+        "constants": constants,
+        "platforms": platforms.to_dict("records"),
+        "fit": {
+            **fit,
+            "alpha": float(fit["alpha_m_s"]),
+            "gamma": float(fit["gamma_m_s_V"]),
+            "direction_convention": "+Y_down_positive_voltage_pushes_up",
+        },
+        "result": {
+            "radius_m": float(radius),
+            "charge_C": float(charge_abs),
+            "charge_abs_C": float(charge_abs),
+            "sigma_charge_C": math.inf,
+            **random_mc,
+            "sigma_charge_systematic_C": 0.0,
+            "sigma_charge_total_C": math.inf,
+        },
+        "flags": flags,
     }
 
 
@@ -256,6 +307,8 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
         return _invalid_result(flags, stable, fit)
     eff = eta_eff(radius, float(viscosity["air_viscosity_Pa_s"]), float(constants["pressure_Pa"]), float(constants["cunningham_b_Pa_m"]))
     charge_abs = 6 * math.pi * eff * radius * d * gamma
+    if not (math.isfinite(charge_abs) and charge_abs > 0 and math.isfinite(radius) and radius > 0):
+        return _invalid_result(["non_finite_charge_or_radius"], stable, fit)
     random_mc = _random_uncertainty_monte_carlo(
         alpha,
         gamma,
@@ -266,11 +319,26 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
         int(config.get("elementary", {}).get("random_seed", 42)),
     )
     sigma_charge = float(random_mc.get("sigma_charge_random_C", math.inf))
+    uncertainty_source = str(random_mc.get("uncertainty_method", "unavailable"))
     if not math.isfinite(sigma_charge):
         sigma_charge = _charge_uncertainty(charge_abs, alpha, gamma, fit)
+        if math.isfinite(sigma_charge) and sigma_charge > 0:
+            uncertainty_source = "analytic_alpha_gamma_fallback"
+            random_mc = {**random_mc, "uncertainty_method": uncertainty_source, "sigma_charge_random_C": sigma_charge}
+    if not (math.isfinite(sigma_charge) and sigma_charge > 0):
+        return _point_estimate_only_result(
+            ["point_estimate_only", "uncertainty_unavailable"],
+            stable,
+            fit,
+            {**constants, **viscosity},
+            radius,
+            charge_abs,
+            random_mc,
+        )
     return {
         "drop_id": "drop_001",
         "valid": True,
+        "status": "success",
         "method": "multi_voltage_terminal_velocity_fitting",
         "constants": {**constants, **viscosity},
         "platforms": stable.to_dict("records"),
@@ -286,6 +354,7 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
             "charge_abs_C": charge_abs,
             "sigma_charge_C": sigma_charge,
             **random_mc,
+            "formal_uncertainty_method": uncertainty_source,
             "sigma_charge_systematic_C": 0.0,
             "sigma_charge_total_C": sigma_charge,
         },

@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from functools import reduce
 from typing import Any
 
 import numpy as np
@@ -31,13 +30,17 @@ def _cfg_value(cfg: dict[str, Any], new_key: str, old_key: str | None, default: 
 
 
 def _usable_drops(drop_results: list[dict]) -> list[dict]:
-    return [
-        drop
-        for drop in drop_results
-        if drop.get("valid")
-        and drop.get("result", {}).get("charge_abs_C") is not None
-        and drop.get("result", {}).get("sigma_charge_C") is not None
-    ]
+    usable = []
+    for drop in drop_results:
+        result = drop.get("result", {}) or {}
+        try:
+            charge = float(result.get("charge_abs_C", math.nan))
+            sigma = float(result.get("sigma_charge_C", math.nan))
+        except (TypeError, ValueError):
+            continue
+        if drop.get("valid") and math.isfinite(charge) and charge > 0 and math.isfinite(sigma) and sigma > 0:
+            usable.append(drop)
+    return usable
 
 
 def _normal_logpdf(x: np.ndarray, mean: np.ndarray, sigma: np.ndarray) -> np.ndarray:
@@ -92,6 +95,16 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
     failed_optimizations = 0
     optimize_count = min(len(e_grid), int(cfg.get("tau_lambda_profile_optimize_points", 16)))
     candidate_indices = set(np.argsort(profile_arr)[-optimize_count:].tolist())
+    local_peak_threshold = float(cfg.get("profile_mode_optimize_relative_threshold", cfg.get("mode_relative_likelihood_threshold", 0.02)))
+    coarse_max = float(np.max(profile_arr))
+    local_peak_indices = []
+    for idx in range(1, len(profile_arr) - 1):
+        if profile_arr[idx] >= profile_arr[idx - 1] and profile_arr[idx] >= profile_arr[idx + 1]:
+            if math.exp(min(0.0, float(profile_arr[idx] - coarse_max))) >= local_peak_threshold:
+                local_peak_indices.append(idx)
+    max_local_modes = int(cfg.get("max_profile_modes_to_optimize", 24))
+    for idx in sorted(local_peak_indices, key=lambda item: profile_arr[item], reverse=True)[:max_local_modes]:
+        candidate_indices.add(idx)
     for idx in list(candidate_indices):
         if idx > 0:
             candidate_indices.add(idx - 1)
@@ -128,22 +141,6 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
         profile_arr[idx] = ll
         if ll > best[0]:
             best = (ll, float(e_grid[idx]), tau_C, lambda_decay)
-    selected_by = "maximum_profile_likelihood"
-    n_hat = np.maximum(1, np.rint(charges / best[1]).astype(int))
-    common_divisor = int(reduce(math.gcd, n_hat.tolist())) if len(n_hat) else 1
-    if common_divisor > 1:
-        target_e = best[1] * common_divisor
-        e_max = float(_cfg_value(cfg, "e_search_max_C", "e_max_C", 2.5e-19))
-        if target_e <= e_max:
-            target_idx = int(np.argmin(np.abs(e_grid - target_e)))
-            ll, tau_C, lambda_decay, success, eval_count = optimize_at_index(target_idx)
-            n_eval += eval_count
-            if success:
-                profile_arr[target_idx] = ll
-                relative = math.exp(min(0.0, ll - best[0]))
-                if relative >= float(cfg.get("harmonic_resolution_min_relative", 0.05)):
-                    best = (ll, float(e_grid[target_idx]), tau_C, lambda_decay)
-                    selected_by = "common_divisor_harmonic_resolution"
     return QuantizedFit(
         e_C=best[1],
         tau_C=best[2],
@@ -158,7 +155,7 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
             "bounds": {"tau_factor": [0.0, 20.0], "lambda_decay": [0.0, 12.0]},
             "optimized_profile_points": int(len(candidate_indices)),
             "failed_optimizations": int(failed_optimizations),
-            "selected_by": selected_by,
+            "selected_by": "maximum_profile_likelihood",
         },
     )
 
@@ -177,6 +174,7 @@ def _assignment_rows(charges: np.ndarray, sigmas: np.ndarray, fit: QuantizedFit,
     for i, n_i in enumerate(n_hat):
         nearest = float(n_i * fit.e_C)
         residual = float(charges[i] - nearest)
+        effective_sigma = float(math.sqrt(float(sigmas[i]) ** 2 + fit.tau_C**2))
         rows.append(
             {
                 "drop_id": drops[i].get("drop_id", f"drop_{i+1:03d}"),
@@ -186,14 +184,16 @@ def _assignment_rows(charges: np.ndarray, sigmas: np.ndarray, fit: QuantizedFit,
                 "assignment_probability": float(probabilities[i, n_i - 1]),
                 "nearest_quantized_charge_C": nearest,
                 "residual_C": residual,
-                "normalized_residual": float(residual / max(sigmas[i], 1e-30)),
+                "effective_sigma_C": effective_sigma,
+                "normalized_residual": float(residual / max(effective_sigma, 1e-30)),
                 "phase_residual": float((charges[i] / fit.e_C) - round(charges[i] / fit.e_C)),
             }
         )
     return rows
 
 
-def _candidate_modes(fit: QuantizedFit) -> list[dict[str, float]]:
+def _candidate_modes(fit: QuantizedFit, cfg: dict[str, Any] | None = None) -> list[dict[str, float]]:
+    cfg = cfg or {}
     e_grid = fit.profile_e_C
     profile = fit.profile_log_likelihood
     max_ll = float(np.max(profile))
@@ -206,9 +206,10 @@ def _candidate_modes(fit: QuantizedFit) -> list[dict[str, float]]:
             indices.add(int(np.argmin(np.abs(e_grid - target))))
     indices.add(int(np.argmax(profile)))
     modes = []
+    min_relative = float(cfg.get("candidate_mode_min_relative_likelihood", 1e-4))
     for idx in sorted(indices, key=lambda item: profile[item], reverse=True):
         relative = float(math.exp(min(0.0, float(profile[idx] - max_ll))))
-        if relative >= 1e-4:
+        if relative >= min_relative:
             modes.append({"e_C": float(e_grid[idx]), "relative_likelihood": relative})
     unique: list[dict[str, float]] = []
     for mode in modes:
@@ -217,12 +218,45 @@ def _candidate_modes(fit: QuantizedFit) -> list[dict[str, float]]:
     return unique[:8]
 
 
-def _profile_interval(fit: QuantizedFit) -> list[float]:
+def _profile_intervals(fit: QuantizedFit) -> list[list[float]]:
     threshold = fit.log_likelihood - 0.5 * 1.96**2
     mask = fit.profile_log_likelihood >= threshold
     if not np.any(mask):
-        return [fit.e_C, fit.e_C]
-    return [float(np.min(fit.profile_e_C[mask])), float(np.max(fit.profile_e_C[mask]))]
+        return [[fit.e_C, fit.e_C]]
+    intervals: list[list[float]] = []
+    start: int | None = None
+    for idx, keep in enumerate(mask.tolist()):
+        if keep and start is None:
+            start = idx
+        if start is not None and (not keep or idx == len(mask) - 1):
+            end = idx if keep and idx == len(mask) - 1 else idx - 1
+            intervals.append([float(fit.profile_e_C[start]), float(fit.profile_e_C[end])])
+            start = None
+    return intervals
+
+
+def _primary_profile_interval(fit: QuantizedFit, intervals: list[list[float]]) -> list[float]:
+    for low, high in intervals:
+        if low <= fit.e_C <= high:
+            return [float(low), float(high)]
+    return min(intervals, key=lambda item: min(abs(fit.e_C - item[0]), abs(fit.e_C - item[1]))) if intervals else [fit.e_C, fit.e_C]
+
+
+def _profile_interval(fit: QuantizedFit) -> list[float]:
+    intervals = _profile_intervals(fit)
+    return _primary_profile_interval(fit, intervals)
+
+
+def _is_harmonic_ratio(value_a: float, value_b: float, cfg: dict[str, Any]) -> bool:
+    if value_a <= 0 or value_b <= 0:
+        return False
+    ratio = max(value_a, value_b) / min(value_a, value_b)
+    tolerance = float(cfg.get("harmonic_ratio_tolerance", 0.04))
+    max_integer = int(cfg.get("harmonic_integer_max", 4))
+    for integer in range(2, max(2, max_integer) + 1):
+        if abs(ratio - float(integer)) <= tolerance:
+            return True
+    return False
 
 
 def _fit_gmm(values: np.ndarray, sigmas: np.ndarray, max_components: int, seed: int) -> dict[str, Any]:
@@ -308,7 +342,7 @@ def _comparison_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
 def _predictive_model_comparison(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[str, Any], *, include_null: bool = True) -> dict[str, object]:
     if len(charges) < 3:
         return {
-            "continuous_model": "heteroscedastic_error_convolved_gmm",
+            "continuous_model": "approximate_heteroscedastic_deconvolved_gmm",
             "heteroscedastic": True,
             "comparison_method": "insufficient_drops",
             "quantized_elpd": math.nan,
@@ -343,7 +377,7 @@ def _predictive_model_comparison(charges: np.ndarray, sigmas: np.ndarray, cfg: d
     final_model = _fit_gmm(charges, sigmas, max_components=min(4, max(1, len(charges) // 3)), seed=seed)
     delta_arr = np.asarray(per_split_delta, dtype=float)
     comparison: dict[str, object] = {
-        "continuous_model": "heteroscedastic_error_convolved_gmm",
+        "continuous_model": "approximate_heteroscedastic_deconvolved_gmm",
         "heteroscedastic": True,
         "continuous_components": int(final_model["components"]),
         "continuous_bic": float(final_model["bic"]),
@@ -372,14 +406,17 @@ def _predictive_model_comparison(charges: np.ndarray, sigmas: np.ndarray, cfg: d
             null_delta.append(float(sim["delta_elpd"]))
         count = sum(1 for value in null_delta if value >= delta)
         p_null = (1 + count) / (null_samples + 1)
-        if p_null <= 0.01 and delta > 0:
-            label = "strong"
-        elif p_null <= 0.05 and delta > 0:
-            label = "moderate"
-        elif p_null <= 0.20 and delta > 0:
-            label = "weak"
+        if bool(cfg.get("enable_calibrated_evidence_labels", False)):
+            if p_null <= 0.01 and delta > 0:
+                label = "strong"
+            elif p_null <= 0.05 and delta > 0:
+                label = "moderate"
+            elif p_null <= 0.20 and delta > 0:
+                label = "weak"
+            else:
+                label = "insufficient"
         else:
-            label = "insufficient"
+            label = "not_calibrated"
         comparison["evidence_label"] = label
         comparison["null_simulation"] = {
             "samples": int(null_samples),
@@ -490,9 +527,15 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
     sigmas = np.maximum(sigmas, numerical_floor)
     fit = _fit_quantized_profile(charges, sigmas, cfg)
     assignments = _assignment_rows(charges, sigmas, fit, valid)
-    modes = _candidate_modes(fit)
-    significant_modes = [mode for mode in modes if mode["relative_likelihood"] >= 0.02]
-    harmonic = len(significant_modes) >= 2
+    modes = _candidate_modes(fit, cfg)
+    significant_threshold = float(cfg.get("mode_relative_likelihood_threshold", 0.02))
+    significant_modes = [mode for mode in modes if mode["relative_likelihood"] >= significant_threshold]
+    profile_multimodal = len(significant_modes) >= 2
+    harmonic = any(
+        _is_harmonic_ratio(float(a["e_C"]), float(b["e_C"]), cfg)
+        for index, a in enumerate(significant_modes)
+        for b in significant_modes[index + 1 :]
+    )
     boot = _bootstrap_e(charges, sigmas, cfg)
     ci = [float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))] if boot else [fit.e_C, fit.e_C]
     measurement_mc = _measurement_mc_e(charges, sigmas, cfg)
@@ -503,8 +546,22 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
     )
     e_min = float(_cfg_value(cfg, "e_search_min_C", "e_min_C", 0.5e-19))
     e_max = float(_cfg_value(cfg, "e_search_max_C", "e_max_C", 2.5e-19))
-    comparison = _predictive_model_comparison(charges, sigmas, cfg)
-    leave_one_drop_out = _leave_one_drop_out_stability(charges, sigmas, valid, cfg, fit.e_C)
+    if bool(cfg.get("skip_model_comparison", False)):
+        comparison = {
+            "continuous_model": "approximate_heteroscedastic_deconvolved_gmm",
+            "heteroscedastic": True,
+            "comparison_method": "skipped",
+            "quantized_elpd": math.nan,
+            "continuous_elpd": math.nan,
+            "delta_elpd": math.nan,
+            "delta_elpd_se": math.nan,
+            "evidence_label": "not_run",
+        }
+    else:
+        comparison = _predictive_model_comparison(charges, sigmas, cfg)
+    leave_one_drop_out = [] if bool(cfg.get("skip_stability_diagnostics", False)) else _leave_one_drop_out_stability(charges, sigmas, valid, cfg, fit.e_C)
+    profile_intervals = _profile_intervals(fit)
+    primary_profile_interval = _primary_profile_interval(fit, profile_intervals)
     return {
         "valid": True,
         "num_total_drops": len(drop_results),
@@ -515,7 +572,9 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
             "sigma_e_C": float(np.std(boot, ddof=1)) if len(boot) > 1 else 0.0,
             "ci_95_C": ci,
             "e_ci_95_C": ci,
-            "profile_ci_95_C": _profile_interval(fit),
+            "profile_intervals_C": profile_intervals,
+            "primary_profile_interval_C": primary_profile_interval,
+            "profile_ci_95_C": primary_profile_interval,
             "measurement_mc_ci_95_C": measurement_ci,
             "uncertainty_method": "profile_bootstrap_measurement_mc",
             "bootstrap_samples_used": int(len(boot)),
@@ -528,8 +587,11 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
         "optimizer": fit.optimizer,
         "drops": assignments,
         "harmonic_analysis": {
+            "profile_multimodal": bool(profile_multimodal),
             "harmonic_ambiguity": bool(harmonic),
             "candidate_modes": modes,
+            "mode_relative_likelihood_threshold": significant_threshold,
+            "harmonic_ratio_tolerance": float(cfg.get("harmonic_ratio_tolerance", 0.04)),
         },
         "model_comparison": {
             "weighted_residual_rms_C": float(

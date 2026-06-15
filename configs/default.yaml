@@ -102,9 +102,22 @@ elementary:
   e_search_min_C: 0.5e-19
   e_search_max_C: 2.5e-19
   profile_grid_points: 800
+  comparison_profile_grid_points: 120
+  tau_lambda_profile_optimize_points: 16
+  tau_lambda_optimizer_maxiter: 80
+  profile_mode_optimize_relative_threshold: 0.02
+  max_profile_modes_to_optimize: 24
+  candidate_mode_min_relative_likelihood: 1.0e-4
+  mode_relative_likelihood_threshold: 0.02
+  harmonic_ratio_tolerance: 0.04
+  harmonic_integer_max: 4
   e_bootstrap_samples: 1000
   measurement_mc_samples: 1000
   null_simulation_samples: 300
+  enable_calibrated_evidence_labels: false
+  systematic_e_profile_grid_points: 80
+  systematic_tau_lambda_profile_optimize_points: 2
+  systematic_tau_lambda_optimizer_maxiter: 20
   random_seed: 42
 
 quality:

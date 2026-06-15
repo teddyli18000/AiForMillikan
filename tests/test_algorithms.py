@@ -1,3 +1,5 @@
+import math
+
 import cv2
 import numpy as np
 import pandas as pd
@@ -5,7 +7,7 @@ import pytest
 
 from millikan_ai.calibration.grid import detect_horizontal_grid_lines, detect_vertical_grid_lines
 from millikan_ai.config import load_config
-from millikan_ai.elementary.estimate import estimate_elementary_charge
+from millikan_ai.elementary.estimate import QuantizedFit, _is_harmonic_ratio, _profile_intervals, estimate_elementary_charge
 from millikan_ai.physics.charge import compute_drop_result
 from millikan_ai.segments.fitting import fit_line, fit_terminal_velocity, fit_track_segments, select_stable_window
 from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platforms
@@ -19,7 +21,15 @@ def _fast_elementary_config() -> dict:
     config["elementary"]["null_simulation_samples"] = 0
     config["elementary"]["tau_lambda_profile_optimize_points"] = 2
     config["elementary"]["tau_lambda_optimizer_maxiter"] = 12
+    config["elementary"]["max_profile_modes_to_optimize"] = 4
     config["physics"]["random_mc_samples"] = 50
+    return config
+
+
+def _estimator_only_config() -> dict:
+    config = _fast_elementary_config()
+    config["elementary"]["skip_model_comparison"] = True
+    config["elementary"]["skip_stability_diagnostics"] = True
     return config
 
 
@@ -197,7 +207,7 @@ def test_compute_drop_result_for_synthetic_segments():
 
 def test_elementary_charge_estimator_on_integer_multiples():
     config = _fast_elementary_config()
-    config["elementary"]["profile_grid_points"] = 900
+    config["elementary"]["profile_grid_points"] = 300
     e = 1.6e-19
     drops = [
         {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.04e-19}}
@@ -227,8 +237,8 @@ def test_elementary_charge_uses_all_successful_q_without_quality_gate():
 
 
 def test_elementary_charge_reports_harmonic_ambiguity_for_even_multiples():
-    config = _fast_elementary_config()
-    config["elementary"]["profile_grid_points"] = 900
+    config = _estimator_only_config()
+    config["elementary"]["profile_grid_points"] = 300
     e = 1.6e-19
     drops = [
         {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.03e-19}}
@@ -238,8 +248,73 @@ def test_elementary_charge_reports_harmonic_ambiguity_for_even_multiples():
     result = estimate_elementary_charge(drops, config)
 
     assert result["valid"] is True
+    assert result["optimizer"]["selected_by"] == "maximum_profile_likelihood"
+    assert result["harmonic_analysis"]["profile_multimodal"] is True
     assert result["harmonic_analysis"]["harmonic_ambiguity"] is True
     assert len(result["harmonic_analysis"]["candidate_modes"]) >= 2
+
+
+@pytest.mark.parametrize("multipliers", [[2, 4, 6, 8, 10], [2, 3, 5, 8, 11], [3, 6, 9, 12, 15]])
+def test_elementary_profile_likelihood_is_not_overridden_by_gcd_harmonic(multipliers):
+    config = _estimator_only_config()
+    config["elementary"]["profile_grid_points"] = 250
+    e = 0.8e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.03e-19}}
+        for i, n in enumerate(multipliers)
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["valid"] is True
+    assert result["optimizer"]["selected_by"] == "maximum_profile_likelihood"
+    assert result["optimizer"]["selected_by"] != "common_divisor_harmonic_resolution"
+
+
+def test_elementary_assignment_normalized_residual_uses_effective_sigma():
+    config = _estimator_only_config()
+    config["elementary"]["profile_grid_points"] = 250
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e + offset, "sigma_charge_C": 0.02e-19}}
+        for i, (n, offset) in enumerate(zip([2, 3, 5, 7, 8], [0.0, 0.05e-19, -0.04e-19, 0.06e-19, -0.02e-19]))
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    tau = result["elementary_charge"]["tau_C"]
+    row = max(result["drops"], key=lambda item: abs(item["residual_C"]))
+    assert row["effective_sigma_C"] == pytest.approx(math.sqrt(row["sigma_charge_C"] ** 2 + tau**2))
+    assert row["normalized_residual"] == pytest.approx(row["residual_C"] / row["effective_sigma_C"])
+
+
+def test_profile_intervals_preserve_disconnected_modes():
+    e_grid = np.linspace(1.0e-19, 2.0e-19, 11)
+    profile = np.full(11, -10.0)
+    profile[1:3] = [-0.5, 0.0]
+    profile[8:10] = [-0.2, -0.1]
+    fit = QuantizedFit(
+        e_C=float(e_grid[2]),
+        tau_C=0.0,
+        lambda_decay=0.0,
+        log_likelihood=0.0,
+        profile_e_C=e_grid,
+        profile_log_likelihood=profile,
+        optimizer={},
+    )
+
+    intervals = _profile_intervals(fit)
+
+    assert len(intervals) == 2
+    assert intervals[0][1] < intervals[1][0]
+
+
+def test_harmonic_ratio_detection_requires_small_integer_ratio():
+    cfg = {"harmonic_ratio_tolerance": 0.04, "harmonic_integer_max": 4}
+
+    assert _is_harmonic_ratio(1.0e-19, 2.0e-19, cfg) is True
+    assert _is_harmonic_ratio(1.0e-19, 3.0e-19, cfg) is True
+    assert _is_harmonic_ratio(1.0e-19, 1.73e-19, cfg) is False
 
 
 def test_elementary_model_comparison_scores_clear_quantization_positive():
@@ -253,7 +328,7 @@ def test_elementary_model_comparison_scores_clear_quantization_positive():
 
     result = estimate_elementary_charge(drops, config)
 
-    assert result["model_comparison"]["continuous_model"] == "heteroscedastic_error_convolved_gmm"
+    assert result["model_comparison"]["continuous_model"] == "approximate_heteroscedastic_deconvolved_gmm"
     assert result["model_comparison"]["delta_elpd"] > 0
 
 
@@ -327,7 +402,7 @@ def test_null_simulation_reports_empirical_p_value():
     assert null["samples"] == 5
     assert len(null["null_delta_elpd_distribution"]) == 5
     assert 0.0 <= null["empirical_p_value"] <= 1.0
-    assert result["model_comparison"]["evidence_label"] in {"strong", "moderate", "weak", "insufficient"}
+    assert result["model_comparison"]["evidence_label"] == "not_calibrated"
 
 
 def test_uncertainty_outputs_include_bootstrap_and_measurement_mc_counts():
@@ -363,7 +438,7 @@ def test_heteroscedastic_gmm_reports_sigma_aware_fit():
     result = estimate_elementary_charge(drops, config)
     comparison = result["model_comparison"]
 
-    assert comparison["continuous_model"] == "heteroscedastic_error_convolved_gmm"
+    assert comparison["continuous_model"] == "approximate_heteroscedastic_deconvolved_gmm"
     assert comparison["heteroscedastic"] is True
     assert comparison["continuous_components"] <= 2
 

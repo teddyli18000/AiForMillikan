@@ -17,6 +17,8 @@ This stage implements a non-ML backend framework:
 
 ML-based trajectory filtering is intentionally left to `training_quality_filter/`.
 
+Current branch scope: the downstream physics and elementary-charge modules assume upstream has already produced accepted trajectories. The current upstream research direction is to avoid grid-line neighborhoods, first validating the longest reliable continuous segment that does not touch a grid line, then later studying whether segments on both sides of a grid line can be associated. That direction is documented here but is not implemented in this downstream branch.
+
 ## Setup
 
 Use a project-local virtual environment.
@@ -213,13 +215,23 @@ result = run_downstream_analysis(
 This path does not call the tracker or read video frames. It writes `platform_velocity_results.csv`, `drop_charge_results.csv`, `drop_charge_failures.json`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, `plots_data.json`, and `analysis_report.md`.
 
 For shared systematic uncertainty, set `physics.systematic_mc_samples` and `physics.systematic_uncertainty` in the config. Each systematic draw uses one common set of sampled physical parameters across all drops, while per-drop random errors remain independent.
+Each shared systematic draw also recomputes the full set of q values and reruns the elementary-charge estimator, so `uncertainty_details.json` includes `sigma_e_systematic_C`, systematic e intervals, and combined e intervals.
 
 Slow estimator validation can be run on synthetic known-truth data:
 
 ```powershell
 $env:PYTHONPATH='src'
-.venv\Scripts\python scripts\validate_estimator_simulation.py --replicates 3 --null-samples 20 --output runs\estimator_simulation_validation.json
+.venv\Scripts\python scripts\validate_estimator_simulation.py --preset smoke --replicates 3 --null-samples 20 --output runs\estimator_simulation_validation.json
 ```
+
+For artificial review before scientific use, run at least:
+
+```powershell
+$env:PYTHONPATH='src'
+.venv\Scripts\python scripts\validate_estimator_simulation.py --preset quick_validation --profile-points 80 --null-samples 20 --output runs\estimator_simulation_validation.json
+```
+
+`smoke` uses a small default matrix for sanity checks. `quick_validation` enforces at least 50 replicates across N = 10, 15, 20, and 40; `full_validation` enforces at least 200. The script also accepts `--n-values` and `--noise-values` for targeted benchmark slices, and writes both JSON and Markdown summaries. Raw-video smoke runs must not be used as elementary-charge scientific validation.
 
 ## Current Raw Video Behavior
 
