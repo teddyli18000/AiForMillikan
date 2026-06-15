@@ -13,7 +13,12 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _read_csv(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def _fmt(value: Any) -> str:
@@ -40,21 +45,6 @@ def _table(frame: pd.DataFrame, columns: list[str] | None = None, max_rows: int 
     return "\n".join(lines) + "\n"
 
 
-def _config_lines(config: dict[str, Any]) -> list[str]:
-    rows = []
-    for section, values in config.items():
-        if isinstance(values, dict):
-            for key, value in values.items():
-                if isinstance(value, dict):
-                    for nested_key, nested_value in value.items():
-                        rows.append(f"|`{section}.{key}.{nested_key}`|`{_fmt(nested_value)}`|")
-                else:
-                    rows.append(f"|`{section}.{key}`|`{_fmt(value)}`|")
-        else:
-            rows.append(f"|`{section}`|`{_fmt(values)}`|")
-    return rows
-
-
 def _drop_result_rows(multi_drop_results: dict[str, Any]) -> pd.DataFrame:
     rows = []
     for drop in multi_drop_results.get("drops", []):
@@ -69,8 +59,7 @@ def _drop_result_rows(multi_drop_results: dict[str, Any]) -> pd.DataFrame:
                 "sigma_charge_C": result.get("sigma_charge_C"),
                 "radius_m": result.get("radius_m"),
                 "alpha": fit.get("alpha"),
-                "beta": fit.get("beta"),
-                "quality_score": drop.get("quality_score"),
+                "gamma": fit.get("gamma"),
                 "flags": ",".join(drop.get("flags", [])),
             }
         )
@@ -88,37 +77,53 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
     platforms = _read_csv(root / output["platforms_csv"])
     voltage_samples = _read_csv(root / output.get("voltage_samples_csv", "voltage_samples.csv"))
     candidates = _read_csv(root / output["candidate_tracks_summary_csv"])
-    segments = _read_csv(root / output["best_track_segments_csv"])
-    drop_segments = _read_csv(root / output.get("drop_track_segments_csv", "drop_track_segments.csv"))
+    velocity_results = _read_csv(root / output.get("platform_velocity_results_csv", "platform_velocity_results.csv"))
+    charge_results = _read_csv(root / output.get("drop_charge_results_csv", "drop_charge_results.csv"))
+    charge_failures = _read_json(root / output.get("drop_charge_failures_json", "drop_charge_failures.json"))
+    model_comparison = _read_json(root / output.get("model_comparison_json", "model_comparison.json"))
+    uncertainty = _read_json(root / output.get("uncertainty_details_json", "uncertainty_details.json"))
     drop_result_rows = _drop_result_rows(multi_drop)
     video = diagnostics.get("video", {})
     grid = diagnostics.get("grid", {})
     flags = list(diagnostics.get("flags", [])) + list(drop.get("flags", [])) + list(elementary.get("flags", []))
-    valid_for_q = bool(drop.get("valid"))
-    valid_video = bool(video.get("readable")) and bool(grid.get("scale_y_m_per_px")) and diagnostics.get("platform_count", 0) >= 2 and valid_for_q
+    valid_drop_count = int(multi_drop.get("valid_drop_count", 0) or 0)
+    failed_drop_count = len(charge_failures.get("failures", []))
+    if elementary.get("valid"):
+        status = "SUCCESS"
+    elif valid_drop_count > 0:
+        status = "PARTIAL"
+    else:
+        status = "FAILED"
+    e_result = elementary.get("elementary_charge", {}) or {}
+    machine_keys = [
+        "platform_velocity_results_csv",
+        "drop_charge_results_csv",
+        "drop_charge_failures_json",
+        "multi_drop_results_json",
+        "elementary_charge_result_json",
+        "model_comparison_json",
+        "uncertainty_details_json",
+        "visualization_layers_json",
+        "run_manifest_json",
+    ]
 
     lines = [
-        "# Millikan 单油滴视频分析报告",
+        "# Millikan Analysis Report",
         "",
-        "## 结论",
+        "## 运行结论",
         "",
-        f"- 视频是否合法: {str(valid_video).lower()}",
-        f"- 是否满足 q 计算条件: {str(valid_for_q).lower()}",
-        f"- 主要 flags: {', '.join(flags) if flags else 'none'}",
-        f"- 识别油滴数量: {multi_drop.get('num_total_drops', 1 if not candidates.empty else 0)}",
-        f"- 有效油滴数量: {multi_drop.get('valid_drop_count', 1 if valid_for_q else 0)}",
+        f"运行状态：{status}",
+        f"成功计算 q 的油滴数：{valid_drop_count}",
+        f"失败油滴数：{failed_drop_count}",
+        f"基本电荷估计：{_fmt(e_result.get('e_hat_C'))} C",
+        f"综合 95% 区间：{_fmt(e_result.get('ci_95_C'))}",
+        f"量子化证据：{model_comparison.get('evidence_label', 'insufficient')}",
+        f"主要警告：{', '.join(flags) if flags else 'none'}",
         "",
-        "## 输入与参数",
+        "## 视频与距离标定",
         "",
         f"- 视频路径: `{video.get('path', '')}`",
         f"- 时间来源: `{diagnostics.get('time_source', 'opencv_fps_frame_index')}`",
-        "",
-        "|参数|值|",
-        "|---|---|",
-        *_config_lines(config),
-        "",
-        "## 视频检查",
-        "",
         f"- 分辨率: `{video.get('width', 0)} x {video.get('height', 0)}`",
         f"- FPS: `{_fmt(video.get('fps', 0))}`",
         f"- 帧数: `{video.get('frame_count', 0)}`",
@@ -136,71 +141,63 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
         f"- 物理距离: `{_fmt(grid.get('measurement_distance_m'))} m`",
         f"- scale_y_m_per_px: `{_fmt(grid.get('scale_y_m_per_px'))}`",
         "",
-        "## 手动电压平台",
+        "## 电压平台",
         "",
-        "### 电压采样",
-        "",
-        "当前主线不启用 OCR；电压平台来自用户手动输入或前端传入。`voltage_samples.csv` 保留为空表用于输出契约兼容。",
-        "",
-        _table(voltage_samples, ["frame_idx", "time_s", "voltage_V", "confidence", "source", "raw_text", "accepted", "reject_reason"], max_rows=12),
-        "",
-        "### 电压平台",
-        "",
+        "当前主线不启用 OCR；电压值来自用户/API 输入，自动边界只提供候选区间。",
         _table(platforms),
-        "",
-        "## 最佳油滴轨迹",
-        "",
-        _table(candidates, max_rows=10),
-        "",
-        f"- overlay: `{root / output['overlay_mp4']}`",
         "",
         "## 多油滴结果",
         "",
         f"- total_drops: `{multi_drop.get('num_total_drops', 0)}`",
         f"- valid_drop_count: `{multi_drop.get('valid_drop_count', 0)}`",
-        f"- multi_drop_results: `{root / output.get('multi_drop_results_json', 'multi_drop_results.json')}`",
-        f"- drop_tracks: `{root / output.get('drop_tracks_csv', 'drop_tracks.csv')}`",
-        f"- drop_track_segments: `{root / output.get('drop_track_segments_csv', 'drop_track_segments.csv')}`",
         "",
         _table(drop_result_rows, max_rows=20),
         "",
-        "## 稳定速度段",
+        "## 单颗油滴结果",
         "",
-        _table(segments),
+        _table(charge_results, ["drop_id", "track_id", "num_platforms", "validation_level", "radius_m", "charge_abs_C", "sigma_charge_total_C", "warnings"], max_rows=20),
         "",
-        "## 多油滴速度段",
+        "## 基本电荷反演",
         "",
-        _table(drop_segments, max_rows=30),
-        "",
-        "## q 计算",
-        "",
-        f"- 方法: `{drop.get('method', '')}`",
-        f"- valid: `{drop.get('valid')}`",
-        f"- quality_score: `{_fmt(drop.get('quality_score'))}`",
-        f"- alpha: `{_fmt(drop.get('fit', {}).get('alpha'))}`",
-        f"- beta: `{_fmt(drop.get('fit', {}).get('beta'))}`",
-        f"- radius_m: `{_fmt(drop.get('result', {}).get('radius_m'))}`",
-        f"- charge_C: `{_fmt(drop.get('result', {}).get('charge_C'))}`",
-        f"- charge_abs_C: `{_fmt(drop.get('result', {}).get('charge_abs_C'))}`",
-        f"- sigma_charge_C: `{_fmt(drop.get('result', {}).get('sigma_charge_C'))}`",
-        "",
-        "## 元电荷反演",
-        "",
-        f"- valid: `{elementary.get('valid')}`",
+        f"- 使用 q 数量: `{elementary.get('num_used_drops', 0)}`",
+        f"- 搜索区间: `{_fmt(e_result.get('search_interval_C'))}`",
+        f"- e_hat: `{_fmt(e_result.get('e_hat_C'))}`",
+        f"- profile 区间: `{_fmt(e_result.get('profile_ci_95_C'))}`",
+        f"- bootstrap 区间: `{_fmt(e_result.get('ci_95_C'))}`",
+        f"- harmonic ambiguity: `{elementary.get('harmonic_analysis', {}).get('harmonic_ambiguity')}`",
         f"- flags: `{', '.join(elementary.get('flags', []))}`",
         f"- reason: `{elementary.get('reason', '')}`",
-        f"- result: `{elementary.get('elementary_charge', {})}`",
         "",
-        "## 质量筛选",
+        _table(pd.DataFrame(elementary.get("drops", [])), ["drop_id", "charge_C", "n_hat", "assignment_probability", "residual_C", "normalized_residual"], max_rows=20),
         "",
-        f"- ml_training: `{quality.get('ml_training', False)}`",
-        f"- method: `{quality.get('implemented', '')}`",
+        "## 模型比较",
         "",
-        "## 输出文件",
+        f"- 量子化模型预测得分: `{_fmt(model_comparison.get('quantized_elpd'))}`",
+        f"- 连续 GMM 预测得分: `{_fmt(model_comparison.get('continuous_elpd'))}`",
+        f"- Delta ELPD: `{_fmt(model_comparison.get('delta_elpd'))}`",
+        f"- 证据等级: `{model_comparison.get('evidence_label', 'insufficient')}`",
+        f"- 连续模型: `{model_comparison.get('continuous_model', '')}`",
+        "",
+        "## 平台速度结果",
+        "",
+        _table(velocity_results, ["drop_id", "track_id", "platform_id", "voltage_V", "velocity_m_s", "sigma_velocity_random_m_s", "r2_diagnostic", "warnings"], max_rows=30),
+        "",
+        "## 误差来源",
+        "",
+        f"- 随机误差: `{uncertainty.get('random_uncertainty', '')}`",
+        f"- 系统误差: `{uncertainty.get('systematic_uncertainty', '')}`",
+        "- 本计算按实验约定忽略空气浮力，并采用 Stokes 阻力与给定 Cunningham 修正。",
+        "",
+        "## 调试警告",
+        "",
+        _table(pd.DataFrame(charge_failures.get("failures", [])), max_rows=20),
+        "",
+        "## 机器文件入口",
         "",
     ]
-    for key, filename in output.items():
-        lines.append(f"- `{key}`: `{root / filename}`")
+    for key in machine_keys:
+        if key in output:
+            lines.append(f"- `{output[key]}`")
     target = root / output.get("analysis_report_md", "analysis_report.md")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return target

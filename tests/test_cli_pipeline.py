@@ -18,6 +18,16 @@ from tests.test_algorithms import _make_voltage_change_video
 import millikan_ai.cli.__main__ as cli_module
 
 
+def _fast_config() -> dict:
+    config = load_config("configs/default.yaml")
+    config["elementary"]["e_bootstrap_samples"] = 0
+    config["elementary"]["measurement_mc_samples"] = 0
+    config["elementary"]["null_simulation_samples"] = 0
+    config["physics"]["random_mc_samples"] = 50
+    config["segment"]["velocity_bootstrap_samples_quick"] = 0
+    return config
+
+
 def _make_synthetic_video(path: Path) -> None:
     writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
     for idx in range(120):
@@ -65,14 +75,13 @@ def _make_synthetic_three_valid_drop_video(path: Path) -> None:
 def test_pipeline_with_manual_platforms_on_synthetic_video(tmp_path: Path):
     video = tmp_path / "synthetic.mp4"
     _make_synthetic_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["roi"]["microscope_roi"] = [20, 20, 240, 200]
     config["manual_platforms"] = [
         {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "manual"},
         {"platform_id": "P002", "start_frame": 60, "end_frame": 119, "start_time_s": 2.0, "end_time_s": 3.97, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "manual"},
     ]
     config["segment"]["stable_min_duration_s"] = 0.5
-    config["segment"]["transient_drop_s"] = 0.1
     config["segment"]["min_valid_points"] = 10
     config_path = tmp_path / "config.yaml"
     save_config(config, config_path)
@@ -122,7 +131,7 @@ def test_cli_analyze_passes_progress_callback(monkeypatch, tmp_path: Path, capsy
 def test_pipeline_writes_auto_platform_suggestions_contract(tmp_path: Path):
     video = tmp_path / "synthetic.mp4"
     _make_synthetic_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["roi"]["microscope_roi"] = [20, 20, 240, 200]
     config["manual_platforms"] = [
         {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "auto_boundary_manual_voltage"},
@@ -133,7 +142,6 @@ def test_pipeline_writes_auto_platform_suggestions_contract(tmp_path: Path):
         {"platform_id": "P002", "start_frame": 66, "end_frame": 119, "start_time_s": 2.2, "end_time_s": 3.97, "confidence": 1.0, "source": "auto_change_detector", "transition_start_frame": -1, "transition_end_frame": -1, "roi_x": 200, "roi_y": 0, "roi_w": 100, "roi_h": 50, "reject_reason": ""},
     ]
     config["segment"]["stable_min_duration_s"] = 0.5
-    config["segment"]["transient_drop_s"] = 0.1
     config["segment"]["min_valid_points"] = 10
     config_path = tmp_path / "config.yaml"
     save_config(config, config_path)
@@ -150,7 +158,7 @@ def test_pipeline_writes_auto_platform_suggestions_contract(tmp_path: Path):
 def test_cli_detect_platforms_command_outputs_suggestions(tmp_path: Path, capsys):
     video = tmp_path / "voltage_changes.mp4"
     _make_voltage_change_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["auto_platform_detection"]["sample_stride_frames"] = 3
     config["auto_platform_detection"]["min_platform_duration_s"] = 0.8
     config["roi"]["voltage_roi"] = [180, 0, 170, 92]
@@ -174,14 +182,13 @@ def test_pipeline_mainline_no_longer_exposes_ocr_sampling():
 def test_pipeline_reports_progress_stages(tmp_path: Path):
     video = tmp_path / "synthetic.mp4"
     _make_synthetic_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["roi"]["microscope_roi"] = [20, 20, 240, 200]
     config["manual_platforms"] = [
         {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "manual"},
         {"platform_id": "P002", "start_frame": 60, "end_frame": 119, "start_time_s": 2.0, "end_time_s": 3.97, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "manual"},
     ]
     config["segment"]["stable_min_duration_s"] = 0.5
-    config["segment"]["transient_drop_s"] = 0.1
     config["segment"]["min_valid_points"] = 10
     config_path = tmp_path / "config.yaml"
     save_config(config, config_path)
@@ -199,7 +206,7 @@ def test_pipeline_reports_progress_stages(tmp_path: Path):
 def test_root_interactive_entry_collects_manual_platforms(monkeypatch, tmp_path: Path, capsys):
     video = tmp_path / "synthetic.mp4"
     _make_synthetic_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["project"]["run_root"] = str(tmp_path / "runs")
     config_path = tmp_path / "config.yaml"
     save_config(config, config_path)
@@ -219,11 +226,10 @@ def test_root_interactive_entry_collects_manual_platforms(monkeypatch, tmp_path:
     answers = iter(
         [
             str(video),
-            str(config_path),
-            "",
-            "",
-            "",
-            "2",
+                str(config_path),
+                "",
+                "",
+                "2",
             "0",
             "59",
             "0",
@@ -265,9 +271,8 @@ def test_root_platform_prompt_defaults_split_frame_ranges(monkeypatch):
 def test_track_multiple_candidates_returns_distinct_tracks(tmp_path: Path):
     video = tmp_path / "multi.mp4"
     _make_synthetic_multi_drop_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["segment"]["stable_min_duration_s"] = 0.5
-    config["segment"]["transient_drop_s"] = 0.1
     config["segment"]["min_valid_points"] = 10
     config["segment"]["min_fit_r2"] = 0.5
     config["segment"]["min_motion_displacement_px"] = 1
@@ -292,14 +297,13 @@ def test_track_multiple_candidates_returns_distinct_tracks(tmp_path: Path):
 def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     video = tmp_path / "multi_pipeline.mp4"
     _make_synthetic_multi_drop_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["roi"]["microscope_roi"] = [20, 20, 240, 200]
     config["manual_platforms"] = [
         {"platform_id": "P001", "start_frame": 0, "end_frame": 59, "start_time_s": 0.0, "end_time_s": 1.97, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "manual"},
         {"platform_id": "P002", "start_frame": 60, "end_frame": 119, "start_time_s": 2.0, "end_time_s": 3.97, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "manual"},
     ]
     config["segment"]["stable_min_duration_s"] = 0.5
-    config["segment"]["transient_drop_s"] = 0.1
     config["segment"]["min_valid_points"] = 10
     config["segment"]["min_fit_r2"] = 0.5
     config["segment"]["min_motion_displacement_px"] = 1
@@ -337,7 +341,7 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     assert all({"quality_score", "keep", "q_valid", "reject_reasons"}.issubset(track) for track in drop_track_layer["tracks"])
     checks = {check["id"]: check for check in validity["checks"]}
     assert checks["multi_drop_q_results"]["details"]["valid_drop_count"] == multi_results["valid_drop_count"]
-    assert checks["elementary_charge_ready"]["details"]["required_drop_count"] == config["elementary"]["min_drops"]
+    assert checks["elementary_charge_ready"]["details"]["required_drop_count"] == config["elementary"]["min_drops_for_estimation"]
     assert "elementary_charge_ready" not in validity["blocking_failed_checks"]
     assert "多油滴结果" in report
     assert "multi_drop_results.json" in report
@@ -346,14 +350,13 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
 def test_pipeline_estimates_elementary_charge_from_three_valid_drops(tmp_path: Path):
     video = tmp_path / "three_valid.mp4"
     _make_synthetic_three_valid_drop_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["roi"]["microscope_roi"] = [20, 15, 300, 230]
     config["manual_platforms"] = [
         {"platform_id": "P001", "start_frame": 0, "end_frame": 89, "start_time_s": 0.0, "end_time_s": 89 / 30.0, "voltage_V": 0.0, "voltage_confidence": 1.0, "source": "manual"},
         {"platform_id": "P002", "start_frame": 90, "end_frame": 179, "start_time_s": 90 / 30.0, "end_time_s": 179 / 30.0, "voltage_V": 200.0, "voltage_confidence": 1.0, "source": "manual"},
     ]
     config["segment"]["stable_min_duration_s"] = 0.8
-    config["segment"]["transient_drop_s"] = 0.1
     config["segment"]["min_valid_points"] = 18
     config["segment"]["min_fit_r2"] = 0.5
     config["segment"]["min_motion_displacement_px"] = 1
@@ -368,12 +371,22 @@ def test_pipeline_estimates_elementary_charge_from_three_valid_drops(tmp_path: P
 
     elementary = json.loads((run_dir / "elementary_charge_result.json").read_text(encoding="utf-8"))
     multi = json.loads((run_dir / "multi_drop_results.json").read_text(encoding="utf-8"))
+    charge_results = pd.read_csv(run_dir / "drop_charge_results.csv")
+    failures = json.loads((run_dir / "drop_charge_failures.json").read_text(encoding="utf-8"))
+    platform_velocity = pd.read_csv(run_dir / "platform_velocity_results.csv")
+    model_comparison = json.loads((run_dir / "model_comparison.json").read_text(encoding="utf-8"))
+    uncertainty = json.loads((run_dir / "uncertainty_details.json").read_text(encoding="utf-8"))
     quality_rows = pd.read_csv(run_dir / "trajectory_quality_scores.csv")
     validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert multi["valid_drop_count"] == 3
+    assert len(charge_results) == multi["valid_drop_count"]
+    assert failures["failures"] == []
+    assert platform_velocity["track_id"].nunique() == 3
+    assert model_comparison["method"] == "bounded_profile_quantized_likelihood"
+    assert uncertainty["status"] in {"partial", "complete"}
     assert elementary["valid"] is True
-    assert elementary["num_used_drops"] == int(quality_rows["keep"].astype(bool).sum()) == 3
+    assert elementary["num_used_drops"] == multi["valid_drop_count"] == 3
     assert validity["overall_valid_for_elementary_charge"] is True
     assert manifest["status"]["valid_for_elementary_charge"] is True
 
@@ -444,7 +457,7 @@ def test_interactive_platform_wizard_prompts_for_ranges_and_voltage(monkeypatch)
 
 
 def test_tracking_roi_is_clipped_to_measurement_grid_bottom():
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     grid = GridCalibration(
         roi=Roi(10, 20, 300, 400),
         grid_lines_x=[30, 120, 220],

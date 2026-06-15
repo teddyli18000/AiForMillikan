@@ -207,6 +207,100 @@ def _annotate_candidate_physics(candidate_summary: pd.DataFrame, drop_results: l
     return annotated
 
 
+def _write_downstream_physics_outputs(
+    target: Path,
+    output_cfg: dict,
+    drop_segments: pd.DataFrame,
+    drop_results: list[dict[str, object]],
+    elementary: dict[str, object],
+) -> None:
+    velocity_rows = []
+    drop_id_by_track = {str(drop.get("track_id", "")): str(drop.get("drop_id", "")) for drop in drop_results}
+    if not drop_segments.empty:
+        for row in drop_segments.to_dict("records"):
+            velocity_rows.append(
+                {
+                    "drop_id": drop_id_by_track.get(str(row.get("track_id", "")), ""),
+                    "track_id": row.get("track_id", ""),
+                    "platform_id": row.get("platform_id", ""),
+                    "voltage_V": row.get("voltage_V"),
+                    "velocity_px_s": row.get("vy_px_s"),
+                    "velocity_m_s": row.get("vy_m_s"),
+                    "sigma_velocity_random_m_s": row.get("sigma_vy"),
+                    "velocity_ci_95_m_s": row.get("velocity_ci_95_m_s"),
+                    "fit_method": row.get("fit_method", ""),
+                    "uncertainty_method": row.get("uncertainty_method", ""),
+                    "num_points": row.get("num_points"),
+                    "duration_s": row.get("duration_s"),
+                    "rmse_px": row.get("rmse_y"),
+                    "r2_diagnostic": row.get("r2_y"),
+                    "slope_first_half": row.get("slope_first_half"),
+                    "slope_second_half": row.get("slope_second_half"),
+                    "residual_autocorrelation_lag1": row.get("residual_autocorrelation_lag1"),
+                    "warnings": row.get("flags", ""),
+                }
+            )
+    pd.DataFrame(velocity_rows).to_csv(target / output_cfg.get("platform_velocity_results_csv", "platform_velocity_results.csv"), index=False)
+
+    charge_rows = []
+    failures = []
+    for drop in drop_results:
+        fit = drop.get("fit", {}) or {}
+        result = drop.get("result", {}) or {}
+        if bool(drop.get("valid")):
+            charge_rows.append(
+                {
+                    "drop_id": drop.get("drop_id", ""),
+                    "track_id": drop.get("track_id", ""),
+                    "num_platforms": len(drop.get("platforms", []) or []),
+                    "validation_level": fit.get("validation_level", ""),
+                    "alpha_m_s": fit.get("alpha_m_s"),
+                    "gamma_m_s_V": fit.get("gamma_m_s_V"),
+                    "sigma_alpha_random": fit.get("sigma_alpha_random"),
+                    "sigma_gamma_random": fit.get("sigma_gamma_random"),
+                    "radius_m": result.get("radius_m"),
+                    "sigma_radius_random_m": result.get("sigma_radius_random_m"),
+                    "sigma_radius_systematic_m": result.get("sigma_radius_systematic_m"),
+                    "charge_abs_C": result.get("charge_abs_C"),
+                    "sigma_charge_random_C": result.get("sigma_charge_random_C", result.get("sigma_charge_C")),
+                    "sigma_charge_systematic_C": result.get("sigma_charge_systematic_C"),
+                    "sigma_charge_total_C": result.get("sigma_charge_total_C", result.get("sigma_charge_C")),
+                    "charge_ci95_low_C": result.get("charge_ci95_low_C"),
+                    "charge_ci95_high_C": result.get("charge_ci95_high_C"),
+                    "voltage_span_V": fit.get("voltage_span_V"),
+                    "intercept_extrapolation_ratio": fit.get("intercept_extrapolation_ratio"),
+                    "fit_chi_square": fit.get("fit_chi_square"),
+                    "fit_dof": fit.get("fit_dof"),
+                    "warnings": ";".join(str(flag) for flag in drop.get("flags", []) if str(flag)),
+                }
+            )
+        else:
+            failures.append(
+                {
+                    "drop_id": drop.get("drop_id", ""),
+                    "track_id": drop.get("track_id", ""),
+                    "stage": "single_drop_physics",
+                    "errors": list(drop.get("flags", []) or []),
+                    "diagnostics": {"fit": fit},
+                }
+            )
+    pd.DataFrame(charge_rows).to_csv(target / output_cfg.get("drop_charge_results_csv", "drop_charge_results.csv"), index=False)
+    _write_json(target / output_cfg.get("drop_charge_failures_json", "drop_charge_failures.json"), {"failures": failures})
+    _write_json(target / output_cfg.get("model_comparison_json", "model_comparison.json"), elementary.get("model_comparison", {}))
+    _write_json(
+        target / output_cfg.get("uncertainty_details_json", "uncertainty_details.json"),
+        {
+            "status": "partial",
+            "random_uncertainty": "single-drop q uses velocity-fit covariance propagation",
+            "systematic_uncertainty": "shared systematic Monte Carlo not yet implemented",
+            "elementary": {
+                "profile_ci_95_C": elementary.get("elementary_charge", {}).get("profile_ci_95_C"),
+                "bootstrap_ci_95_C": elementary.get("elementary_charge", {}).get("ci_95_C"),
+            },
+        },
+    )
+
+
 def _candidate_rank_map(candidate_summary: pd.DataFrame) -> dict[str, int]:
     if candidate_summary.empty or "candidate_id" not in candidate_summary:
         return {}
@@ -348,8 +442,9 @@ def run_pipeline(
     quality_scores["drop_valid"] = bool(drop_result.get("valid"))
     quality_scores["drop_flags"] = drop_result.get("flags", [])
     _write_json(target / output_cfg["quality_scores_json"], quality_scores)
-    elementary = estimate_elementary_charge(kept_drop_results, config)
+    elementary = estimate_elementary_charge(drop_results, config)
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
+    _write_downstream_physics_outputs(target, output_cfg, drop_segments, drop_results, elementary)
     _emit_progress(progress_callback, 0.86, "write visualization outputs")
     visualization_layers = build_visualization_layers(
         meta,
@@ -410,7 +505,7 @@ def run_pipeline(
         segments,
         candidate_summary,
         multi_drop_results,
-        int(config["elementary"]["min_drops"]),
+        int(config["elementary"].get("min_drops_for_estimation", config["elementary"].get("min_drops", 3))),
     )
     _write_json(target / output_cfg["validity_report_json"], validity_report)
     write_summary(target, config)

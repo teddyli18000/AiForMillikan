@@ -18,7 +18,19 @@ def _raw_smoke_video() -> Path:
 def test_default_config_loads():
     config = load_config("configs/default.yaml")
     assert config["physics"]["plate_distance_m"] == 0.005
-    assert config["segment"]["stable_min_duration_s"] > 0
+    assert config["segment"]["boundary_guard_frames"] == 0
+    assert "transient_drop_s" not in config["segment"]
+    assert "voltage_sign" not in config["physics"]
+    assert "radius_tolerance_m" not in config["physics"]
+    assert "max_radius_iterations" not in config["physics"]
+    assert config["physics"]["random_mc_samples"] == 1000
+    assert config["physics"]["systematic_mc_samples"] == 0
+    assert "spatial_scale_rel" in config["physics"]["systematic_uncertainty"]
+    assert config["viscosity"]["source"] == "temperature"
+    assert config["elementary"]["min_drops_for_estimation"] == 3
+    assert config["elementary"]["e_search_min_C"] == 0.5e-19
+    assert config["elementary"]["e_search_max_C"] == 2.5e-19
+    assert config["elementary"]["e_bootstrap_samples"] == 1000
 
 
 def test_default_config_is_manual_platform_first_without_ocr():

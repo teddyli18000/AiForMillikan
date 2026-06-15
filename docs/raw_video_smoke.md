@@ -45,5 +45,6 @@ The current `develop`/`main` backend does not run voltage OCR. It may suggest pl
 - `3u1.mp4` and `3u2.mp4` are useful negative/stability tests. They should not be reported as valid unless platform choices, direction convention, or tracking evidence changes enough to satisfy the physics checks.
 - Auto boundary suggestions are accepted only when the detected count matches the user-provided count and no suggested platform has a reject reason. Rejected suggestions should fall back to manual boundary input.
 - `candidate_tracks_summary.csv.selected_for_multi_drop=true` means the candidate was evaluated. Use `q_valid=true`, `multi_drop_results.valid_drop_count`, or `run_manifest.counts.valid_drops` for physically valid droplets.
-- Use `trajectory_quality_scores.csv.keep=true` together with `q_valid=true` for results allowed into elementary-charge estimation.
-- Short or transient-cropped platforms must retain their source `track_id` in `drop_track_segments.csv`; blank `track_id` rows can create fake drops and are a regression.
+- Raw-video smoke runs are diagnostic integration checks for ROI, tracking, platform handling, and artifact writing. They are not scientific validation for formal elementary-charge inference on this branch.
+- Scientific downstream validation starts from already accepted trajectories through `millikan_ai.downstream.run_downstream_analysis`; every mathematically successful q from that accepted input enters elementary-charge estimation.
+- Short platform rows must retain their source `track_id` in `drop_track_segments.csv`; blank `track_id` rows can create fake drops and are a regression.

@@ -14,6 +14,7 @@ This project analyzes Millikan oil drop experiment videos. The current backend i
 - `src/millikan_ai/segments/`: voltage platform segmentation and terminal velocity fitting.
 - `src/millikan_ai/physics/`: physics-based single-drop charge inversion.
 - `src/millikan_ai/elementary/`: non-ML elementary charge estimation from computed drop results.
+- `src/millikan_ai/downstream.py`: standalone scientific downstream API for already accepted trajectories, voltage platforms, calibration scale, and physical config. It must not require a video path, tracker, candidate generation, or overlays.
 - `training_quality_filter/`: future ML/unsupervised trajectory quality filtering subsystem. Do not implement ML filtering in the main backend.
 
 ## Raw Data
@@ -41,9 +42,20 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - If ROI detection or tracking confidence is low, write explicit flags and allow manual/config-driven correction.
 - Do not claim a trained ML filter is implemented. The runtime adapter must report `mode=mock_rule_adapter`, `trained=false`.
 - Do not silently output physical results when fewer than two usable voltage platforms exist.
+- Single-drop physics uses the fixed convention `+Y` downward and positive voltage pushing droplets upward, fitting `v = alpha - gamma U`. Cunningham radius solving uses the closed-form positive root, not fixed-point iteration.
+- Physical q results must not invent a fixed `quality_score`; downstream diagnostics and the quality adapter may report adapter scores separately.
+- Scientific validation for downstream physics/e estimation uses synthetic accepted-trajectory fixtures with known truth. Do not use raw videos as scientific validation for elementary charge on this branch.
+- On `feature/downstream-physics-elementary`, do not modify tracker, optical-flow, Kalman, detection, trajectory stitching, or upstream filtering algorithms. Teacher's grid-avoidance idea is an upstream research direction for docs/interface assumptions only on this branch.
+- Current downstream inputs are already accepted trajectories. Future upstream may provide the longest continuous segment that avoids grid-line neighborhoods, but this branch must not implement or require a new stitching API.
+- Standalone downstream analysis starts after trajectory extraction and upstream trajectory filtering. Every mathematically successful q enters elementary-charge estimation; only computation failures are excluded.
+- A formal successful q requires finite positive radius, finite positive charge, and finite positive random q uncertainty from joint alpha/gamma Monte Carlo or an explicit analytic fallback. Point estimates with missing uncertainty are `point_estimate_only`, are reported as partial/failures, and do not enter the e probability model.
+- Shared systematic uncertainty belongs in the standalone downstream path: sample one common physical-parameter draw across all drops, while treating per-drop random q errors independently.
+- Shared systematic uncertainty must be propagated to final e by recomputing all q values for each shared draw and rerunning the elementary-charge estimator on that draw.
+- The elementary estimator's main `e_hat_C` is the global maximum of the bounded profile likelihood. Harmonic/divisor modes are diagnostics only and must not override the main estimate.
+- `scripts/validate_estimator_simulation.py` is the slow synthetic validation harness for e bias, interval coverage, continuous-data false positives, N/noise behavior, and harmonic ambiguity. It must not use raw videos.
 - `analysis_report.md` is the user-facing report for the selected/default drop plus any configured multi-drop outputs; CSV/JSON/MP4 files remain the machine-readable contract.
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
-- Platform velocity fitting should use the best stable sub-window inside each voltage platform, not blindly fit the whole platform.
+- Platform velocity fitting in the downstream scientific path fits the full provided constant-voltage platform, optionally trimming only `segment.boundary_guard_frames`; do not restore fixed transient trimming or highest-R2 sub-window selection.
 - Candidate tracking and segment validation must reject stationary grid/bright-spot candidates using `segment.min_motion_displacement_px`.
 - Tracking must process each video frame once for shared blob detection across active seeds; LK optical flow should run on a local patch around the tracked point rather than the full video frame.
 - Candidate tracking must stay inside the detected grid/tracking ROI so watermarks, manufacturer text, and border highlights are not eligible droplets.
@@ -54,7 +66,7 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - `visualization_layers.json` is the frontend-facing structured drawing contract. Prefer adding reusable layer objects there over encoding new UI-only information only in rendered images.
 - `diagnostic_overlay.jpg` is the frontend-facing static visualization contract: it should show pixel `+X/+Y`, microscope ROI, tracking ROI, grid lines, measurement lines, selected droplet, and trajectory. Keep `docs/frontend_backend_interface.md` in sync when this contract changes.
 - Multi-drop tracking defaults to the safety cap `tracking.max_drops: 20`; preserve the selected/default drop files for compatibility.
-- Elementary-charge estimation may only consume drops with both `trajectory_quality_scores.csv.keep=true` and `q_valid=true`.
+- Elementary-charge estimation consumes every successfully computed `q_valid=true` drop. The mock quality adapter is diagnostic/frontend-facing and must not be a second gate for e estimation.
 - Keep the backend CPU-only. GPU/OpenCV CUDA work requires a separately approved dependency plan.
 - `candidate_tracks_summary.csv` may include post-physics columns such as `drop_id`, `q_valid`, `physics_flags`, `charge_abs_C`, and `radius_m`. Treat `selected_for_multi_drop=true` as "tracked for evaluation"; use `q_valid=true` or `multi_drop_results.valid_drop_count` for physically valid droplets.
 - The selected/default drop should prefer the highest-ranked `q_valid=true` result. Do not use tracking rank alone when a lower-ranked selected candidate has a valid q and the top candidate is physically invalid.

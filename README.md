@@ -12,9 +12,12 @@ This stage implements a non-ML backend framework:
 - physics-based single-drop charge inversion
 - adaptive multi-drop q inversion and explainable rule-based quality filtering
 - non-ML elementary charge grid-search estimator
+- standalone downstream analysis for already accepted trajectories
 - run output validation and summaries
 
 ML-based trajectory filtering is intentionally left to `training_quality_filter/`.
+
+Current branch scope: the downstream physics and elementary-charge modules assume upstream has already produced accepted trajectories. The current upstream research direction is to avoid grid-line neighborhoods, first validating the longest reliable continuous segment that does not touch a grid line, then later studying whether segments on both sides of a grid line can be associated. That direction is documented here but is not implemented in this downstream branch.
 
 ## Setup
 
@@ -44,7 +47,7 @@ Start the guided interactive workflow from the repository root:
 .venv\Scripts\python run_millikan.py
 ```
 
-The wizard asks for the video path, config path, measurement distance, plate distance, voltage sign, and manual voltage platform ranges. It shows stage progress while running and prints the final run directory, report path, manifest path, and overlay path.
+The wizard asks for the video path, config path, measurement distance, plate distance, and manual voltage platform ranges. The backend uses the fixed experiment convention `+Y` downward and positive voltage pushing droplets upward; it no longer asks for a configurable voltage sign. It shows stage progress while running and prints the final run directory, report path, manifest path, and overlay path.
 
 Inspect a raw video:
 
@@ -95,6 +98,11 @@ Each run directory writes:
 - `diagnostics.json`
 - `drop_results.json`
 - `multi_drop_results.json`
+- `platform_velocity_results.csv`
+- `drop_charge_results.csv`
+- `drop_charge_failures.json`
+- `model_comparison.json`
+- `uncertainty_details.json`
 - `quality_scores.json`
 - `trajectory_quality_scores.csv`
 - `elementary_charge_result.json`
@@ -188,6 +196,43 @@ print(result.manifest["status"])
 
 The API writes the same output contract as the CLI, including `run_manifest.json`.
 
+## Standalone Downstream API
+
+For scientific validation of the downstream physics/e pipeline, use prepared accepted trajectories instead of raw videos:
+
+```python
+from millikan_ai.downstream import run_downstream_analysis
+
+result = run_downstream_analysis(
+    trajectories=accepted_trajectories,
+    platforms=voltage_platforms,
+    scale_y_m_per_px=scale_y_m_per_px,
+    config=config,
+    run_dir="runs/downstream_case",
+)
+```
+
+This path does not call the tracker or read video frames. It writes `platform_velocity_results.csv`, `drop_charge_results.csv`, `drop_charge_failures.json`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, `plots_data.json`, and `analysis_report.md`.
+
+For shared systematic uncertainty, set `physics.systematic_mc_samples` and `physics.systematic_uncertainty` in the config. Each systematic draw uses one common set of sampled physical parameters across all drops, while per-drop random errors remain independent.
+Each shared systematic draw also recomputes the full set of q values and reruns the elementary-charge estimator, so `uncertainty_details.json` includes `sigma_e_systematic_C`, systematic e intervals, and combined e intervals.
+
+Slow estimator validation can be run on synthetic known-truth data:
+
+```powershell
+$env:PYTHONPATH='src'
+.venv\Scripts\python scripts\validate_estimator_simulation.py --preset smoke --replicates 3 --null-samples 20 --output runs\estimator_simulation_validation.json
+```
+
+For artificial review before scientific use, run at least:
+
+```powershell
+$env:PYTHONPATH='src'
+.venv\Scripts\python scripts\validate_estimator_simulation.py --preset quick_validation --profile-points 80 --null-samples 20 --output runs\estimator_simulation_validation.json
+```
+
+`smoke` uses a small default matrix for sanity checks. `quick_validation` enforces at least 50 replicates across N = 10, 15, 20, and 40; `full_validation` enforces at least 200. The script also accepts `--n-values` and `--noise-values` for targeted benchmark slices, and writes both JSON and Markdown summaries. Raw-video smoke runs must not be used as elementary-charge scientific validation.
+
 ## Current Raw Video Behavior
 
 `raw_data/2.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md` when auto-detected platform boundaries are combined with the guide voltage values. With platform values supplied, the backend can select stable droplets and compute real physics-based `q`. Without platform values, the run is explicitly invalid for q calculation.
@@ -198,19 +243,20 @@ For frontend review, each run writes `run_manifest.json`, `validity_report.json`
 
 Raw smoke-test findings for the current `1.mp4` through `8.mp4` samples and older archived videos are recorded in `docs/raw_video_smoke.md`.
 
-With reliable platform data, the single-drop calculation uses:
+Raw-video smoke runs are diagnostic integration checks only; they are not scientific validation of the elementary-charge estimator.
+
+With reliable platform data, the downstream physics path uses the fixed sign convention:
 
 ```text
 time_s = frame_idx / fps
 v_y_m_s = v_y_px_s * scale_y_m_per_px
-E = voltage_sign * U / d
-v = alpha + beta * E
+v = alpha - gamma * U
+eta(T) = Sutherland air viscosity from viscosity.air_temperature_C, unless direct viscosity is configured
 eta_eff(r) = eta / (1 + b / (p * r))
-r = sqrt(9 * eta_eff(r) * alpha / (2 * rho * g))
-q = 6 * pi * eta_eff(r) * r * beta
+r and |q| are computed from alpha, gamma, eta_eff, and plate distance d
 ```
 
-Within each voltage platform, the backend fits the best stable sub-window after dropping the transient interval. It does not blindly fit the whole platform when early motion is unstable.
+Within each voltage platform, the downstream velocity fitter uses the whole confirmed constant-voltage platform by default. It may apply `segment.boundary_guard_frames` when configured, but it no longer drops a fixed mechanical transient interval or chooses the highest-R2 sub-window as the default calculation path. R2, first/second-half slopes, residual autocorrelation, and fit warnings are diagnostics rather than universal hard filters.
 
 For a single oil drop, elementary-charge blind estimation is intentionally reported as underdetermined because it needs multiple independent `q_i` values.
 
@@ -218,6 +264,6 @@ By default, `tracking.max_drops` is `20`. The tracker samples multiple keyframes
 
 Tracked droplets and physically valid droplets are distinct. `candidate_tracks_summary.csv` records post-physics fields such as `q_valid`, `physics_flags`, `charge_abs_C`, and `radius_m`; `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` are the authoritative valid-droplet counts for reports and frontend display.
 
-The quality adapter is deterministic and reports `trained=false`. Only tracks with `trajectory_quality_scores.csv.keep=true` and `q_valid=true` enter elementary-charge estimation.
+The quality adapter is deterministic and reports `trained=false`. It is diagnostic/frontend-facing; elementary-charge estimation consumes every successfully computed `q_valid=true` drop rather than applying a second `keep=true` quality gate.
 
 When multiple selected tracks are evaluated, `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` use the highest-ranked physically valid drop. If no selected drop has valid q, they fall back to the highest-ranked evaluated candidate and report explicit physics flags.

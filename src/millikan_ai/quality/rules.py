@@ -61,7 +61,7 @@ def score_drop_quality(
         drop = drops_by_track.get(track_id, {})
         trajectory_score, reasons = _trajectory_score(candidate, config)
         q_valid = bool(drop.get("valid"))
-        physics_score = _bounded(drop.get("quality_score")) if q_valid else 0.0
+        physics_score = _bounded(drop.get("quality_score"), 1.0) if q_valid else 0.0
         if not q_valid:
             reasons.append("q_invalid")
         reasons.extend(str(flag) for flag in drop.get("flags", []) if str(flag))

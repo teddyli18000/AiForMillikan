@@ -35,6 +35,23 @@ For non-interactive CLI integration, a caller can create or request manual platf
 .venv\Scripts\python -m millikan_ai.cli analyze --video <video_path> --config <generated_config.yaml> --run-dir <run_dir>
 ```
 
+For downstream scientific validation after upstream trajectory extraction/filtering has already accepted trajectories, use the standalone API:
+
+```python
+from millikan_ai.downstream import run_downstream_analysis
+
+result = run_downstream_analysis(
+    trajectories=accepted_trajectories,
+    platforms=voltage_platforms,
+    scale_y_m_per_px=scale_y_m_per_px,
+    config=config,
+    run_dir=run_dir,
+)
+```
+
+This standalone path does not require a video path and must not call tracking, candidate generation, or overlays. Raw-video runs remain diagnostic integration checks, not elementary-charge scientific validation.
+The downstream entry point assumes trajectories have already been accepted by upstream extraction/filtering. Future upstream experiments may provide a longest grid-line-avoiding segment or an upstream-associated multi-segment trajectory, but this contract does not add a stitching API in the downstream branch.
+
 `manual_platforms` rows use the schema written to `platforms.csv`:
 
 ```yaml
@@ -73,13 +90,19 @@ Each run should also expose:
 - `validity_report.json`: machine-readable legality and reasonableness checks.
 - `best_track.csv`: per-frame selected droplet coordinates.
 - `drop_tracks.csv`: per-frame coordinates for all selected droplets when multi-drop tracking is enabled.
-- `best_track_segments.csv`: fitted stable velocity windows.
-- `drop_track_segments.csv`: fitted stable velocity windows for all selected droplets.
+- `best_track_segments.csv`: per-platform terminal-velocity fits for the selected/default droplet.
+- `drop_track_segments.csv`: per-platform terminal-velocity fits for all selected droplets.
 - `candidate_tracks_summary.csv`: ranked candidate droplet quality table.
 - `platforms.csv`: voltage platform boundaries and values.
 - `auto_platform_suggestions.csv`: visual voltage-display boundary suggestions before user voltage values are bound.
 - `drop_results.json`: physical `q` calculation result.
 - `multi_drop_results.json`: per-drop physical `q` results and valid drop counts.
+- `platform_velocity_results.csv`: normalized per-platform terminal velocity results for downstream physics UI panels.
+- `drop_charge_results.csv`: one row per successfully computed q; every row enters elementary-charge estimation.
+- `drop_charge_failures.json`: explicit physics failure records for drops that did not produce a formal q, including `point_estimate_only` rows when q and radius exist but finite positive random q uncertainty is unavailable.
+- `model_comparison.json`: elementary-charge quantized-vs-continuous predictive comparison summary.
+- `uncertainty_details.json`: current uncertainty summary and implemented/pending uncertainty methods.
+- `plots_data.json`: machine-readable data for downstream scientific plots.
 - `quality_scores.json`: deterministic quality-adapter metadata and aggregate counts.
 - `trajectory_quality_scores.csv`: per-track trajectory score, physics score, keep decision, and reject reasons.
 - `analysis_report.md`: user-facing full report.
@@ -96,6 +119,8 @@ Each run should also expose:
 - selected droplet marker
 - selected droplet trajectory
 - all selected droplet trajectories in the `drop_tracks` layer when more than one track is selected
+
+Standalone downstream runs write a concise debugging report and machine outputs without video visualization layers. Use `drop_charge_results.csv`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, and `plots_data.json` for those panels.
 
 `diagnostic_overlay.jpg` is a rendered preview of the same concepts. The UI should prefer `visualization_layers.json` for interactive overlays and use the image as a quick preview or fallback.
 
@@ -142,7 +167,7 @@ The desktop UI should show these panels for each run:
 4. Track overlay video from `overlay_best_track.mp4`.
 5. Platform editor table backed by `platforms.csv`.
 6. Candidate ranking table backed by `candidate_tracks_summary.csv`.
-7. Stable velocity segments backed by `best_track_segments.csv`.
+7. Per-platform terminal-velocity fits backed by `best_track_segments.csv`.
 8. Physics calculation backed by `drop_results.json`.
 9. Multi-drop track and segment tables backed by `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json`.
 10. Flags and failure reasons from `diagnostics.json`, `drop_results.json`, and `elementary_charge_result.json`.
@@ -175,6 +200,12 @@ The backend validates frame ranges and records manual entries as non-OCR sources
 
 These fields explain why bright grid intersections, watermarks, borders, edge highlights, or physically impossible tracks are not counted as valid droplets.
 
+## Downstream Scientific Output Units
+
+Standalone downstream reports display radius in micrometres and charge/sigma charge in `1e-19 C`. Machine CSV/JSON files keep SI values such as `radius_m`, `charge_abs_C`, and `sigma_charge_random_C`, and may include display columns such as `radius_um`, `charge_1e_minus_19_C`, and `sigma_charge_total_1e_minus_19_C`.
+
+`uncertainty_details.json` reports random per-drop uncertainty, optional shared systematic Monte Carlo, combined charge intervals, and e-level systematic intervals. Shared systematic draws reuse one sampled set of scale, plate distance, voltage calibration, viscosity/temperature, pressure, oil density, and Cunningham `b` values across all drops, then rerun the elementary estimator on the full sampled q set.
+
 ## Multi-Drop Contract
 
 The current default tracks up to `tracking.max_drops: 20` distinct trajectories and computes q per selected track. Existing selected/default drop fields remain stable:
@@ -185,7 +216,7 @@ The current default tracks up to `tracking.max_drops: 20` distinct trajectories 
 - keep `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for that selected/default drop
 - use `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json` for all selected drops
 - use `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` for the valid-droplet count
-- use `elementary_charge_result.json` for the estimator over independent results with both `keep=true` and `q_valid=true`
+- use `elementary_charge_result.json` for the estimator over every successfully computed q in standalone downstream analysis; video-pipeline `keep` remains a diagnostic quality-adapter field
 - keep single-drop reports valid when only one droplet is found
 
 ## Current Quality Scope
