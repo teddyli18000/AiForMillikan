@@ -130,6 +130,94 @@ def _charge_uncertainty(charge_abs: float, alpha: float, gamma: float, fit: dict
     return abs(charge_abs) * math.sqrt(sum(terms))
 
 
+def _random_uncertainty_monte_carlo(
+    alpha: float,
+    gamma: float,
+    fit: dict[str, object],
+    constants: dict,
+    viscosity: dict,
+    samples: int,
+    seed: int,
+) -> dict[str, object]:
+    covariance = np.asarray(fit.get("covariance", []), dtype=float)
+    if samples <= 0 or covariance.shape != (2, 2) or not np.all(np.isfinite(covariance)):
+        return {
+            "uncertainty_method": "unavailable",
+            "random_mc_samples_requested": int(max(0, samples)),
+            "random_mc_samples_used": 0,
+            "sigma_radius_random_m": math.inf,
+            "radius_ci95_low_m": math.nan,
+            "radius_ci95_high_m": math.nan,
+            "sigma_charge_random_C": math.inf,
+            "charge_ci95_low_C": math.nan,
+            "charge_ci95_high_C": math.nan,
+        }
+    covariance = (covariance + covariance.T) / 2.0
+    try:
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    except np.linalg.LinAlgError:
+        return {
+            "uncertainty_method": "unavailable",
+            "random_mc_samples_requested": int(samples),
+            "random_mc_samples_used": 0,
+            "sigma_radius_random_m": math.inf,
+            "radius_ci95_low_m": math.nan,
+            "radius_ci95_high_m": math.nan,
+            "sigma_charge_random_C": math.inf,
+            "charge_ci95_low_C": math.nan,
+            "charge_ci95_high_C": math.nan,
+        }
+    eigenvalues = np.maximum(eigenvalues, 0.0)
+    covariance_psd = (eigenvectors * eigenvalues) @ eigenvectors.T
+    rng = np.random.default_rng(seed)
+    draws = rng.multivariate_normal(np.array([alpha, gamma], dtype=float), covariance_psd, size=int(samples), check_valid="ignore")
+    radius_samples: list[float] = []
+    charge_samples: list[float] = []
+    eta = float(viscosity["air_viscosity_Pa_s"])
+    pressure = float(constants["pressure_Pa"])
+    b = float(constants["cunningham_b_Pa_m"])
+    d = float(constants["plate_distance_m"])
+    for alpha_i, gamma_i in draws:
+        if not (math.isfinite(float(alpha_i)) and math.isfinite(float(gamma_i))) or alpha_i <= 0 or gamma_i <= 0:
+            continue
+        radius_i, flags = solve_radius_with_cunningham(float(alpha_i), constants)
+        if flags or radius_i is None:
+            continue
+        try:
+            eff_i = eta_eff(radius_i, eta, pressure, b)
+        except ValueError:
+            continue
+        charge_i = 6 * math.pi * eff_i * radius_i * d * float(gamma_i)
+        if math.isfinite(charge_i) and charge_i > 0:
+            radius_samples.append(float(radius_i))
+            charge_samples.append(float(charge_i))
+    if len(charge_samples) < 2:
+        return {
+            "uncertainty_method": "joint_alpha_gamma_monte_carlo",
+            "random_mc_samples_requested": int(samples),
+            "random_mc_samples_used": int(len(charge_samples)),
+            "sigma_radius_random_m": math.inf,
+            "radius_ci95_low_m": math.nan,
+            "radius_ci95_high_m": math.nan,
+            "sigma_charge_random_C": math.inf,
+            "charge_ci95_low_C": math.nan,
+            "charge_ci95_high_C": math.nan,
+        }
+    radius_arr = np.asarray(radius_samples, dtype=float)
+    charge_arr = np.asarray(charge_samples, dtype=float)
+    return {
+        "uncertainty_method": "joint_alpha_gamma_monte_carlo",
+        "random_mc_samples_requested": int(samples),
+        "random_mc_samples_used": int(len(charge_arr)),
+        "sigma_radius_random_m": float(np.std(radius_arr, ddof=1)),
+        "radius_ci95_low_m": float(np.percentile(radius_arr, 2.5)),
+        "radius_ci95_high_m": float(np.percentile(radius_arr, 97.5)),
+        "sigma_charge_random_C": float(np.std(charge_arr, ddof=1)),
+        "charge_ci95_low_C": float(np.percentile(charge_arr, 2.5)),
+        "charge_ci95_high_C": float(np.percentile(charge_arr, 97.5)),
+    }
+
+
 def _invalid_result(flags: list[str], platforms: pd.DataFrame, fit: dict[str, object] | None = None) -> dict[str, object]:
     return {
         "drop_id": "drop_001",
@@ -168,7 +256,18 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
         return _invalid_result(flags, stable, fit)
     eff = eta_eff(radius, float(viscosity["air_viscosity_Pa_s"]), float(constants["pressure_Pa"]), float(constants["cunningham_b_Pa_m"]))
     charge_abs = 6 * math.pi * eff * radius * d * gamma
-    sigma_charge = _charge_uncertainty(charge_abs, alpha, gamma, fit)
+    random_mc = _random_uncertainty_monte_carlo(
+        alpha,
+        gamma,
+        fit,
+        constants,
+        viscosity,
+        int(config.get("physics", {}).get("random_mc_samples", 1000)),
+        int(config.get("elementary", {}).get("random_seed", 42)),
+    )
+    sigma_charge = float(random_mc.get("sigma_charge_random_C", math.inf))
+    if not math.isfinite(sigma_charge):
+        sigma_charge = _charge_uncertainty(charge_abs, alpha, gamma, fit)
     return {
         "drop_id": "drop_001",
         "valid": True,
@@ -186,7 +285,7 @@ def compute_drop_result(segments: pd.DataFrame, config: dict) -> dict[str, objec
             "charge_C": charge_abs,
             "charge_abs_C": charge_abs,
             "sigma_charge_C": sigma_charge,
-            "sigma_charge_random_C": sigma_charge,
+            **random_mc,
             "sigma_charge_systematic_C": 0.0,
             "sigma_charge_total_C": sigma_charge,
         },

@@ -18,6 +18,32 @@ def _physics_constants(config: dict) -> dict:
     return {**config["physics"], **resolve_air_viscosity(config)}
 
 
+def _synthetic_segments_for_radius_charge(config: dict, radius: float, charge: float, voltages: tuple[float, ...]) -> pd.DataFrame:
+    constants = _physics_constants(config)
+    eta = constants["air_viscosity_Pa_s"]
+    pressure = constants["pressure_Pa"]
+    b = constants["cunningham_b_Pa_m"]
+    d = constants["plate_distance_m"]
+    rho = constants["oil_density_kg_m3"]
+    gravity = constants["gravity_m_s2"]
+    eff = eta_eff(radius, eta, pressure, b)
+    alpha = (2 * rho * gravity * radius**2) / (9 * eff)
+    gamma = charge / (6 * math.pi * eff * radius * d)
+    return pd.DataFrame(
+        [
+            {
+                "platform_id": f"P{index:03d}",
+                "track_id": "accepted_001",
+                "voltage_V": voltage,
+                "vy_m_s": alpha - gamma * voltage,
+                "sigma_vy": 1.0e-7,
+                "stable": True,
+            }
+            for index, voltage in enumerate(voltages, start=1)
+        ]
+    )
+
+
 def test_cunningham_closed_form_satisfies_radius_equation():
     config = load_config("configs/default.yaml")
     constants = _physics_constants(config)
@@ -103,6 +129,50 @@ def test_compute_drop_result_recovers_known_radius_and_charge():
     assert result["result"]["charge_abs_C"] == pytest.approx(charge, rel=1e-9)
     assert not math.isclose(result["result"]["sigma_charge_C"], abs(charge) * 0.15, rel_tol=1e-12, abs_tol=0.0)
     assert "quality_score" not in result
+
+
+@pytest.mark.parametrize(
+    "voltages",
+    [
+        (0.0, 250.0),
+        (100.0, 250.0),
+        (0.0, 234.988155),
+        (0.0, 180.0, 360.0),
+    ],
+)
+def test_compute_drop_result_known_truth_voltage_scenarios(voltages):
+    config = load_config("configs/default.yaml")
+    config["physics"]["random_mc_samples"] = 200
+    radius = 0.72e-6
+    charge = 4.8e-19
+
+    result = compute_drop_result(_synthetic_segments_for_radius_charge(config, radius, charge, voltages), config)
+
+    assert result["valid"] is True
+    assert result["fit"]["alpha_m_s"] > 0
+    assert result["fit"]["gamma_m_s_V"] > 0
+    assert result["result"]["radius_m"] == pytest.approx(radius, rel=1e-9)
+    assert result["result"]["charge_abs_C"] == pytest.approx(charge, rel=1e-9)
+
+
+def test_compute_drop_result_joint_monte_carlo_uncertainty_outputs():
+    config = load_config("configs/default.yaml")
+    config["physics"]["random_mc_samples"] = 400
+    radius = 0.75e-6
+    charge = 4.8e-19
+    rows = _synthetic_segments_for_radius_charge(config, radius, charge, (0.0, 180.0, 360.0))
+
+    result = compute_drop_result(rows, config)
+
+    assert result["valid"] is True
+    output = result["result"]
+    assert output["uncertainty_method"] == "joint_alpha_gamma_monte_carlo"
+    assert output["random_mc_samples_used"] > 100
+    assert output["sigma_radius_random_m"] > 0
+    assert output["radius_ci95_low_m"] < output["radius_m"] < output["radius_ci95_high_m"]
+    assert output["sigma_charge_random_C"] > 0
+    assert output["charge_ci95_low_C"] < output["charge_abs_C"] < output["charge_ci95_high_C"]
+    assert result["fit"]["covariance"][0][1] != 0
 
 
 def test_compute_drop_result_fails_for_non_positive_gamma():

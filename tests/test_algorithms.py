@@ -17,6 +17,7 @@ def _fast_elementary_config() -> dict:
     config["elementary"]["e_bootstrap_samples"] = 0
     config["elementary"]["measurement_mc_samples"] = 20
     config["elementary"]["null_simulation_samples"] = 0
+    config["physics"]["random_mc_samples"] = 50
     return config
 
 

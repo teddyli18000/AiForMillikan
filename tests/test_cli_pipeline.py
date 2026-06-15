@@ -23,6 +23,7 @@ def _fast_config() -> dict:
     config["elementary"]["e_bootstrap_samples"] = 0
     config["elementary"]["measurement_mc_samples"] = 0
     config["elementary"]["null_simulation_samples"] = 0
+    config["physics"]["random_mc_samples"] = 50
     config["segment"]["velocity_bootstrap_samples_quick"] = 0
     return config
 
