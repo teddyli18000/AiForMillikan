@@ -366,3 +366,42 @@ def test_heteroscedastic_gmm_reports_sigma_aware_fit():
     assert comparison["continuous_model"] == "heteroscedastic_error_convolved_gmm"
     assert comparison["heteroscedastic"] is True
     assert comparison["continuous_components"] <= 2
+
+
+@pytest.mark.parametrize("n_drops", [3, 5, 10, 15, 20, 40])
+def test_elementary_quantized_known_truth_across_dataset_sizes(n_drops):
+    config = _fast_elementary_config()
+    config["elementary"]["profile_grid_points"] = 70
+    config["elementary"]["comparison_profile_grid_points"] = 40
+    config["elementary"]["cv_repeats"] = 1
+    e = 1.6e-19
+    multipliers = [2 + (idx % 8) for idx in range(n_drops)]
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e + ((i % 3) - 1) * 0.01e-19, "sigma_charge_C": 0.05e-19}}
+        for i, n in enumerate(multipliers)
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["valid"] is True
+    assert result["num_used_drops"] == n_drops
+    assert abs(result["elementary_charge"]["e_hat_C"] - e) < 0.12e-19
+
+
+def test_elementary_reports_leave_one_drop_out_stability_and_is_order_invariant():
+    config = _fast_elementary_config()
+    config["elementary"]["profile_grid_points"] = 80
+    config["elementary"]["comparison_profile_grid_points"] = 40
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.05e-19}}
+        for i, n in enumerate([2, 3, 5, 7, 8])
+    ]
+
+    forward = estimate_elementary_charge(drops, config)
+    reversed_result = estimate_elementary_charge(list(reversed(drops)), config)
+
+    stability = forward["stability"]["leave_one_drop_out"]
+    assert len(stability) == 5
+    assert all(row["valid"] for row in stability)
+    assert forward["elementary_charge"]["e_hat_C"] == pytest.approx(reversed_result["elementary_charge"]["e_hat_C"])

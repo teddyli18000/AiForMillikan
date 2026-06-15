@@ -365,7 +365,8 @@ def run_downstream_analysis(
     plots_data = {
         "elementary_profile": {
             "candidate_modes": elementary.get("harmonic_analysis", {}).get("candidate_modes", []),
-        }
+        },
+        "leave_one_drop_out": elementary.get("stability", {}).get("leave_one_drop_out", []),
     }
 
     drop_segments.to_csv(target / "drop_track_segments.csv", index=False)

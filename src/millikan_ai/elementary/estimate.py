@@ -424,6 +424,35 @@ def _measurement_mc_e(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[str, An
     return estimates
 
 
+def _leave_one_drop_out_stability(charges: np.ndarray, sigmas: np.ndarray, drops: list[dict], cfg: dict[str, Any], e_hat: float) -> list[dict[str, object]]:
+    if len(charges) < 4:
+        return []
+    fit_cfg = _comparison_cfg(cfg)
+    rows = []
+    for index, drop in enumerate(drops):
+        mask = np.ones(len(charges), dtype=bool)
+        mask[index] = False
+        try:
+            fit = _fit_quantized_profile(charges[mask], sigmas[mask], fit_cfg)
+            rows.append(
+                {
+                    "drop_id": drop.get("drop_id", f"drop_{index+1:03d}"),
+                    "valid": True,
+                    "e_hat_C": float(fit.e_C),
+                    "delta_from_full_C": float(fit.e_C - e_hat),
+                }
+            )
+        except ValueError as exc:
+            rows.append(
+                {
+                    "drop_id": drop.get("drop_id", f"drop_{index+1:03d}"),
+                    "valid": False,
+                    "reason": str(exc),
+                }
+            )
+    return rows
+
+
 def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[str, object]:
     cfg = config["elementary"]
     valid = _usable_drops(drop_results)
@@ -475,6 +504,7 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
     e_min = float(_cfg_value(cfg, "e_search_min_C", "e_min_C", 0.5e-19))
     e_max = float(_cfg_value(cfg, "e_search_max_C", "e_max_C", 2.5e-19))
     comparison = _predictive_model_comparison(charges, sigmas, cfg)
+    leave_one_drop_out = _leave_one_drop_out_stability(charges, sigmas, valid, cfg, fit.e_C)
     return {
         "valid": True,
         "num_total_drops": len(drop_results),
@@ -508,6 +538,9 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
             "method": "bounded_profile_quantized_likelihood",
             "log_likelihood": float(fit.log_likelihood),
             **comparison,
+        },
+        "stability": {
+            "leave_one_drop_out": leave_one_drop_out,
         },
         "flags": ["harmonic_ambiguity"] if harmonic else [],
     }
