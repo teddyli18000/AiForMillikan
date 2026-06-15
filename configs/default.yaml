@@ -79,6 +79,15 @@ physics:
   cunningham_b_Pa_m: 0.0000082
   gravity_m_s2: 9.80665
   random_mc_samples: 1000
+  systematic_mc_samples: 0
+  systematic_uncertainty:
+    spatial_scale_rel: 0.0
+    plate_distance_rel: 0.0
+    voltage_scale_rel: 0.0
+    temperature_C: 0.0
+    pressure_rel: 0.0
+    oil_density_rel: 0.0
+    cunningham_b_rel: 0.0
 
 viscosity:
   source: temperature

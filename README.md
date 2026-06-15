@@ -212,6 +212,15 @@ result = run_downstream_analysis(
 
 This path does not call the tracker or read video frames. It writes `platform_velocity_results.csv`, `drop_charge_results.csv`, `drop_charge_failures.json`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, `plots_data.json`, and `analysis_report.md`.
 
+For shared systematic uncertainty, set `physics.systematic_mc_samples` and `physics.systematic_uncertainty` in the config. Each systematic draw uses one common set of sampled physical parameters across all drops, while per-drop random errors remain independent.
+
+Slow estimator validation can be run on synthetic known-truth data:
+
+```powershell
+$env:PYTHONPATH='src'
+.venv\Scripts\python scripts\validate_estimator_simulation.py --replicates 3 --null-samples 20 --output runs\estimator_simulation_validation.json
+```
+
 ## Current Raw Video Behavior
 
 `raw_data/2.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md` when auto-detected platform boundaries are combined with the guide voltage values. With platform values supplied, the backend can select stable droplets and compute real physics-based `q`. Without platform values, the run is explicitly invalid for q calculation.

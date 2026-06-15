@@ -119,6 +119,8 @@ Each run should also expose:
 - selected droplet trajectory
 - all selected droplet trajectories in the `drop_tracks` layer when more than one track is selected
 
+Standalone downstream runs write a concise debugging report and machine outputs without video visualization layers. Use `drop_charge_results.csv`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, and `plots_data.json` for those panels.
+
 `diagnostic_overlay.jpg` is a rendered preview of the same concepts. The UI should prefer `visualization_layers.json` for interactive overlays and use the image as a quick preview or fallback.
 
 ## Run Manifest Schema
@@ -196,6 +198,12 @@ The backend validates frame ranges and records manual entries as non-OCR sources
 - `charge_abs_C` and `radius_m`: post-physics values when `q_valid` is true.
 
 These fields explain why bright grid intersections, watermarks, borders, edge highlights, or physically impossible tracks are not counted as valid droplets.
+
+## Downstream Scientific Output Units
+
+Standalone downstream reports display radius in micrometres and charge in `1e-19 C`. Machine CSV/JSON files keep SI values such as `radius_m` and `charge_abs_C`, and may include display columns such as `radius_um` and `charge_1e_minus_19_C`.
+
+`uncertainty_details.json` reports random per-drop uncertainty, optional shared systematic Monte Carlo, and combined charge intervals. Shared systematic draws reuse one sampled set of scale, plate distance, voltage calibration, viscosity/temperature, pressure, oil density, and Cunningham `b` values across all drops.
 
 ## Multi-Drop Contract
 

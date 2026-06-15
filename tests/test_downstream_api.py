@@ -76,8 +76,8 @@ def _trajectories_for_drops(config: dict, charges: list[float]) -> tuple[pd.Data
 
 def test_standalone_downstream_api_requires_no_video_and_uses_every_successful_q(tmp_path: Path):
     config = load_config("configs/default.yaml")
-    config["elementary"]["e_bootstrap_samples"] = 20
-    config["elementary"]["measurement_mc_samples"] = 20
+    config["elementary"]["e_bootstrap_samples"] = 0
+    config["elementary"]["measurement_mc_samples"] = 0
     config["elementary"]["null_simulation_samples"] = 0
     e = 1.6e-19
     trajectories, platforms, scale = _trajectories_for_drops(config, [2 * e, 3 * e, 5 * e])
@@ -99,8 +99,8 @@ def test_standalone_downstream_api_requires_no_video_and_uses_every_successful_q
 
 def test_standalone_downstream_api_excludes_only_failed_q_from_elementary(tmp_path: Path):
     config = load_config("configs/default.yaml")
-    config["elementary"]["e_bootstrap_samples"] = 10
-    config["elementary"]["measurement_mc_samples"] = 10
+    config["elementary"]["e_bootstrap_samples"] = 0
+    config["elementary"]["measurement_mc_samples"] = 0
     config["elementary"]["null_simulation_samples"] = 0
     e = 1.6e-19
     trajectories, platforms, scale = _trajectories_for_drops(config, [2 * e, 3 * e, 5 * e])

@@ -46,6 +46,8 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - Physical q results must not invent a fixed `quality_score`; downstream diagnostics and the quality adapter may report adapter scores separately.
 - Scientific validation for downstream physics/e estimation uses synthetic accepted-trajectory fixtures with known truth. Do not use raw videos as scientific validation for elementary charge on this branch.
 - Standalone downstream analysis starts after trajectory extraction and upstream trajectory filtering. Every mathematically successful q enters elementary-charge estimation; only computation failures are excluded.
+- Shared systematic uncertainty belongs in the standalone downstream path: sample one common physical-parameter draw across all drops, while treating per-drop random q errors independently.
+- `scripts/validate_estimator_simulation.py` is the slow synthetic validation harness for e bias, interval coverage, continuous-data false positives, N/noise behavior, and harmonic ambiguity. It must not use raw videos.
 - `analysis_report.md` is the user-facing report for the selected/default drop plus any configured multi-drop outputs; CSV/JSON/MP4 files remain the machine-readable contract.
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
 - Platform velocity fitting in the downstream scientific path fits the full provided constant-voltage platform, optionally trimming only `segment.boundary_guard_frames`; do not restore fixed transient trimming or highest-R2 sub-window selection.

@@ -24,6 +24,8 @@ def test_default_config_loads():
     assert "radius_tolerance_m" not in config["physics"]
     assert "max_radius_iterations" not in config["physics"]
     assert config["physics"]["random_mc_samples"] == 1000
+    assert config["physics"]["systematic_mc_samples"] == 0
+    assert "spatial_scale_rel" in config["physics"]["systematic_uncertainty"]
     assert config["viscosity"]["source"] == "temperature"
     assert config["elementary"]["min_drops_for_estimation"] == 3
     assert config["elementary"]["e_search_min_C"] == 0.5e-19
