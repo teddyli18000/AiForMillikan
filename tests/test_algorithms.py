@@ -17,6 +17,8 @@ def _fast_elementary_config() -> dict:
     config["elementary"]["e_bootstrap_samples"] = 0
     config["elementary"]["measurement_mc_samples"] = 20
     config["elementary"]["null_simulation_samples"] = 0
+    config["elementary"]["tau_lambda_profile_optimize_points"] = 2
+    config["elementary"]["tau_lambda_optimizer_maxiter"] = 12
     config["physics"]["random_mc_samples"] = 50
     return config
 
@@ -251,7 +253,7 @@ def test_elementary_model_comparison_scores_clear_quantization_positive():
 
     result = estimate_elementary_charge(drops, config)
 
-    assert result["model_comparison"]["continuous_model"] == "error_convolved_gmm"
+    assert result["model_comparison"]["continuous_model"] == "heteroscedastic_error_convolved_gmm"
     assert result["model_comparison"]["delta_elpd"] > 0
 
 
@@ -267,3 +269,100 @@ def test_elementary_model_comparison_does_not_overstate_continuous_sample():
     result = estimate_elementary_charge(drops, config)
 
     assert result["model_comparison"]["evidence_label"] != "strong"
+
+
+def test_quantized_profile_optimizes_tau_lambda_continuously():
+    config = _fast_elementary_config()
+    config["elementary"]["profile_grid_points"] = 100
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e + offset, "sigma_charge_C": 0.025e-19}}
+        for i, (n, offset) in enumerate(zip([2, 3, 4, 6, 8, 9], [0.00e-19, 0.04e-19, -0.03e-19, 0.02e-19, -0.04e-19, 0.03e-19]))
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    optimizer = result["optimizer"]
+    assert optimizer["tau_lambda_optimizer"] == "scipy_minimize"
+    assert optimizer["converged"] is True
+    assert optimizer["n_eval"] > 0
+    old_tau_grid = {0.0, 0.5, 1.0, 2.0, 4.0}
+    tau_ratio = result["elementary_charge"]["tau_C"] / 0.025e-19
+    assert all(abs(tau_ratio - value) > 0.02 for value in old_tau_grid)
+
+
+def test_model_comparison_uses_repeated_5fold_for_large_samples():
+    config = _fast_elementary_config()
+    config["elementary"]["profile_grid_points"] = 70
+    config["elementary"]["cv_repeats"] = 2
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": (2 + (i % 7)) * e + ((i % 3) - 1) * 0.01e-19, "sigma_charge_C": 0.05e-19}}
+        for i in range(20)
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+    comparison = result["model_comparison"]
+
+    assert comparison["comparison_method"] == "repeated_5fold_predictive_likelihood"
+    assert comparison["folds"] == 5
+    assert comparison["repeats"] > 1
+    assert len(comparison["per_split_delta_elpd"]) == comparison["folds"] * comparison["repeats"]
+    assert comparison["delta_elpd_se"] >= 0
+
+
+def test_null_simulation_reports_empirical_p_value():
+    config = _fast_elementary_config()
+    config["elementary"]["profile_grid_points"] = 60
+    config["elementary"]["null_simulation_samples"] = 5
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.06e-19}}
+        for i, n in enumerate([2, 3, 4, 5, 6, 7])
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+    null = result["model_comparison"]["null_simulation"]
+
+    assert null["samples"] == 5
+    assert len(null["null_delta_elpd_distribution"]) == 5
+    assert 0.0 <= null["empirical_p_value"] <= 1.0
+    assert result["model_comparison"]["evidence_label"] in {"strong", "moderate", "weak", "insufficient"}
+
+
+def test_uncertainty_outputs_include_bootstrap_and_measurement_mc_counts():
+    config = _fast_elementary_config()
+    config["elementary"]["profile_grid_points"] = 70
+    config["elementary"]["e_bootstrap_samples"] = 7
+    config["elementary"]["measurement_mc_samples"] = 9
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.05e-19}}
+        for i, n in enumerate([2, 3, 5, 7, 8])
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+    elementary = result["elementary_charge"]
+
+    assert elementary["uncertainty_method"] == "profile_bootstrap_measurement_mc"
+    assert elementary["bootstrap_samples_used"] == 7
+    assert elementary["measurement_mc_samples_used"] == 9
+    assert len(elementary["measurement_mc_ci_95_C"]) == 2
+
+
+def test_heteroscedastic_gmm_reports_sigma_aware_fit():
+    config = _fast_elementary_config()
+    config["elementary"]["profile_grid_points"] = 60
+    values = [1.6e-19, 1.65e-19, 1.7e-19, 5.0e-19, 5.1e-19, 10.0e-19]
+    sigmas = [0.03e-19, 0.03e-19, 0.03e-19, 0.08e-19, 0.08e-19, 2.5e-19]
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": value, "sigma_charge_C": sigma}}
+        for i, (value, sigma) in enumerate(zip(values, sigmas))
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+    comparison = result["model_comparison"]
+
+    assert comparison["continuous_model"] == "heteroscedastic_error_convolved_gmm"
+    assert comparison["heteroscedastic"] is True
+    assert comparison["continuous_components"] <= 2
