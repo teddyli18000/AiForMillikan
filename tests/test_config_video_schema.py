@@ -21,7 +21,13 @@ def test_default_config_loads():
     assert config["segment"]["boundary_guard_frames"] == 0
     assert "transient_drop_s" not in config["segment"]
     assert "voltage_sign" not in config["physics"]
+    assert "radius_tolerance_m" not in config["physics"]
+    assert "max_radius_iterations" not in config["physics"]
     assert config["viscosity"]["source"] == "temperature"
+    assert config["elementary"]["min_drops_for_estimation"] == 3
+    assert config["elementary"]["e_search_min_C"] == 0.5e-19
+    assert config["elementary"]["e_search_max_C"] == 2.5e-19
+    assert config["elementary"]["e_bootstrap_samples"] == 1000
 
 
 def test_default_config_is_manual_platform_first_without_ocr():

@@ -19,6 +19,7 @@ calibration:
 
 segment:
   boundary_guard_frames: 0
+  velocity_bootstrap_samples_quick: 200
   stable_min_duration_s: 2.0
   min_valid_points: 45
   max_missing_ratio: 0.15
@@ -77,8 +78,6 @@ physics:
   pressure_Pa: 101325.0
   cunningham_b_Pa_m: 0.0000082
   gravity_m_s2: 9.80665
-  radius_tolerance_m: 1.0e-12
-  max_radius_iterations: 80
 
 viscosity:
   source: temperature
@@ -89,11 +88,13 @@ viscosity:
   sutherland_constant_K: 110.4
 
 elementary:
-  min_drops: 3
-  e_min_C: 0.5e-19
-  e_max_C: 2.5e-19
-  grid_points: 800
-  bootstrap_samples: 50
+  min_drops_for_estimation: 3
+  e_search_min_C: 0.5e-19
+  e_search_max_C: 2.5e-19
+  profile_grid_points: 800
+  e_bootstrap_samples: 1000
+  measurement_mc_samples: 1000
+  null_simulation_samples: 300
   random_seed: 42
 
 quality:

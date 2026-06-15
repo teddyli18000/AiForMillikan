@@ -49,39 +49,61 @@ def fit_velocity_voltage(platforms: pd.DataFrame) -> dict[str, object]:
     velocity = frame["vy_m_s"].to_numpy(float)
     if len(set(np.round(voltage, 9))) < 2:
         raise ValueError("insufficient_distinct_voltages")
+    design = np.column_stack([np.ones(len(voltage)), -voltage])
     if "sigma_vy" in frame:
         sigma = frame["sigma_vy"].to_numpy(float)
     elif "sigma_velocity_random_m_s" in frame:
         sigma = frame["sigma_velocity_random_m_s"].to_numpy(float)
     else:
-        sigma = np.full(len(frame), np.std(velocity) or 1.0, dtype=float)
-    positive_sigma = sigma[np.isfinite(sigma) & (sigma > 0)]
-    fallback_sigma = float(np.median(positive_sigma)) if len(positive_sigma) else max(float(np.std(velocity)), 1e-12)
-    sigma = np.where(np.isfinite(sigma) & (sigma > 0), sigma, fallback_sigma)
-    design = np.column_stack([np.ones(len(voltage)), -voltage])
-    weights = 1.0 / np.square(sigma)
-    xtw = design.T * weights
-    normal = xtw @ design
-    try:
-        covariance = np.linalg.inv(normal)
-    except np.linalg.LinAlgError as exc:
-        raise ValueError("singular_voltage_design") from exc
-    theta = covariance @ (xtw @ velocity)
+        sigma = np.asarray([], dtype=float)
+    valid_sigma = len(sigma) == len(frame) and bool(np.all(np.isfinite(sigma) & (sigma > 0)))
+    if valid_sigma:
+        weights = 1.0 / np.square(sigma)
+        xtw = design.T * weights
+        normal = xtw @ design
+        try:
+            covariance = np.linalg.inv(normal)
+        except np.linalg.LinAlgError as exc:
+            raise ValueError("singular_voltage_design") from exc
+        theta = covariance @ (xtw @ velocity)
+        fit_method = "weighted_least_squares"
+        velocity_uncertainty_source = "provided_sigma_v"
+    else:
+        try:
+            theta, _residual_sum, _rank, _singular = np.linalg.lstsq(design, velocity, rcond=None)
+            xtx_inv = np.linalg.inv(design.T @ design)
+        except np.linalg.LinAlgError as exc:
+            raise ValueError("singular_voltage_design") from exc
+        predicted_unscaled = design @ theta
+        residuals_unscaled = velocity - predicted_unscaled
+        dof_unscaled = len(voltage) - 2
+        if dof_unscaled > 0:
+            residual_variance = float(np.sum(np.square(residuals_unscaled)) / dof_unscaled)
+            covariance = xtx_inv * residual_variance
+        else:
+            covariance = np.full((2, 2), math.nan, dtype=float)
+        sigma = np.full(len(frame), math.nan, dtype=float)
+        fit_method = "unweighted_least_squares"
+        velocity_uncertainty_source = "unavailable_unweighted"
     alpha = float(theta[0])
     gamma = float(theta[1])
     predicted = design @ theta
     residuals = velocity - predicted
-    chi_square = float(np.sum(np.square(residuals / sigma)))
+    chi_square = float(np.sum(np.square(residuals / sigma))) if valid_sigma else math.nan
     dof = max(0, len(voltage) - 2)
     voltage_span = float(np.max(voltage) - np.min(voltage))
     condition = float(np.linalg.cond(design))
     intercept_ratio = float(max(abs(np.min(voltage)), abs(np.max(voltage))) / voltage_span) if voltage_span > 0 else math.inf
+    sigma_alpha = math.sqrt(max(0.0, float(covariance[0, 0]))) if math.isfinite(float(covariance[0, 0])) else math.inf
+    sigma_gamma = math.sqrt(max(0.0, float(covariance[1, 1]))) if math.isfinite(float(covariance[1, 1])) else math.inf
     return {
+        "fit_method": fit_method,
+        "velocity_uncertainty_source": velocity_uncertainty_source,
         "alpha_m_s": alpha,
         "gamma_m_s_V": gamma,
         "covariance": covariance.tolist(),
-        "sigma_alpha_random": math.sqrt(max(0.0, float(covariance[0, 0]))),
-        "sigma_gamma_random": math.sqrt(max(0.0, float(covariance[1, 1]))),
+        "sigma_alpha_random": sigma_alpha,
+        "sigma_gamma_random": sigma_gamma,
         "residuals_m_s": residuals.tolist(),
         "fit_chi_square": chi_square,
         "fit_dof": dof,

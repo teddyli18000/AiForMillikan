@@ -50,6 +50,23 @@ def test_fit_velocity_voltage_two_platforms_has_nonzero_covariance():
     assert fit["covariance"][0][0] > 0
     assert fit["covariance"][1][1] > 0
     assert fit["validation_level"] == "two_platform"
+    assert fit["fit_method"] == "weighted_least_squares"
+
+
+def test_fit_velocity_voltage_without_sigma_uses_explicit_unweighted_fallback():
+    rows = pd.DataFrame(
+        [
+            {"voltage_V": 100.0, "vy_m_s": 1.5e-4},
+            {"voltage_V": 300.0, "vy_m_s": 0.5e-4},
+        ]
+    )
+
+    fit = fit_velocity_voltage(rows)
+
+    assert fit["alpha_m_s"] == pytest.approx(2.0e-4)
+    assert fit["gamma_m_s_V"] == pytest.approx(5.0e-7)
+    assert fit["fit_method"] == "unweighted_least_squares"
+    assert fit["velocity_uncertainty_source"] == "unavailable_unweighted"
 
 
 def test_compute_drop_result_recovers_known_radius_and_charge():

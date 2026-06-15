@@ -252,7 +252,7 @@ def _predictive_model_comparison(charges: np.ndarray, sigmas: np.ndarray, cfg: d
 
 
 def _bootstrap_e(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[str, Any]) -> list[float]:
-    samples = int(cfg.get("e_bootstrap_samples_quick", 0))
+    samples = int(_cfg_value(cfg, "e_bootstrap_samples", "bootstrap_samples", 0))
     if samples <= 0:
         return []
     rng = random.Random(int(cfg.get("random_seed", 42)))
@@ -288,7 +288,7 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
         }
     charges = np.array([float(drop["result"]["charge_abs_C"]) for drop in valid], dtype=float)
     sigmas = np.array([float(drop["result"]["sigma_charge_C"]) for drop in valid], dtype=float)
-    finite = np.isfinite(charges) & np.isfinite(sigmas) & (charges > 0) & (sigmas > 0)
+    finite = np.isfinite(charges) & np.isfinite(sigmas) & (charges > 0) & (sigmas >= 0)
     charges = charges[finite]
     sigmas = sigmas[finite]
     valid = [drop for drop, keep in zip(valid, finite.tolist()) if keep]
@@ -299,6 +299,9 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
             "num_total_drops": len(drop_results),
             "num_used_drops": len(valid),
         }
+    positive_sigmas = sigmas[sigmas > 0]
+    numerical_floor = max(float(np.median(positive_sigmas)) * 1e-6, 1e-30) if len(positive_sigmas) else 1e-30
+    sigmas = np.maximum(sigmas, numerical_floor)
     fit = _fit_quantized_profile(charges, sigmas, cfg)
     assignments = _assignment_rows(charges, sigmas, fit, valid)
     modes = _candidate_modes(fit)

@@ -35,6 +35,22 @@ For non-interactive CLI integration, a caller can create or request manual platf
 .venv\Scripts\python -m millikan_ai.cli analyze --video <video_path> --config <generated_config.yaml> --run-dir <run_dir>
 ```
 
+For downstream scientific validation after upstream trajectory extraction/filtering has already accepted trajectories, use the standalone API:
+
+```python
+from millikan_ai.downstream import run_downstream_analysis
+
+result = run_downstream_analysis(
+    trajectories=accepted_trajectories,
+    platforms=voltage_platforms,
+    scale_y_m_per_px=scale_y_m_per_px,
+    config=config,
+    run_dir=run_dir,
+)
+```
+
+This standalone path does not require a video path and must not call tracking, candidate generation, or overlays. Raw-video runs remain diagnostic integration checks, not elementary-charge scientific validation.
+
 `manual_platforms` rows use the schema written to `platforms.csv`:
 
 ```yaml
@@ -85,6 +101,7 @@ Each run should also expose:
 - `drop_charge_failures.json`: explicit physics failure records for drops that did not produce q.
 - `model_comparison.json`: elementary-charge quantized-vs-continuous predictive comparison summary.
 - `uncertainty_details.json`: current uncertainty summary and implemented/pending uncertainty methods.
+- `plots_data.json`: machine-readable data for downstream scientific plots.
 - `quality_scores.json`: deterministic quality-adapter metadata and aggregate counts.
 - `trajectory_quality_scores.csv`: per-track trajectory score, physics score, keep decision, and reject reasons.
 - `analysis_report.md`: user-facing full report.
@@ -190,7 +207,7 @@ The current default tracks up to `tracking.max_drops: 20` distinct trajectories 
 - keep `best_track.csv`, `best_track_segments.csv`, and `drop_results.json` for that selected/default drop
 - use `drop_tracks.csv`, `drop_track_segments.csv`, and `multi_drop_results.json` for all selected drops
 - use `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` for the valid-droplet count
-- use `elementary_charge_result.json` for the estimator over all independent results with `q_valid=true`; `keep` remains a diagnostic quality-adapter field
+- use `elementary_charge_result.json` for the estimator over every successfully computed q in standalone downstream analysis; video-pipeline `keep` remains a diagnostic quality-adapter field
 - keep single-drop reports valid when only one droplet is found
 
 ## Current Quality Scope

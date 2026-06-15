@@ -505,7 +505,7 @@ def run_pipeline(
         segments,
         candidate_summary,
         multi_drop_results,
-        int(config["elementary"]["min_drops"]),
+        int(config["elementary"].get("min_drops_for_estimation", config["elementary"].get("min_drops", 3))),
     )
     _write_json(target / output_cfg["validity_report_json"], validity_report)
     write_summary(target, config)

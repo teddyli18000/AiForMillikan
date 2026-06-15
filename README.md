@@ -12,6 +12,7 @@ This stage implements a non-ML backend framework:
 - physics-based single-drop charge inversion
 - adaptive multi-drop q inversion and explainable rule-based quality filtering
 - non-ML elementary charge grid-search estimator
+- standalone downstream analysis for already accepted trajectories
 - run output validation and summaries
 
 ML-based trajectory filtering is intentionally left to `training_quality_filter/`.
@@ -193,6 +194,24 @@ print(result.manifest["status"])
 
 The API writes the same output contract as the CLI, including `run_manifest.json`.
 
+## Standalone Downstream API
+
+For scientific validation of the downstream physics/e pipeline, use prepared accepted trajectories instead of raw videos:
+
+```python
+from millikan_ai.downstream import run_downstream_analysis
+
+result = run_downstream_analysis(
+    trajectories=accepted_trajectories,
+    platforms=voltage_platforms,
+    scale_y_m_per_px=scale_y_m_per_px,
+    config=config,
+    run_dir="runs/downstream_case",
+)
+```
+
+This path does not call the tracker or read video frames. It writes `platform_velocity_results.csv`, `drop_charge_results.csv`, `drop_charge_failures.json`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, `plots_data.json`, and `analysis_report.md`.
+
 ## Current Raw Video Behavior
 
 `raw_data/2.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md` when auto-detected platform boundaries are combined with the guide voltage values. With platform values supplied, the backend can select stable droplets and compute real physics-based `q`. Without platform values, the run is explicitly invalid for q calculation.
@@ -202,6 +221,8 @@ Tracking is constrained to the detected grid area so watermarks, manufacturer te
 For frontend review, each run writes `run_manifest.json`, `validity_report.json`, `visualization_layers.json`, and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; the validity report lists pass/fail checks; the layer JSON provides structured drawing data for interactive frontend overlays, including multi-drop tracks when `tracking.max_drops > 1`; the diagnostic image is a rendered preview. See `docs/frontend_backend_interface.md` for the desktop UI contract.
 
 Raw smoke-test findings for the current `1.mp4` through `8.mp4` samples and older archived videos are recorded in `docs/raw_video_smoke.md`.
+
+Raw-video smoke runs are diagnostic integration checks only; they are not scientific validation of the elementary-charge estimator.
 
 With reliable platform data, the downstream physics path uses the fixed sign convention:
 

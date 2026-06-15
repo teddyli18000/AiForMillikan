@@ -110,7 +110,6 @@ def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, 
     if not rows or platforms.empty:
         return 0, 0.0, 0.0
     frame = pd.DataFrame(rows)
-    transient = float(config["segment"].get("transient_drop_s", 0.0))
     min_duration = float(config["segment"]["stable_min_duration_s"])
     min_points = int(config["segment"]["min_valid_points"])
     min_r2 = float(config["segment"]["min_fit_r2"])
@@ -119,7 +118,7 @@ def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, 
     r2_values = []
     vx_values = []
     for platform in platforms.to_dict("records"):
-        start = float(platform["start_time_s"]) + transient
+        start = float(platform["start_time_s"])
         end = float(platform["end_time_s"])
         segment = frame[(frame["time_s"] >= start) & (frame["time_s"] <= end) & (frame["is_valid_detection"].astype(bool))]
         if len(segment) < max(2, min_points):

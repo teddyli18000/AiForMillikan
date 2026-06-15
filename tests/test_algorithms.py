@@ -12,6 +12,14 @@ from millikan_ai.segments.platforms import VoltageSample, segment_voltage_platfo
 from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 
 
+def _fast_elementary_config() -> dict:
+    config = load_config("configs/default.yaml")
+    config["elementary"]["e_bootstrap_samples"] = 0
+    config["elementary"]["measurement_mc_samples"] = 20
+    config["elementary"]["null_simulation_samples"] = 0
+    return config
+
+
 def test_detect_horizontal_grid_lines_on_synthetic_image():
     image = np.zeros((240, 320, 3), dtype=np.uint8)
     for y in [30, 70, 110, 150, 190]:
@@ -128,12 +136,14 @@ def test_fit_terminal_velocity_bootstrap_is_reproducible():
     assert first["velocity_ci_95_px_s"] == pytest.approx(second["velocity_ci_95_px_s"])
 
 
-def test_fit_track_segments_uses_zero_transient_and_boundary_guard_frames():
+def test_fit_terminal_velocity_rejects_non_increasing_time():
+    with pytest.raises(ValueError, match="non_increasing_time"):
+        fit_terminal_velocity(np.array([0.0, 0.2, 0.2, 0.4]), np.array([1.0, 1.2, 1.3, 1.4]))
+
+
+def test_fit_track_segments_uses_full_platform_and_boundary_guard_frames_only():
     config = load_config("configs/default.yaml")
     config["segment"]["boundary_guard_frames"] = 2
-    config["segment"]["min_valid_points"] = 2
-    config["segment"]["stable_min_duration_s"] = 0.0
-    config["segment"]["min_fit_r2"] = -1.0
     track = pd.DataFrame(
         {
             "video_id": ["synthetic"] * 10,
@@ -165,39 +175,6 @@ def test_fit_track_segments_uses_zero_transient_and_boundary_guard_frames():
     assert segments.iloc[0]["num_points"] == 6
 
 
-def test_fit_track_segments_preserves_track_id_for_transient_cropped_short_platform():
-    config = load_config("configs/default.yaml")
-    config["segment"]["transient_drop_s"] = 0.5
-    config["segment"]["stable_min_duration_s"] = 1.0
-    config["segment"]["min_valid_points"] = 5
-    track = pd.DataFrame(
-        {
-            "video_id": ["synthetic"] * 10,
-            "track_id": ["candidate_001"] * 10,
-            "time_s": np.arange(10) / 30.0,
-            "x_px": np.full(10, 50.0),
-            "y_px": np.linspace(100, 105, 10),
-            "is_valid_detection": True,
-        }
-    )
-    platforms = pd.DataFrame(
-        [
-            {
-                "platform_id": "P001",
-                "start_time_s": 0.0,
-                "end_time_s": 0.2,
-                "voltage_V": 100.0,
-            }
-        ]
-    )
-
-    segments = fit_track_segments(track, platforms, scale_y_m_per_px=1e-6, config=config)
-
-    assert segments.iloc[0]["track_id"] == "candidate_001"
-    assert segments.iloc[0]["video_id"] == "synthetic"
-    assert "too_short" in segments.iloc[0]["flags"]
-
-
 def test_compute_drop_result_for_synthetic_segments():
     config = load_config("configs/default.yaml")
     rows = []
@@ -216,7 +193,7 @@ def test_compute_drop_result_for_synthetic_segments():
 
 
 def test_elementary_charge_estimator_on_integer_multiples():
-    config = load_config("configs/default.yaml")
+    config = _fast_elementary_config()
     config["elementary"]["profile_grid_points"] = 900
     e = 1.6e-19
     drops = [
@@ -231,7 +208,7 @@ def test_elementary_charge_estimator_on_integer_multiples():
 
 
 def test_elementary_charge_uses_all_successful_q_without_quality_gate():
-    config = load_config("configs/default.yaml")
+    config = _fast_elementary_config()
     config["elementary"]["profile_grid_points"] = 500
     e = 1.6e-19
     drops = [
@@ -247,7 +224,7 @@ def test_elementary_charge_uses_all_successful_q_without_quality_gate():
 
 
 def test_elementary_charge_reports_harmonic_ambiguity_for_even_multiples():
-    config = load_config("configs/default.yaml")
+    config = _fast_elementary_config()
     config["elementary"]["profile_grid_points"] = 900
     e = 1.6e-19
     drops = [
@@ -263,7 +240,7 @@ def test_elementary_charge_reports_harmonic_ambiguity_for_even_multiples():
 
 
 def test_elementary_model_comparison_scores_clear_quantization_positive():
-    config = load_config("configs/default.yaml")
+    config = _fast_elementary_config()
     config["elementary"]["profile_grid_points"] = 500
     e = 1.6e-19
     drops = [
@@ -278,7 +255,7 @@ def test_elementary_model_comparison_scores_clear_quantization_positive():
 
 
 def test_elementary_model_comparison_does_not_overstate_continuous_sample():
-    config = load_config("configs/default.yaml")
+    config = _fast_elementary_config()
     config["elementary"]["profile_grid_points"] = 400
     values = np.array([2.2, 2.7, 3.1, 3.8, 4.4, 5.0]) * 1e-19
     drops = [
