@@ -6,10 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from millikan_ai.elementary.estimate import estimate_elementary_charge
-from millikan_ai.physics.charge import compute_drop_result
+from millikan_ai.physics.charge import compute_drop_result, eta_eff, solve_radius_with_cunningham
+from millikan_ai.physics.viscosity import resolve_air_viscosity
 from millikan_ai.segments.fitting import fit_track_segments
 
 
@@ -130,6 +132,134 @@ def _write_charge_outputs(run_dir: Path, drop_results: list[dict[str, Any]]) -> 
     return charges, charge_failures
 
 
+def _normal_factor(rng: np.random.Generator, sigma_rel: float) -> float:
+    if sigma_rel <= 0 or not math.isfinite(float(sigma_rel)):
+        return 1.0
+    return max(1e-12, float(rng.normal(1.0, sigma_rel)))
+
+
+def _systematic_draw_config(config: dict[str, Any], rng: np.random.Generator) -> tuple[dict[str, Any], float, float]:
+    physics = dict(config["physics"])
+    viscosity = dict(config.get("viscosity", {}))
+    systematic = physics.get("systematic_uncertainty", {}) or {}
+    scale_factor = _normal_factor(rng, float(systematic.get("spatial_scale_rel", 0.0)))
+    voltage_factor = _normal_factor(rng, float(systematic.get("voltage_scale_rel", 0.0)))
+    physics["plate_distance_m"] = float(physics["plate_distance_m"]) * _normal_factor(rng, float(systematic.get("plate_distance_rel", 0.0)))
+    physics["pressure_Pa"] = float(physics["pressure_Pa"]) * _normal_factor(rng, float(systematic.get("pressure_rel", 0.0)))
+    physics["oil_density_kg_m3"] = float(physics["oil_density_kg_m3"]) * _normal_factor(rng, float(systematic.get("oil_density_rel", 0.0)))
+    physics["cunningham_b_Pa_m"] = float(physics["cunningham_b_Pa_m"]) * _normal_factor(rng, float(systematic.get("cunningham_b_rel", 0.0)))
+    if "temperature_C" in systematic and viscosity.get("source", "temperature") != "direct":
+        viscosity["air_temperature_C"] = float(viscosity.get("air_temperature_C", 20.0)) + float(rng.normal(0.0, float(systematic["temperature_C"])))
+    elif "viscosity_rel" in systematic:
+        base_eta = resolve_air_viscosity({"physics": physics, "viscosity": viscosity})["air_viscosity_Pa_s"]
+        viscosity["source"] = "direct"
+        viscosity["direct_air_viscosity_Pa_s"] = base_eta * _normal_factor(rng, float(systematic.get("viscosity_rel", 0.0)))
+    return {"physics": physics, "viscosity": viscosity}, scale_factor, voltage_factor
+
+
+def _compute_q_from_fit(alpha: float, gamma: float, constants: dict[str, Any], viscosity: dict[str, Any]) -> tuple[float | None, float | None]:
+    radius, flags = solve_radius_with_cunningham(alpha, constants)
+    if flags or radius is None:
+        return None, None
+    eff = eta_eff(radius, float(viscosity["air_viscosity_Pa_s"]), float(constants["pressure_Pa"]), float(constants["cunningham_b_Pa_m"]))
+    charge = 6 * math.pi * eff * radius * float(constants["plate_distance_m"]) * gamma
+    if not math.isfinite(charge) or charge <= 0:
+        return None, None
+    return float(radius), float(charge)
+
+
+def _build_uncertainty_details(drop_results: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
+    valid_drops = [drop for drop in drop_results if bool(drop.get("valid"))]
+    samples = int(config.get("physics", {}).get("systematic_mc_samples", 0))
+    if not valid_drops or samples <= 0:
+        return {
+            "status": "incomplete",
+            "random_uncertainty": "per-drop random q uncertainty uses joint alpha-gamma Monte Carlo when covariance is available",
+            "systematic_uncertainty": "shared systematic Monte Carlo not configured",
+            "per_drop": [],
+        }
+    seed = int(config.get("elementary", {}).get("random_seed", 42)) + 65537
+    rng = np.random.default_rng(seed)
+    radius_samples: dict[str, list[float]] = {str(drop.get("drop_id", "")): [] for drop in valid_drops}
+    charge_samples: dict[str, list[float]] = {str(drop.get("drop_id", "")): [] for drop in valid_drops}
+    combined_samples: dict[str, list[float]] = {str(drop.get("drop_id", "")): [] for drop in valid_drops}
+    for _sample in range(samples):
+        draw_cfg, scale_factor, voltage_factor = _systematic_draw_config(config, rng)
+        viscosity = resolve_air_viscosity(draw_cfg)
+        constants = {**draw_cfg["physics"], **viscosity}
+        for drop in valid_drops:
+            drop_id = str(drop.get("drop_id", ""))
+            fit = drop.get("fit", {}) or {}
+            alpha = float(fit.get("alpha_m_s", fit.get("alpha", math.nan))) * scale_factor
+            gamma = float(fit.get("gamma_m_s_V", fit.get("gamma", math.nan))) * scale_factor / voltage_factor
+            if not (math.isfinite(alpha) and math.isfinite(gamma)) or alpha <= 0 or gamma <= 0:
+                continue
+            radius, charge = _compute_q_from_fit(alpha, gamma, constants, viscosity)
+            if radius is None or charge is None:
+                continue
+            radius_samples[drop_id].append(radius)
+            charge_samples[drop_id].append(charge)
+            sigma_random = float((drop.get("result", {}) or {}).get("sigma_charge_random_C", 0.0) or 0.0)
+            combined_samples[drop_id].append(max(1e-30, float(rng.normal(charge, sigma_random))) if sigma_random > 0 else charge)
+    per_drop = []
+    min_used = samples
+    for drop in valid_drops:
+        drop_id = str(drop.get("drop_id", ""))
+        result = drop.get("result", {}) or {}
+        q_nominal = float(result.get("charge_abs_C", math.nan))
+        radius_nominal = float(result.get("radius_m", math.nan))
+        q_sys = np.asarray(charge_samples[drop_id], dtype=float)
+        r_sys = np.asarray(radius_samples[drop_id], dtype=float)
+        q_combined = np.asarray(combined_samples[drop_id], dtype=float)
+        min_used = min(min_used, len(q_sys))
+        if len(q_sys) >= 2:
+            per_drop.append(
+                {
+                    "drop_id": drop_id,
+                    "track_id": drop.get("track_id", ""),
+                    "radius_m": radius_nominal,
+                    "charge_abs_C": q_nominal,
+                    "sigma_radius_systematic_m": float(np.std(r_sys, ddof=1)),
+                    "radius_systematic_ci95_low_m": float(np.percentile(r_sys, 2.5)),
+                    "radius_systematic_ci95_high_m": float(np.percentile(r_sys, 97.5)),
+                    "sigma_charge_systematic_C": float(np.std(q_sys, ddof=1)),
+                    "charge_systematic_ci95_low_C": float(np.percentile(q_sys, 2.5)),
+                    "charge_systematic_ci95_high_C": float(np.percentile(q_sys, 97.5)),
+                    "combined_charge_ci95_low_C": float(np.percentile(q_combined, 2.5)),
+                    "combined_charge_ci95_high_C": float(np.percentile(q_combined, 97.5)),
+                }
+            )
+        else:
+            per_drop.append(
+                {
+                    "drop_id": drop_id,
+                    "track_id": drop.get("track_id", ""),
+                    "radius_m": radius_nominal,
+                    "charge_abs_C": q_nominal,
+                    "sigma_radius_systematic_m": math.inf,
+                    "radius_systematic_ci95_low_m": math.nan,
+                    "radius_systematic_ci95_high_m": math.nan,
+                    "sigma_charge_systematic_C": math.inf,
+                    "charge_systematic_ci95_low_C": math.nan,
+                    "charge_systematic_ci95_high_C": math.nan,
+                    "combined_charge_ci95_low_C": math.nan,
+                    "combined_charge_ci95_high_C": math.nan,
+                }
+            )
+    return {
+        "status": "complete" if min_used >= max(2, samples // 2) else "partial",
+        "random_uncertainty": "per-drop random q uncertainty uses joint alpha-gamma Monte Carlo",
+        "systematic_uncertainty": "shared systematic Monte Carlo uses common sampled physical parameters across all drops",
+        "shared_systematic_mc": {
+            "samples_requested": int(samples),
+            "samples_used": int(min_used),
+            "seed": int(seed),
+            "inputs": config.get("physics", {}).get("systematic_uncertainty", {}),
+        },
+        "per_drop": per_drop,
+    }
+
+
 def _write_report(run_dir: Path, result: dict[str, Any]) -> None:
     charges = result["charge_results"]
     elementary = result["elementary"]
@@ -231,11 +361,7 @@ def run_downstream_analysis(
     drop_results, multi_drop_results = _compute_drop_results(drop_segments, config)
     elementary = estimate_elementary_charge(drop_results, config)
     model_comparison = elementary.get("model_comparison", {})
-    uncertainty_details = {
-        "status": "incomplete",
-        "random_uncertainty": "per-drop random q uncertainty is available when velocity covariance is available",
-        "systematic_uncertainty": "shared systematic Monte Carlo not yet implemented",
-    }
+    uncertainty_details = _build_uncertainty_details(drop_results, config)
     plots_data = {
         "elementary_profile": {
             "candidate_modes": elementary.get("harmonic_analysis", {}).get("candidate_modes", []),

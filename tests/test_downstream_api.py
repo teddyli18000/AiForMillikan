@@ -126,3 +126,39 @@ def test_downstream_api_does_not_import_or_call_tracker():
     import millikan_ai.downstream as downstream
 
     assert not hasattr(downstream, "track_multiple_candidates")
+
+
+def test_downstream_shared_systematic_monte_carlo_outputs_correlated_uncertainty(tmp_path: Path):
+    config = load_config("configs/default.yaml")
+    config["elementary"]["e_bootstrap_samples"] = 0
+    config["elementary"]["measurement_mc_samples"] = 0
+    config["elementary"]["null_simulation_samples"] = 0
+    config["physics"]["random_mc_samples"] = 80
+    config["physics"]["systematic_mc_samples"] = 120
+    config["physics"]["systematic_uncertainty"] = {
+        "spatial_scale_rel": 0.01,
+        "plate_distance_rel": 0.01,
+        "voltage_scale_rel": 0.005,
+        "temperature_C": 0.5,
+        "pressure_rel": 0.002,
+        "oil_density_rel": 0.005,
+        "cunningham_b_rel": 0.01,
+    }
+    e = 1.6e-19
+    trajectories, platforms, scale = _trajectories_for_drops(config, [2 * e, 3 * e, 5 * e])
+
+    result = run_downstream_analysis(
+        trajectories=trajectories,
+        platforms=platforms,
+        scale_y_m_per_px=scale,
+        config=config,
+        run_dir=tmp_path,
+    )
+
+    uncertainty = result["uncertainty_details"]
+    assert uncertainty["status"] == "complete"
+    assert uncertainty["shared_systematic_mc"]["samples_used"] >= 100
+    per_drop = uncertainty["per_drop"]
+    assert len(per_drop) == 3
+    assert all(row["sigma_charge_systematic_C"] > 0 for row in per_drop)
+    assert all(row["combined_charge_ci95_low_C"] < row["charge_abs_C"] < row["combined_charge_ci95_high_C"] for row in per_drop)
