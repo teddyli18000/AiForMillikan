@@ -113,6 +113,7 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
     n_eval = 0
     failed_optimizations = 0
     failed_candidate_log_likelihoods: list[float] = []
+    retry_attempt_failures = 0
     optimize_count = min(len(e_grid), int(cfg.get("tau_lambda_profile_optimize_points", 16)))
     candidate_indices = set(np.argsort(profile_arr)[-optimize_count:].tolist())
     local_peak_indices = []
@@ -121,6 +122,14 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
             local_peak_indices.append(idx)
     max_local_modes = max(1, int(cfg.get("max_profile_modes_to_optimize", 96)))
     optimized_local_peak_indices = sorted(local_peak_indices, key=lambda item: profile_arr[item], reverse=True)[:max_local_modes]
+    omitted_local_peak_indices = [idx for idx in local_peak_indices if idx not in set(optimized_local_peak_indices)]
+    coarse_max = float(np.max(profile_arr))
+    omitted_threshold = float(cfg.get("omitted_mode_relative_likelihood_threshold", cfg.get("mode_relative_likelihood_threshold", 0.02)))
+    important_omitted_local_peaks = [
+        idx
+        for idx in omitted_local_peak_indices
+        if math.exp(min(0.0, float(profile_arr[idx] - coarse_max))) >= omitted_threshold
+    ]
     for idx in optimized_local_peak_indices:
         candidate_indices.add(idx)
     for idx in list(candidate_indices):
@@ -130,7 +139,7 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
             candidate_indices.add(idx + 1)
     tau_scale = max(median_sigma, 1e-30)
 
-    def optimize_at_index(idx: int) -> tuple[float, float, float, bool, int]:
+    def optimize_at_index(idx: int) -> tuple[float, float, float, bool, int, int]:
         e_C = float(e_grid[idx])
         _ll0, tau0, lambda0 = coarse_best_by_e[idx]
 
@@ -140,20 +149,60 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
             tau_C = tau_factor * tau_scale
             return -_quantized_log_likelihood(charges, sigmas, e_C, tau_C, lambda_decay, nmax)
 
-        result = minimize(
-            objective,
+        starts: list[np.ndarray] = [
             np.array([max(0.0, tau0 / tau_scale), max(0.0, lambda0)], dtype=float),
-            method="L-BFGS-B",
-            bounds=[(0.0, 20.0), (0.0, 12.0)],
-            options={"maxiter": int(cfg.get("tau_lambda_optimizer_maxiter", 80))},
+        ]
+        for neighbor in [idx - 1, idx + 1]:
+            if 0 <= neighbor < len(coarse_best_by_e):
+                _ll_neighbor, tau_neighbor, lambda_neighbor = coarse_best_by_e[neighbor]
+                starts.append(np.array([max(0.0, tau_neighbor / tau_scale), max(0.0, lambda_neighbor)], dtype=float))
+        starts.extend(
+            [
+                np.array([0.0, max(0.0, lambda0)], dtype=float),
+                np.array([1.0, 0.75], dtype=float),
+                np.array([4.0, 3.0], dtype=float),
+            ]
         )
-        if not result.success:
-            return float(_ll0), float(tau0), float(lambda0), False, int(getattr(result, "nfev", 0) or 0)
-        return -float(result.fun), float(result.x[0]) * tau_scale, float(result.x[1]), True, int(getattr(result, "nfev", 0) or 0)
+        unique_starts: list[np.ndarray] = []
+        for start in starts:
+            clipped = np.array([min(20.0, max(0.0, float(start[0]))), min(12.0, max(0.0, float(start[1])))])
+            if not any(np.allclose(clipped, existing, rtol=0.0, atol=1e-12) for existing in unique_starts):
+                unique_starts.append(clipped)
+        maxiter = int(cfg.get("tau_lambda_optimizer_maxiter", 80))
+        best_failed: tuple[float, float, float] | None = (float(_ll0), float(tau0), float(lambda0))
+        eval_total = 0
+        attempt_failures = 0
+        methods = ["L-BFGS-B", "Powell"]
+        for method in methods:
+            for start in unique_starts:
+                options = {"maxiter": maxiter if method == "L-BFGS-B" else max(maxiter * 2, 80)}
+                result = minimize(
+                    objective,
+                    start,
+                    method=method,
+                    bounds=[(0.0, 20.0), (0.0, 12.0)],
+                    options=options,
+                )
+                eval_total += int(getattr(result, "nfev", 0) or 0)
+                fun = float(getattr(result, "fun", math.inf))
+                x = np.asarray(getattr(result, "x", start), dtype=float)
+                if math.isfinite(fun) and len(x) >= 2:
+                    ll = -fun
+                    tau_candidate = float(x[0]) * tau_scale
+                    lambda_candidate = float(x[1])
+                    if best_failed is None or ll > best_failed[0]:
+                        best_failed = (ll, tau_candidate, lambda_candidate)
+                    if bool(getattr(result, "success", False)):
+                        return ll, tau_candidate, lambda_candidate, True, eval_total, attempt_failures
+                attempt_failures += 1
+        if best_failed is None:
+            best_failed = (float(_ll0), float(tau0), float(lambda0))
+        return best_failed[0], best_failed[1], best_failed[2], False, eval_total, attempt_failures
 
     for idx in sorted(candidate_indices):
-        ll, tau_C, lambda_decay, success, eval_count = optimize_at_index(idx)
+        ll, tau_C, lambda_decay, success, eval_count, attempt_failures = optimize_at_index(idx)
         n_eval += eval_count
+        retry_attempt_failures += attempt_failures
         if not success:
             failed_optimizations += 1
             failed_candidate_log_likelihoods.append(float(ll))
@@ -162,7 +211,7 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
             best = (ll, float(e_grid[idx]), tau_C, lambda_decay)
     local_modes_optimized = sum(1 for idx in local_peak_indices if idx in candidate_indices)
     failed_candidate_could_win = any(ll >= best[0] for ll in failed_candidate_log_likelihoods)
-    profile_optimization_incomplete = bool(failed_candidate_could_win)
+    profile_optimization_incomplete = bool(failed_optimizations > 0 or important_omitted_local_peaks)
     return QuantizedFit(
         e_C=best[1],
         tau_C=best[2],
@@ -177,10 +226,13 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
             "bounds": {"tau_factor": [0.0, 20.0], "lambda_decay": [0.0, 12.0]},
             "optimized_profile_points": int(len(candidate_indices)),
             "failed_optimizations": int(failed_optimizations),
+            "retry_attempt_failures": int(retry_attempt_failures),
             "failed_candidate_could_win": bool(failed_candidate_could_win),
             "local_modes_found": int(len(local_peak_indices)),
             "local_modes_optimized": int(local_modes_optimized),
             "local_modes_omitted": int(max(0, len(local_peak_indices) - local_modes_optimized)),
+            "important_local_modes_omitted": int(len(important_omitted_local_peaks)),
+            "omitted_mode_relative_likelihood_threshold": float(omitted_threshold),
             "profile_optimization_incomplete": profile_optimization_incomplete,
             "selected_by": "maximum_profile_likelihood",
         },

@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import millikan_ai.elementary.estimate as elementary_estimate
 from millikan_ai.calibration.grid import detect_horizontal_grid_lines, detect_vertical_grid_lines
 from millikan_ai.config import load_config
 from millikan_ai.elementary.estimate import QuantizedFit, _is_harmonic_ratio, _profile_intervals, estimate_elementary_charge
@@ -452,6 +453,63 @@ def test_quantized_profile_optimizes_tau_lambda_continuously():
     old_tau_grid = {0.0, 0.5, 1.0, 2.0, 4.0}
     tau_ratio = result["elementary_charge"]["tau_C"] / 0.025e-19
     assert all(abs(tau_ratio - value) > 0.02 for value in old_tau_grid)
+
+
+def test_profile_optimization_failure_for_candidate_blocks_identification(monkeypatch):
+    config = _estimator_only_config()
+    config["elementary"]["profile_grid_points"] = 160
+    config["elementary"]["tau_lambda_profile_optimize_points"] = 6
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e + offset, "sigma_charge_C": 0.035e-19}}
+        for i, (n, offset) in enumerate(zip([1, 2, 3, 4, 5, 6, 7], [0.0, 0.02e-19, -0.01e-19, 0.01e-19, -0.02e-19, 0.0, 0.01e-19]))
+    ]
+    real_minimize = elementary_estimate.minimize
+    calls = {"count": 0, "failed_objective": None}
+
+    def flaky_minimize(*args, **kwargs):
+        calls["count"] += 1
+        objective = args[0]
+        if calls["failed_objective"] is None:
+            calls["failed_objective"] = objective
+        if objective is calls["failed_objective"]:
+            return type(
+                "FailedOptimization",
+                (),
+                {"success": False, "fun": math.inf, "x": np.array([0.0, 0.0]), "nfev": 1, "message": "forced failure"},
+            )()
+        return real_minimize(*args, **kwargs)
+
+    monkeypatch.setattr(elementary_estimate, "minimize", flaky_minimize)
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["optimizer"]["failed_optimizations"] >= 1
+    assert result["optimizer"]["profile_optimization_incomplete"] is True
+    assert result["fundamental_spacing_identified"] is False
+    assert result["status"] == "profile_optimization_incomplete"
+
+
+def test_important_local_mode_omission_blocks_identification():
+    config = _estimator_only_config()
+    config["elementary"]["profile_grid_points"] = 220
+    config["elementary"]["tau_lambda_profile_optimize_points"] = 2
+    config["elementary"]["max_profile_modes_to_optimize"] = 1
+    config["elementary"]["omitted_mode_relative_likelihood_threshold"] = 0.0
+    e = 1.6e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e + offset, "sigma_charge_C": 0.05e-19}}
+        for i, (n, offset) in enumerate(
+            zip([1, 2, 3, 5, 7, 9, 12, 15], [0.02e-19, -0.03e-19, 0.01e-19, 0.04e-19, -0.02e-19, 0.03e-19, -0.01e-19, 0.02e-19])
+        )
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["optimizer"]["local_modes_omitted"] > 0
+    assert result["optimizer"]["profile_optimization_incomplete"] is True
+    assert result["fundamental_spacing_identified"] is False
+    assert result["status"] == "profile_optimization_incomplete"
 
 
 def test_model_comparison_uses_repeated_5fold_for_large_samples():
