@@ -88,7 +88,7 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
     flags = list(diagnostics.get("flags", [])) + list(drop.get("flags", [])) + list(elementary.get("flags", []))
     valid_drop_count = int(multi_drop.get("valid_drop_count", 0) or 0)
     failed_drop_count = len(charge_failures.get("failures", []))
-    if elementary.get("valid"):
+    if elementary.get("fundamental_spacing_identified"):
         status = "SUCCESS"
     elif valid_drop_count > 0:
         status = "PARTIAL"
@@ -115,7 +115,9 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
         f"运行状态：{status}",
         f"成功计算 q 的油滴数：{valid_drop_count}",
         f"失败油滴数：{failed_drop_count}",
-        f"基本电荷估计：{_fmt(e_result.get('e_hat_C'))} C",
+        f"有界候选基本电荷：{_fmt(e_result.get('e_hat_C'))} C",
+        f"最终元电荷识别：{elementary.get('fundamental_spacing_identified')}",
+        f"元电荷状态：{elementary.get('status', '')}",
         f"综合 95% 区间：{_fmt(e_result.get('ci_95_C'))}",
         f"量子化证据：{model_comparison.get('evidence_label', 'insufficient')}",
         f"主要警告：{', '.join(flags) if flags else 'none'}",
@@ -160,15 +162,27 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
         "## 基本电荷反演",
         "",
         f"- 使用 q 数量: `{elementary.get('num_used_drops', 0)}`",
-        f"- 搜索区间: `{_fmt(e_result.get('search_interval_C'))}`",
-        f"- e_hat: `{_fmt(e_result.get('e_hat_C'))}`",
+        f"- 固定先验区间: `{_fmt(e_result.get('search_interval_C'))}`",
+        f"- prior provenance: `{_fmt(e_result.get('prior'))}`",
+        f"- bounded candidate e_hat: `{_fmt(e_result.get('e_hat_C'))}`",
+        f"- fit_valid: `{elementary.get('fit_valid')}`",
+        f"- bounded_estimate_available: `{elementary.get('bounded_estimate_available')}`",
+        f"- quantization_favored: `{elementary.get('quantization_favored')}`",
+        f"- quantization_supported: `{elementary.get('quantization_supported')}`",
+        f"- primitive_assignment_supported: `{elementary.get('primitive_assignment_supported')}`",
+        f"- fundamental_spacing_identified: `{elementary.get('fundamental_spacing_identified')}`",
+        f"- status: `{elementary.get('status', '')}`",
         f"- profile 区间: `{_fmt(e_result.get('profile_ci_95_C'))}`",
         f"- bootstrap 区间: `{_fmt(e_result.get('ci_95_C'))}`",
         f"- harmonic ambiguity: `{elementary.get('harmonic_analysis', {}).get('harmonic_ambiguity')}`",
         f"- flags: `{', '.join(elementary.get('flags', []))}`",
         f"- reason: `{elementary.get('reason', '')}`",
         "",
-        _table(pd.DataFrame(elementary.get("drops", [])), ["drop_id", "charge_C", "n_hat", "assignment_probability", "residual_C", "normalized_residual"], max_rows=20),
+        _table(
+            pd.DataFrame(elementary.get("drops", [])),
+            ["drop_id", "charge_C", "n_hat", "assignment_probability_given_e", "conditional_on_e_C", "residual_C", "normalized_residual"],
+            max_rows=20,
+        ),
         "",
         "## 模型比较",
         "",

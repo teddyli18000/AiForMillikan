@@ -28,8 +28,8 @@ def test_default_config_loads():
     assert "spatial_scale_rel" in config["physics"]["systematic_uncertainty"]
     assert config["viscosity"]["source"] == "temperature"
     assert config["elementary"]["min_drops_for_estimation"] == 3
-    assert config["elementary"]["e_search_min_C"] == 0.5e-19
-    assert config["elementary"]["e_search_max_C"] == 2.5e-19
+    assert "e_search_min_C" not in config["elementary"]
+    assert "e_search_max_C" not in config["elementary"]
     assert config["elementary"]["e_bootstrap_samples"] == 1000
 
 
