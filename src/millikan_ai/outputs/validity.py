@@ -29,7 +29,8 @@ def build_validity_report(
     total_drop_count = int(multi_drop_results.get("num_total_drops", diagnostics.get("drop_count", 0)) or 0)
     valid_drop_count = int(multi_drop_results.get("valid_drop_count", 1 if drop_result.get("valid") else 0) or 0)
     required_drop_count = int(elementary_min_drops or 0)
-    elementary_ready = bool(elementary.get("valid")) or (required_drop_count > 0 and valid_drop_count >= required_drop_count)
+    elementary_ready = required_drop_count > 0 and valid_drop_count >= required_drop_count
+    fundamental_identified = bool(elementary.get("fundamental_spacing_identified"))
     checks = [
         _check("video_readable", bool(video.get("readable")), "Video can be opened by OpenCV.", {"path": video.get("path")}),
         _check("fps_valid", float(video.get("fps") or 0) > 0, "FPS is available for frame-to-time conversion.", {"fps": video.get("fps")}),
@@ -81,29 +82,52 @@ def build_validity_report(
             },
         ),
         _check(
-            "elementary_charge_ready",
+            "elementary_estimation_ready",
             elementary_ready,
-            "Enough independent valid droplet q values exist for blind elementary-charge estimation.",
+            "Enough independent valid droplet q values exist for bounded elementary-charge estimation.",
             {
                 "valid_drop_count": valid_drop_count,
                 "required_drop_count": required_drop_count,
-                "elementary_valid": bool(elementary.get("valid")),
+                "fit_valid": bool(elementary.get("fit_valid")),
+                "bounded_estimate_available": bool(elementary.get("bounded_estimate_available")),
                 "flags": elementary.get("flags", []),
             },
         ),
         _check(
             "elementary_charge_status",
-            bool(elementary.get("valid")) or "insufficient_independent_drops" in elementary.get("flags", []) or "insufficient_drops" in elementary.get("flags", []),
-            "Elementary-charge estimation either succeeded or reported an explicit insufficiency reason.",
-            {"flags": elementary.get("flags", []), "valid": elementary.get("valid")},
+            bool(elementary.get("fit_valid"))
+            or "insufficient_independent_drops" in elementary.get("flags", [])
+            or "insufficient_drops" in elementary.get("flags", []),
+            "Elementary-charge estimation either fit a bounded candidate or reported an explicit insufficiency reason.",
+            {
+                "flags": elementary.get("flags", []),
+                "fit_valid": elementary.get("fit_valid"),
+                "status": elementary.get("status"),
+            },
+        ),
+        _check(
+            "elementary_fundamental_spacing_identified",
+            fundamental_identified,
+            "Final elementary-charge conclusion requires calibrated quantization support and primitive assignment evidence.",
+            {
+                "fundamental_spacing_identified": elementary.get("fundamental_spacing_identified"),
+                "bounded_estimate_available": elementary.get("bounded_estimate_available"),
+                "quantization_supported": elementary.get("quantization_supported"),
+                "primitive_assignment_supported": elementary.get("primitive_assignment_supported"),
+                "status": elementary.get("status"),
+            },
         ),
     ]
-    non_q_blocking = {"elementary_charge_status", "elementary_charge_ready"}
+    non_q_blocking = {"elementary_charge_status", "elementary_estimation_ready", "elementary_fundamental_spacing_identified"}
     blocking_failed = [check["id"] for check in checks if not check["passed"] and check["id"] not in non_q_blocking]
     return {
         "schema_version": 1,
         "overall_valid_for_q": bool(drop_result.get("valid")) and not blocking_failed,
-        "overall_valid_for_elementary_charge": bool(elementary.get("valid")),
+        "overall_valid_for_elementary_charge": fundamental_identified,
+        "elementary_estimation_ready": bool(elementary_ready),
+        "bounded_estimate_available": bool(elementary.get("bounded_estimate_available")),
+        "quantization_supported": elementary.get("quantization_supported"),
+        "elementary_status": elementary.get("status"),
         "blocking_failed_checks": blocking_failed,
         "checks": checks,
         "combined_flags": list(diagnostics.get("flags", [])) + list(drop_result.get("flags", [])) + list(elementary.get("flags", [])),

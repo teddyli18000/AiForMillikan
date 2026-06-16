@@ -21,7 +21,7 @@ def _fast_elementary_config() -> dict:
     config["elementary"]["null_simulation_samples"] = 0
     config["elementary"]["tau_lambda_profile_optimize_points"] = 2
     config["elementary"]["tau_lambda_optimizer_maxiter"] = 12
-    config["elementary"]["max_profile_modes_to_optimize"] = 4
+    config["elementary"]["max_profile_modes_to_optimize"] = 48
     config["physics"]["random_mc_samples"] = 50
     return config
 
@@ -30,6 +30,7 @@ def _estimator_only_config() -> dict:
     config = _fast_elementary_config()
     config["elementary"]["skip_model_comparison"] = True
     config["elementary"]["skip_stability_diagnostics"] = True
+    config["elementary"]["measurement_mc_samples"] = 0
     return config
 
 
@@ -216,7 +217,10 @@ def test_elementary_charge_estimator_on_integer_multiples():
     result = estimate_elementary_charge(drops, config)
     assert result["valid"] is True
     assert abs(result["elementary_charge"]["e_hat_C"] - e) < 0.03e-19
-    assert result["elementary_charge"]["search_interval_C"] == [0.5e-19, 2.5e-19]
+    assert result["elementary_charge"]["search_interval_C"] == [1.35e-19, 1.90e-19]
+    assert result["elementary_charge"]["prior"]["prior_constrained"] is True
+    assert result["fundamental_spacing_identified"] is False
+    assert result["status"] == "bounded_estimate_evidence_not_calibrated"
     assert result["model_comparison"]["method"] == "bounded_profile_quantized_likelihood"
 
 
@@ -249,16 +253,17 @@ def test_elementary_charge_reports_harmonic_ambiguity_for_even_multiples():
 
     assert result["valid"] is True
     assert result["optimizer"]["selected_by"] == "maximum_profile_likelihood"
-    assert result["harmonic_analysis"]["profile_multimodal"] is True
-    assert result["harmonic_analysis"]["harmonic_ambiguity"] is True
-    assert len(result["harmonic_analysis"]["candidate_modes"]) >= 2
+    assert result["primitive_assignment"]["primitive_assignment_supported"] is False
+    assert result["primitive_assignment"]["integer_gcd"] >= 2
+    assert result["fundamental_spacing_identified"] is False
+    assert result["status"] == "integer_assignments_nonprimitive"
 
 
 @pytest.mark.parametrize("multipliers", [[2, 4, 6, 8, 10], [2, 3, 5, 8, 11], [3, 6, 9, 12, 15]])
 def test_elementary_profile_likelihood_is_not_overridden_by_gcd_harmonic(multipliers):
     config = _estimator_only_config()
     config["elementary"]["profile_grid_points"] = 250
-    e = 0.8e-19
+    e = 1.6e-19
     drops = [
         {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e, "sigma_charge_C": 0.03e-19}}
         for i, n in enumerate(multipliers)
@@ -269,6 +274,88 @@ def test_elementary_profile_likelihood_is_not_overridden_by_gcd_harmonic(multipl
     assert result["valid"] is True
     assert result["optimizer"]["selected_by"] == "maximum_profile_likelihood"
     assert result["optimizer"]["selected_by"] != "common_divisor_harmonic_resolution"
+
+
+@pytest.mark.parametrize("n_drops", [10, 20])
+@pytest.mark.parametrize("sigma_rel", [0.08, 0.10, 0.12])
+def test_bounded_estimator_recovers_known_truth_integer_samples(n_drops, sigma_rel):
+    config = _estimator_only_config()
+    config["elementary"]["profile_grid_points"] = 360
+    config["elementary"]["tau_lambda_profile_optimize_points"] = 8
+    e_true = 1.602176634e-19
+    multipliers = [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10, 11, 12][:n_drops]
+    drops = [
+        {
+            "drop_id": f"d{i}",
+            "valid": True,
+            "result": {"charge_abs_C": n * e_true, "sigma_charge_C": sigma_rel * e_true * (1.0 + 0.012 * (i % 4))},
+        }
+        for i, n in enumerate(multipliers)
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["valid"] is True
+    assert abs(result["elementary_charge"]["e_hat_C"] / e_true - 1.0) < 0.02
+    assert result["boundary_guard"]["search_boundary_hit"] is False
+    assert [row["n_hat"] for row in result["drops"]] == multipliers
+    assert all("assignment_probability_given_e" in row for row in result["drops"])
+    assert result["fundamental_spacing_identified"] is False
+
+
+def test_old_search_interval_config_cannot_override_predeclared_prior():
+    config = _estimator_only_config()
+    config["elementary"]["profile_grid_points"] = 250
+    config["elementary"]["e_search_min_C"] = 0.5e-19
+    config["elementary"]["e_search_max_C"] = 2.5e-19
+    e_true = 1.602176634e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e_true, "sigma_charge_C": 0.05e-19}}
+        for i, n in enumerate([1, 2, 3, 4, 5, 6])
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["elementary_charge"]["search_interval_C"] == [1.35e-19, 1.90e-19]
+    prior = result["elementary_charge"]["prior"]
+    assert prior["search_interval_override_ignored"] is True
+    assert set(prior["ignored_override_keys"]) == {"e_search_min_C", "e_search_max_C"}
+
+
+def test_prior_boundary_hit_prevents_fundamental_identification():
+    config = _estimator_only_config()
+    config["elementary"]["profile_grid_points"] = 360
+    e_near_boundary = 1.351e-19
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e_near_boundary, "sigma_charge_C": 0.02e-19}}
+        for i, n in enumerate([1, 2, 3, 4, 5, 6])
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    assert result["boundary_guard"]["search_boundary_hit"] is True
+    assert result["fundamental_spacing_identified"] is False
+    assert result["status"] == "prior_boundary_hit"
+
+
+@pytest.mark.parametrize("base", [2, 3, 8])
+def test_nonprimitive_high_confidence_assignments_prevent_identification(base):
+    config = _estimator_only_config()
+    config["elementary"]["profile_grid_points"] = 360
+    e_true = 1.602176634e-19
+    multipliers = [base * value for value in [1, 2, 3, 4, 5, 6]]
+    drops = [
+        {"drop_id": f"d{i}", "valid": True, "result": {"charge_abs_C": n * e_true, "sigma_charge_C": 0.02e-19}}
+        for i, n in enumerate(multipliers)
+    ]
+
+    result = estimate_elementary_charge(drops, config)
+
+    primitive = result["primitive_assignment"]
+    assert primitive["primitive_assignment_supported"] is False
+    assert primitive["has_common_divisor_evidence"] is True
+    assert result["fundamental_spacing_identified"] is False
+    assert result["status"] == "integer_assignments_nonprimitive"
 
 
 def test_elementary_assignment_normalized_residual_uses_effective_sigma():
@@ -344,6 +431,7 @@ def test_elementary_model_comparison_does_not_overstate_continuous_sample():
     result = estimate_elementary_charge(drops, config)
 
     assert result["model_comparison"]["evidence_label"] != "strong"
+    assert result["fundamental_spacing_identified"] is False
 
 
 def test_quantized_profile_optimizes_tau_lambda_continuously():

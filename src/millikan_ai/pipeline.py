@@ -104,7 +104,11 @@ def _build_run_manifest(
         "status": {
             "video_readable": bool(diagnostics.get("video", {}).get("readable")),
             "valid_for_q": bool(drop_result.get("valid")),
-            "valid_for_elementary_charge": bool(elementary.get("valid")),
+            "valid_for_elementary_charge": bool(elementary.get("fundamental_spacing_identified")),
+            "elementary_estimation_ready": bool(elementary.get("fit_valid")) or bool(elementary.get("bounded_estimate_available")),
+            "bounded_estimate_available": bool(elementary.get("bounded_estimate_available")),
+            "quantization_supported": elementary.get("quantization_supported"),
+            "elementary_status": elementary.get("status"),
             "drop_valid": bool(drop_result.get("valid")),
             "ml_training": bool(quality_scores.get("ml_training", False)),
             "flags": flags,
@@ -570,8 +574,10 @@ def write_summary(run_dir: str | Path, config: dict | None = None) -> Path:
     config = config or load_config(root / "run_config.yaml")
     diagnostics_path = root / config["output"]["diagnostics_json"]
     drop_path = root / config["output"]["drop_results_json"]
+    elementary_path = root / config["output"].get("elementary_charge_result_json", "elementary_charge_result.json")
     diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8")) if diagnostics_path.exists() else {}
     drop = json.loads(drop_path.read_text(encoding="utf-8")) if drop_path.exists() else {}
+    elementary = json.loads(elementary_path.read_text(encoding="utf-8")) if elementary_path.exists() else {}
     lines = [
         f"Run: {root.name}",
         f"Video: {diagnostics.get('video', {}).get('path', '')}",
@@ -579,7 +585,11 @@ def write_summary(run_dir: str | Path, config: dict | None = None) -> Path:
         f"Track rows: {diagnostics.get('track_rows', 0)}",
         f"Segment rows: {diagnostics.get('segment_rows', 0)}",
         f"Drop valid: {drop.get('valid')}",
-        f"Flags: {', '.join(diagnostics.get('flags', []) + drop.get('flags', []))}",
+        f"Elementary fit valid: {elementary.get('fit_valid')}",
+        f"Elementary bounded estimate available: {elementary.get('bounded_estimate_available')}",
+        f"Elementary fundamental spacing identified: {elementary.get('fundamental_spacing_identified')}",
+        f"Elementary status: {elementary.get('status', '')}",
+        f"Flags: {', '.join(diagnostics.get('flags', []) + drop.get('flags', []) + elementary.get('flags', []))}",
     ]
     target = root / config["output"]["summary_txt"]
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")

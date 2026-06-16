@@ -369,7 +369,7 @@ def _write_report(run_dir: Path, result: dict[str, Any]) -> None:
     charges = result["charge_results"]
     elementary = result["elementary"]
     comparison = result["model_comparison"]
-    status = "success" if elementary.get("valid") else ("partial" if result["multi_drop_results"]["valid_drop_count"] else "failed")
+    status = "success" if elementary.get("fundamental_spacing_identified") else ("partial" if result["multi_drop_results"]["valid_drop_count"] else "failed")
     lines = [
         "# Downstream Millikan Report",
         "",
@@ -414,8 +414,16 @@ def _write_report(run_dir: Path, result: dict[str, Any]) -> None:
             "## Elementary-Charge Estimate",
             "",
             f"- valid: `{elementary.get('valid')}`",
+            f"- fit_valid: `{elementary.get('fit_valid')}`",
+            f"- bounded_estimate_available: `{elementary.get('bounded_estimate_available')}`",
+            f"- quantization_favored: `{elementary.get('quantization_favored')}`",
+            f"- quantization_supported: `{elementary.get('quantization_supported')}`",
+            f"- primitive_assignment_supported: `{elementary.get('primitive_assignment_supported')}`",
+            f"- fundamental_spacing_identified: `{elementary.get('fundamental_spacing_identified')}`",
+            f"- status: `{elementary.get('status')}`",
             f"- used q count: `{elementary.get('num_used_drops', 0)}`",
             f"- e_hat (1e-19 C): `{_scale_e(elementary)}`",
+            f"- fixed prior interval C: `{elementary.get('elementary_charge', {}).get('search_interval_C')}`",
             f"- profile intervals C: `{elementary.get('elementary_charge', {}).get('profile_intervals_C', [])}`",
             f"- systematic e interval C: `{result['uncertainty_details'].get('elementary_charge_systematic', {}).get('e_systematic_ci95_low_C')}` to `{result['uncertainty_details'].get('elementary_charge_systematic', {}).get('e_systematic_ci95_high_C')}`",
             "",

@@ -341,8 +341,8 @@ def test_pipeline_writes_multi_drop_outputs(tmp_path: Path):
     assert all({"quality_score", "keep", "q_valid", "reject_reasons"}.issubset(track) for track in drop_track_layer["tracks"])
     checks = {check["id"]: check for check in validity["checks"]}
     assert checks["multi_drop_q_results"]["details"]["valid_drop_count"] == multi_results["valid_drop_count"]
-    assert checks["elementary_charge_ready"]["details"]["required_drop_count"] == config["elementary"]["min_drops_for_estimation"]
-    assert "elementary_charge_ready" not in validity["blocking_failed_checks"]
+    assert checks["elementary_estimation_ready"]["details"]["required_drop_count"] == config["elementary"]["min_drops_for_estimation"]
+    assert "elementary_estimation_ready" not in validity["blocking_failed_checks"]
     assert "多油滴结果" in report
     assert "multi_drop_results.json" in report
 
@@ -386,9 +386,15 @@ def test_pipeline_estimates_elementary_charge_from_three_valid_drops(tmp_path: P
     assert model_comparison["method"] == "bounded_profile_quantized_likelihood"
     assert uncertainty["status"] in {"partial", "complete"}
     assert elementary["valid"] is True
+    assert elementary["bounded_estimate_available"] is True
+    assert elementary["quantization_supported"] is None
+    assert elementary["fundamental_spacing_identified"] is False
     assert elementary["num_used_drops"] == multi["valid_drop_count"] == 3
-    assert validity["overall_valid_for_elementary_charge"] is True
-    assert manifest["status"]["valid_for_elementary_charge"] is True
+    assert validity["overall_valid_for_elementary_charge"] is False
+    assert validity["bounded_estimate_available"] is True
+    assert manifest["status"]["valid_for_elementary_charge"] is False
+    assert manifest["status"]["bounded_estimate_available"] is True
+    assert manifest["status"]["elementary_status"] == elementary["status"]
 
 
 def test_primary_drop_selection_prefers_valid_q_over_top_tracking_score():

@@ -9,6 +9,9 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.special import logsumexp
 
+E_PRIOR_MIN_C = 1.35e-19
+E_PRIOR_MAX_C = 1.90e-19
+
 
 @dataclass(frozen=True)
 class QuantizedFit:
@@ -27,6 +30,23 @@ def _cfg_value(cfg: dict[str, Any], new_key: str, old_key: str | None, default: 
     if old_key and old_key in cfg:
         return cfg[old_key]
     return default
+
+
+def _predeclared_prior_interval() -> tuple[float, float]:
+    return E_PRIOR_MIN_C, E_PRIOR_MAX_C
+
+
+def _prior_metadata(cfg: dict[str, Any]) -> dict[str, Any]:
+    ignored_keys = [key for key in ["e_search_min_C", "e_search_max_C", "e_min_C", "e_max_C"] if key in cfg]
+    return {
+        "prior_constrained": True,
+        "prior_type": "predeclared_physical_interval",
+        "search_interval_C": [E_PRIOR_MIN_C, E_PRIOR_MAX_C],
+        "exact_reference_e_used": False,
+        "user_configurable": False,
+        "search_interval_override_ignored": bool(ignored_keys),
+        "ignored_override_keys": ignored_keys,
+    }
 
 
 def _usable_drops(drop_results: list[dict]) -> list[dict]:
@@ -64,8 +84,7 @@ def _quantized_log_likelihood(
 
 
 def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[str, Any]) -> QuantizedFit:
-    e_min = float(_cfg_value(cfg, "e_search_min_C", "e_min_C", 0.5e-19))
-    e_max = float(_cfg_value(cfg, "e_search_max_C", "e_max_C", 2.5e-19))
+    e_min, e_max = _predeclared_prior_interval()
     grid_points = int(_cfg_value(cfg, "profile_grid_points", "grid_points", 800))
     if not (0 < e_min < e_max) or grid_points < 10:
         raise ValueError("invalid_elementary_search_config")
@@ -93,17 +112,16 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
     profile_arr = np.asarray(profile, dtype=float)
     n_eval = 0
     failed_optimizations = 0
+    failed_candidate_log_likelihoods: list[float] = []
     optimize_count = min(len(e_grid), int(cfg.get("tau_lambda_profile_optimize_points", 16)))
     candidate_indices = set(np.argsort(profile_arr)[-optimize_count:].tolist())
-    local_peak_threshold = float(cfg.get("profile_mode_optimize_relative_threshold", cfg.get("mode_relative_likelihood_threshold", 0.02)))
-    coarse_max = float(np.max(profile_arr))
     local_peak_indices = []
     for idx in range(1, len(profile_arr) - 1):
         if profile_arr[idx] >= profile_arr[idx - 1] and profile_arr[idx] >= profile_arr[idx + 1]:
-            if math.exp(min(0.0, float(profile_arr[idx] - coarse_max))) >= local_peak_threshold:
-                local_peak_indices.append(idx)
-    max_local_modes = int(cfg.get("max_profile_modes_to_optimize", 24))
-    for idx in sorted(local_peak_indices, key=lambda item: profile_arr[item], reverse=True)[:max_local_modes]:
+            local_peak_indices.append(idx)
+    max_local_modes = max(1, int(cfg.get("max_profile_modes_to_optimize", 96)))
+    optimized_local_peak_indices = sorted(local_peak_indices, key=lambda item: profile_arr[item], reverse=True)[:max_local_modes]
+    for idx in optimized_local_peak_indices:
         candidate_indices.add(idx)
     for idx in list(candidate_indices):
         if idx > 0:
@@ -138,9 +156,13 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
         n_eval += eval_count
         if not success:
             failed_optimizations += 1
+            failed_candidate_log_likelihoods.append(float(ll))
         profile_arr[idx] = ll
         if ll > best[0]:
             best = (ll, float(e_grid[idx]), tau_C, lambda_decay)
+    local_modes_optimized = sum(1 for idx in local_peak_indices if idx in candidate_indices)
+    failed_candidate_could_win = any(ll >= best[0] for ll in failed_candidate_log_likelihoods)
+    profile_optimization_incomplete = bool(failed_candidate_could_win)
     return QuantizedFit(
         e_C=best[1],
         tau_C=best[2],
@@ -155,6 +177,11 @@ def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[st
             "bounds": {"tau_factor": [0.0, 20.0], "lambda_decay": [0.0, 12.0]},
             "optimized_profile_points": int(len(candidate_indices)),
             "failed_optimizations": int(failed_optimizations),
+            "failed_candidate_could_win": bool(failed_candidate_could_win),
+            "local_modes_found": int(len(local_peak_indices)),
+            "local_modes_optimized": int(local_modes_optimized),
+            "local_modes_omitted": int(max(0, len(local_peak_indices) - local_modes_optimized)),
+            "profile_optimization_incomplete": profile_optimization_incomplete,
             "selected_by": "maximum_profile_likelihood",
         },
     )
@@ -182,6 +209,8 @@ def _assignment_rows(charges: np.ndarray, sigmas: np.ndarray, fit: QuantizedFit,
                 "sigma_charge_C": float(sigmas[i]),
                 "n_hat": int(n_i),
                 "assignment_probability": float(probabilities[i, n_i - 1]),
+                "assignment_probability_given_e": float(probabilities[i, n_i - 1]),
+                "conditional_on_e_C": float(fit.e_C),
                 "nearest_quantized_charge_C": nearest,
                 "residual_C": residual,
                 "effective_sigma_C": effective_sigma,
@@ -257,6 +286,110 @@ def _is_harmonic_ratio(value_a: float, value_b: float, cfg: dict[str, Any]) -> b
         if abs(ratio - float(integer)) <= tolerance:
             return True
     return False
+
+
+def _boundary_diagnostics(fit: QuantizedFit) -> dict[str, Any]:
+    e_min, e_max = _predeclared_prior_interval()
+    span = e_max - e_min
+    grid_step = float(fit.profile_e_C[1] - fit.profile_e_C[0]) if len(fit.profile_e_C) > 1 else span
+    distance = min(abs(float(fit.e_C) - e_min), abs(e_max - float(fit.e_C)))
+    threshold = max(2.0 * grid_step, 0.02 * span)
+    return {
+        "search_boundary_hit": bool(distance <= threshold),
+        "boundary_distance_C": float(distance),
+        "boundary_distance_grid_steps": float(distance / grid_step) if grid_step > 0 else math.inf,
+        "boundary_guard_threshold_C": float(threshold),
+    }
+
+
+def _gcd(values: list[int]) -> int:
+    current = 0
+    for value in values:
+        current = math.gcd(current, int(abs(value)))
+    return int(current)
+
+
+def _primitive_assignment_diagnostics(assignments: list[dict[str, object]], cfg: dict[str, Any]) -> dict[str, Any]:
+    confidence_threshold = float(cfg.get("assignment_confidence_threshold", 0.80))
+    divisor_threshold = float(cfg.get("common_divisor_fraction_threshold", 0.80))
+    min_samples = int(cfg.get("primitive_min_high_confidence_samples", 3))
+    high_conf = [
+        int(row["n_hat"])
+        for row in assignments
+        if float(row.get("assignment_probability_given_e", row.get("assignment_probability", 0.0)) or 0.0) >= confidence_threshold
+    ]
+    gcd_value = _gcd(high_conf) if high_conf else 0
+    ratios: dict[str, float] = {}
+    for divisor in range(2, 13):
+        ratios[str(divisor)] = (
+            float(sum(1 for value in high_conf if value % divisor == 0) / len(high_conf)) if high_conf else 0.0
+        )
+    has_common_divisor = bool(
+        len(high_conf) >= min_samples
+        and (gcd_value > 1 or any(value >= divisor_threshold for value in ratios.values()))
+    )
+    enough_support = len(high_conf) >= min_samples
+    return {
+        "primitive_assignment_supported": bool(enough_support and not has_common_divisor),
+        "high_confidence_assignment_count": int(len(high_conf)),
+        "high_confidence_threshold": float(confidence_threshold),
+        "integer_gcd": int(gcd_value),
+        "divisible_fraction_by_integer": ratios,
+        "common_divisor_fraction_threshold": float(divisor_threshold),
+        "min_high_confidence_samples": int(min_samples),
+        "has_common_divisor_evidence": bool(has_common_divisor),
+    }
+
+
+def _mode_proportions(samples: list[float], fit: QuantizedFit, modes: list[dict[str, float]], cfg: dict[str, Any]) -> dict[str, Any]:
+    if not samples:
+        return {"samples": 0, "main_mode_fraction": None, "harmonic_mode_fraction": None, "other_mode_fraction": None}
+    e_min, e_max = _predeclared_prior_interval()
+    grid_step = float(fit.profile_e_C[1] - fit.profile_e_C[0]) if len(fit.profile_e_C) > 1 else (e_max - e_min)
+    tolerance = max(2.0 * grid_step, 0.02 * (e_max - e_min))
+    main = 0
+    harmonic = 0
+    other = 0
+    harmonic_modes = [float(mode["e_C"]) for mode in modes if _is_harmonic_ratio(float(mode["e_C"]), float(fit.e_C), cfg)]
+    for value in samples:
+        sample = float(value)
+        if abs(sample - float(fit.e_C)) <= tolerance:
+            main += 1
+        elif any(abs(sample - mode) <= tolerance for mode in harmonic_modes):
+            harmonic += 1
+        else:
+            other += 1
+    total = len(samples)
+    return {
+        "samples": int(total),
+        "main_mode_fraction": float(main / total),
+        "harmonic_mode_fraction": float(harmonic / total),
+        "other_mode_fraction": float(other / total),
+        "mode_tolerance_C": float(tolerance),
+    }
+
+
+def _quantization_supported(comparison: dict[str, Any], cfg: dict[str, Any]) -> bool | None:
+    null = comparison.get("null_simulation")
+    delta = comparison.get("delta_elpd")
+    if not null or not bool(cfg.get("enable_calibrated_evidence_labels", False)):
+        return None
+    try:
+        p_value = float(null.get("empirical_p_value"))
+        delta_value = float(delta)
+    except (TypeError, ValueError):
+        return False
+    return bool(math.isfinite(p_value) and math.isfinite(delta_value) and delta_value > 0 and p_value <= 0.05)
+
+
+def _quantization_favored(comparison: dict[str, Any]) -> bool | None:
+    try:
+        delta = float(comparison.get("delta_elpd"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(delta):
+        return None
+    return bool(delta > 0)
 
 
 def _fit_gmm(values: np.ndarray, sigmas: np.ndarray, max_components: int, seed: int) -> dict[str, Any]:
@@ -362,7 +495,7 @@ def _predictive_model_comparison(charges: np.ndarray, sigmas: np.ndarray, cfg: d
         test_charge = charges[test_idx]
         test_sigma = sigmas[test_idx]
         q_fit = _fit_quantized_profile(train_charges, train_sigmas, fit_cfg)
-        e_min = float(_cfg_value(cfg, "e_search_min_C", "e_min_C", 0.5e-19))
+        e_min, _e_max = _predeclared_prior_interval()
         nmax = max(1, int(math.ceil(float(max(np.max(train_charges), np.max(test_charge))) / e_min)) + 1)
         q_score = _quantized_log_likelihood(test_charge, test_sigma, q_fit.e_C, q_fit.tau_C, q_fit.lambda_decay, nmax)
         max_components = min(4, max(1, len(train_charges) // 3))
@@ -497,6 +630,13 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
     if len(valid) == 1:
         return {
             "valid": False,
+            "fit_valid": False,
+            "bounded_estimate_available": False,
+            "quantization_favored": None,
+            "quantization_supported": None,
+            "primitive_assignment_supported": False,
+            "fundamental_spacing_identified": False,
+            "status": "insufficient_independent_drops",
             "flags": ["insufficient_independent_drops"],
             "num_total_drops": len(drop_results),
             "num_used_drops": 1,
@@ -505,6 +645,13 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
     if len(valid) < min_drops:
         return {
             "valid": False,
+            "fit_valid": False,
+            "bounded_estimate_available": False,
+            "quantization_favored": None,
+            "quantization_supported": None,
+            "primitive_assignment_supported": False,
+            "fundamental_spacing_identified": False,
+            "status": "insufficient_drops",
             "flags": ["insufficient_drops"],
             "num_total_drops": len(drop_results),
             "num_used_drops": len(valid),
@@ -518,6 +665,13 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
     if len(valid) < min_drops:
         return {
             "valid": False,
+            "fit_valid": False,
+            "bounded_estimate_available": False,
+            "quantization_favored": None,
+            "quantization_supported": None,
+            "primitive_assignment_supported": False,
+            "fundamental_spacing_identified": False,
+            "status": "insufficient_finite_drops",
             "flags": ["insufficient_finite_drops"],
             "num_total_drops": len(drop_results),
             "num_used_drops": len(valid),
@@ -544,8 +698,7 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
         if measurement_mc
         else [fit.e_C, fit.e_C]
     )
-    e_min = float(_cfg_value(cfg, "e_search_min_C", "e_min_C", 0.5e-19))
-    e_max = float(_cfg_value(cfg, "e_search_max_C", "e_max_C", 2.5e-19))
+    e_min, e_max = _predeclared_prior_interval()
     if bool(cfg.get("skip_model_comparison", False)):
         comparison = {
             "continuous_model": "approximate_heteroscedastic_deconvolved_gmm",
@@ -562,8 +715,71 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
     leave_one_drop_out = [] if bool(cfg.get("skip_stability_diagnostics", False)) else _leave_one_drop_out_stability(charges, sigmas, valid, cfg, fit.e_C)
     profile_intervals = _profile_intervals(fit)
     primary_profile_interval = _primary_profile_interval(fit, profile_intervals)
+    boundary = _boundary_diagnostics(fit)
+    primitive = _primitive_assignment_diagnostics(assignments, cfg)
+    bootstrap_modes = _mode_proportions(boot, fit, modes, cfg)
+    measurement_modes = _mode_proportions(measurement_mc, fit, modes, cfg)
+    mode_threshold = float(cfg.get("mode_stability_min_main_fraction", 0.80))
+    mode_instability = any(
+        mode_info["samples"] > 0 and float(mode_info["main_mode_fraction"]) < mode_threshold
+        for mode_info in [bootstrap_modes, measurement_modes]
+    )
+    quantization_favored = _quantization_favored(comparison)
+    quantization_supported = _quantization_supported(comparison, cfg)
+    fit_valid = bool(math.isfinite(float(fit.e_C)) and math.isfinite(float(fit.log_likelihood)))
+    bounded_estimate_available = bool(fit_valid and e_min <= float(fit.e_C) <= e_max)
+    profile_incomplete = bool(fit.optimizer.get("profile_optimization_incomplete", False))
+    flags: list[str] = []
+    if boundary["search_boundary_hit"]:
+        flags.append("prior_boundary_hit")
+    if profile_incomplete:
+        flags.append("profile_optimization_incomplete")
+    if harmonic:
+        flags.append("harmonic_ambiguity")
+    if mode_instability:
+        flags.append("mode_instability")
+    if not primitive["primitive_assignment_supported"]:
+        flags.append("integer_assignments_nonprimitive")
+    if quantization_supported is None:
+        flags.append("evidence_not_calibrated")
+    elif not quantization_supported:
+        flags.append("quantization_not_supported")
+    if not bounded_estimate_available:
+        status = "bounded_estimate_unavailable"
+    elif boundary["search_boundary_hit"]:
+        status = "prior_boundary_hit"
+    elif profile_incomplete:
+        status = "profile_optimization_incomplete"
+    elif not primitive["primitive_assignment_supported"]:
+        status = "integer_assignments_nonprimitive"
+    elif harmonic or mode_instability:
+        status = "mode_instability"
+    elif quantization_supported is not True:
+        status = "bounded_estimate_evidence_not_calibrated" if quantization_supported is None else "quantization_not_supported"
+    else:
+        status = "fundamental_spacing_identified"
+    fundamental_identified = bool(
+        fit_valid
+        and bounded_estimate_available
+        and not boundary["search_boundary_hit"]
+        and not profile_incomplete
+        and not harmonic
+        and not mode_instability
+        and primitive["primitive_assignment_supported"]
+        and quantization_supported is True
+    )
+    comparison["quantization_favored"] = quantization_favored
+    comparison["quantization_supported"] = quantization_supported
+    comparison["fundamental_spacing_identified"] = fundamental_identified
     return {
         "valid": True,
+        "fit_valid": fit_valid,
+        "bounded_estimate_available": bounded_estimate_available,
+        "quantization_favored": quantization_favored,
+        "quantization_supported": quantization_supported,
+        "primitive_assignment_supported": primitive["primitive_assignment_supported"],
+        "fundamental_spacing_identified": fundamental_identified,
+        "status": status,
         "num_total_drops": len(drop_results),
         "num_used_drops": len(valid),
         "elementary_charge": {
@@ -580,7 +796,8 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
             "bootstrap_samples_used": int(len(boot)),
             "measurement_mc_samples_used": int(len(measurement_mc)),
             "search_interval_C": [e_min, e_max],
-            "blind_estimation": "bounded_interval_no_reference_e_input",
+            "prior": _prior_metadata(cfg),
+            "blind_estimation": "predeclared_physical_interval_no_exact_reference_e_input",
             "tau_C": float(fit.tau_C),
             "lambda_decay": float(fit.lambda_decay),
         },
@@ -601,8 +818,16 @@ def estimate_elementary_charge(drop_results: list[dict], config: dict) -> dict[s
             "log_likelihood": float(fit.log_likelihood),
             **comparison,
         },
+        "boundary_guard": boundary,
+        "primitive_assignment": primitive,
+        "mode_stability": {
+            "main_mode_min_fraction_required": mode_threshold,
+            "mode_instability": bool(mode_instability),
+            "bootstrap": bootstrap_modes,
+            "measurement_mc": measurement_modes,
+        },
         "stability": {
             "leave_one_drop_out": leave_one_drop_out,
         },
-        "flags": ["harmonic_ambiguity"] if harmonic else [],
+        "flags": flags,
     }

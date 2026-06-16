@@ -37,7 +37,7 @@ Do not install dependencies globally or into the base Conda environment. Use `.v
 .venv\Scripts\python -m pytest tests -q --basetemp runs\pytest_tmp_work -o cache_dir=runs\pytest_cache_work
 ```
 
-The test suite uses synthetic images/videos for deterministic grid, manual platform, tracking, velocity, charge, elementary-charge, and CLI behavior. It includes a three-droplet pipeline case that reaches `elementary_charge_result.json.valid=true`.
+The test suite uses synthetic images/videos for deterministic grid, manual platform, tracking, velocity, charge, elementary-charge, and CLI behavior. It includes a three-droplet pipeline case that reaches `elementary_charge_result.json.valid=true` as a numeric bounded fit while keeping `fundamental_spacing_identified=false` until calibrated evidence is available.
 
 ## CLI
 
@@ -213,6 +213,8 @@ result = run_downstream_analysis(
 ```
 
 This path does not call the tracker or read video frames. It writes `platform_velocity_results.csv`, `drop_charge_results.csv`, `drop_charge_failures.json`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, `plots_data.json`, and `analysis_report.md`.
+
+Elementary-charge estimation is a predeclared bounded inversion, not an unconstrained blind search. The fixed internal prior interval is `[1.35e-19, 1.90e-19] C`; it is not user configurable, and old `e_search_min_C/e_search_max_C` keys are ignored with provenance recorded in `elementary_charge_result.json`. The legacy `valid` field means only that the numeric fit produced a bounded candidate. Scientific success must use `fundamental_spacing_identified`, which additionally requires no boundary hit, complete profile optimization, stable modes, primitive integer assignments, and calibrated quantization support.
 
 For shared systematic uncertainty, set `physics.systematic_mc_samples` and `physics.systematic_uncertainty` in the config. Each systematic draw uses one common set of sampled physical parameters across all drops, while per-drop random errors remain independent.
 Each shared systematic draw also recomputes the full set of q values and reruns the elementary-charge estimator, so `uncertainty_details.json` includes `sigma_e_systematic_C`, systematic e intervals, and combined e intervals.
