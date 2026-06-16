@@ -123,6 +123,7 @@ Each run should also expose:
 Standalone downstream runs write a concise debugging report and machine outputs without video visualization layers. Use `drop_charge_results.csv`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, and `plots_data.json` for those panels.
 
 Elementary-charge output is a predeclared bounded inversion over the fixed internal interval `[1.35e-19, 1.90e-19] C`. This interval is not a user setting. `elementary_charge_result.json.valid` is retained only as numeric-fit compatibility; UI validity must use `fundamental_spacing_identified`.
+The estimator also exposes `optimizer.profile_optimization_incomplete`, `optimizer.failed_optimizations`, `optimizer.local_modes_omitted`, and `optimizer.important_local_modes_omitted`. A run with `profile_optimization_incomplete=true` must be displayed as a bounded diagnostic candidate only, even if `valid=true`.
 
 `diagnostic_overlay.jpg` is a rendered preview of the same concepts. The UI should prefer `visualization_layers.json` for interactive overlays and use the image as a quick preview or fallback.
 
@@ -155,9 +156,9 @@ Important fields:
 - `overall_valid_for_elementary_charge`: whether bounded elementary-charge estimation identified a primitive fundamental spacing with calibrated support.
 - `elementary_estimation_ready`: whether enough successful q values exist to attempt the estimator; this is not final validity.
 - `bounded_estimate_available`, `quantization_supported`, and `elementary_status`: compact estimator state for UI badges and warnings.
+- `combined_flags`: includes scientific guard flags such as `profile_optimization_incomplete`, `prior_boundary_hit`, `integer_assignments_nonprimitive`, and `evidence_not_calibrated`.
 - `blocking_failed_checks`: check ids that block q validity.
 - `checks`: detailed pass/fail objects with `id`, `passed`, `message`, and `details`.
-- `combined_flags`: flags collected from diagnostics, q calculation, and elementary-charge estimation.
 
 The UI should show failed checks directly instead of hiding the reason behind a generic invalid state.
 
