@@ -1,3 +1,4 @@
+import json
 import math
 from pathlib import Path
 
@@ -95,6 +96,15 @@ def test_standalone_downstream_api_requires_no_video_and_uses_every_successful_q
     assert result["elementary"]["valid"] is True
     assert (tmp_path / "drop_charge_results.csv").exists()
     assert (tmp_path / "analysis_report.md").exists()
+    plots = json.loads((tmp_path / "plots_data.json").read_text(encoding="utf-8"))
+    assert plots["schema_version"] == 2
+    assert set(plots["charts"]) == {
+        "charge_distribution",
+        "integer_assignment",
+        "phase_residual",
+        "model_comparison",
+    }
+    assert len(plots["charts"]["charge_distribution"]["observations"]) == 3
 
 
 def test_standalone_downstream_api_excludes_only_failed_q_from_elementary(tmp_path: Path):
@@ -202,3 +212,5 @@ def test_downstream_report_uses_human_units_and_input_provenance(tmp_path: Path)
     assert "random_sigma_q_1e_minus_19_C" in report
     assert "sigma_charge_total_C" not in report
     assert report.count("## Per-Drop r and q") == 1
+    assert "Interactive Visualization Data" in report
+    assert "plots_data.json" in report

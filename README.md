@@ -103,6 +103,7 @@ Each run directory writes:
 - `drop_charge_failures.json`
 - `model_comparison.json`
 - `uncertainty_details.json`
+- `plots_data.json`
 - `quality_scores.json`
 - `trajectory_quality_scores.csv`
 - `elementary_charge_result.json`
@@ -241,7 +242,9 @@ $env:PYTHONPATH='src'
 
 Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection. Candidate ranking also penalizes tracks that stay too close to grid lines or tracking ROI edges, which reduces false positives from grid intersections and edge highlights. The tracker shares per-frame blob detection across active seeds and runs LK optical flow on a local patch around each tracked point to keep 1080p videos responsive on CPU.
 
-For frontend review, each run writes `run_manifest.json`, `validity_report.json`, `visualization_layers.json`, and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; the validity report lists pass/fail checks; the layer JSON provides structured drawing data for interactive frontend overlays, including multi-drop tracks when `tracking.max_drops > 1`; the diagnostic image is a rendered preview. See `docs/frontend_backend_interface.md` for the desktop UI contract.
+For frontend review, each run writes `run_manifest.json`, `validity_report.json`, `visualization_layers.json`, `plots_data.json`, and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; the validity report lists pass/fail checks; the layer JSON provides structured drawing data for interactive frontend overlays, `plots_data.json` provides renderer-neutral elementary-charge chart data, and the diagnostic image is a rendered preview. See `docs/frontend_backend_interface.md` for the desktop UI contract.
+
+`plots_data.json` uses `schema_version: 2` and does not contain PNG, SVG, HTML, Plotly, or ECharts options. It contains four backend-computed chart datasets: charge distribution with quantized and continuous predictive density curves, integer assignment comb, phase residuals, and per-droplet quantized-vs-continuous predictive score contributions. These charts remain diagnostic when `fundamental_spacing_identified=false`; formal support still depends on `quantization_supported` and `evidence_label`.
 
 Raw smoke-test findings for the current `1.mp4` through `8.mp4` samples and older archived videos are recorded in `docs/raw_video_smoke.md`.
 

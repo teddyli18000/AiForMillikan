@@ -125,6 +125,15 @@ Standalone downstream runs write a concise debugging report and machine outputs 
 Elementary-charge output is a predeclared bounded inversion over the fixed internal interval `[1.35e-19, 1.90e-19] C`. This interval is not a user setting. `elementary_charge_result.json.valid` is retained only as numeric-fit compatibility; UI validity must use `fundamental_spacing_identified`.
 The estimator also exposes `optimizer.profile_optimization_incomplete`, `optimizer.failed_optimizations`, `optimizer.local_modes_omitted`, and `optimizer.important_local_modes_omitted`. A run with `profile_optimization_incomplete=true` must be displayed as a bounded diagnostic candidate only, even if `valid=true`.
 
+`plots_data.json` is the elementary-charge interactive visualization contract. It uses `schema_version: 2`, standard JSON values only, and no renderer-specific chart options. The top-level `charts` object contains:
+
+- `charge_distribution`: observed `q_i`, `sigma_q_i`, integer assignments, optional histogram bins, quantized predictive density from the fitted bounded quantized model, continuous predictive density from the fitted comparison GMM, and `n * e_hat` reference levels.
+- `integer_assignment`: one point per droplet with `drop_id`, `track_id`, `q_C`, `sigma_q_C`, `n_hat`, nearest quantized charge, residual, normalized residual, assignment probability, and flags.
+- `phase_residual`: one point per assigned droplet with `phase_residual = q_i / e_hat - round(q_i / e_hat)`, a phase histogram, and a zero reference line.
+- `model_comparison`: total quantized/continuous ELPD fields and per-droplet `delta_log_predictive_density`. The per-droplet values sum to `delta_elpd`.
+
+The manifest should expose this file through a frontend panel like `elementary_charge_visualization` with `source=plots_data.json` and `status_source=elementary_charge_result.json`. The UI may render the charts with ECharts, Plotly, Qt Charts, or another library, but should not treat `quantization_favored=true` as formal support unless `quantization_supported=true`.
+
 `diagnostic_overlay.jpg` is a rendered preview of the same concepts. The UI should prefer `visualization_layers.json` for interactive overlays and use the image as a quick preview or fallback.
 
 ## Run Manifest Schema

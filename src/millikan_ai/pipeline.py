@@ -11,6 +11,7 @@ import pandas as pd
 from millikan_ai.calibration.grid import Roi, calibrate_grid, default_voltage_roi
 from millikan_ai.config import load_config, save_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
+from millikan_ai.elementary.plots import build_elementary_plots_data
 from millikan_ai.outputs.schemas import (
     AUTO_PLATFORM_SUGGESTION_COLUMNS,
     BEST_TRACK_COLUMNS,
@@ -151,6 +152,11 @@ def _build_run_manifest(
             {"id": "multi_drop_segments", "source": files.get("drop_track_segments_csv")},
             {"id": "charge_result", "source": files.get("drop_results_json")},
             {"id": "multi_drop_results", "source": files.get("multi_drop_results_json")},
+            {
+                "id": "elementary_charge_visualization",
+                "source": files.get("plots_data_json"),
+                "status_source": files.get("elementary_charge_result_json"),
+            },
             {"id": "quality", "source": files.get("quality_scores_json")},
             {"id": "quality_scores", "source": files.get("trajectory_quality_scores_csv")},
             {"id": "validity", "source": files.get("validity_report_json")},
@@ -291,6 +297,7 @@ def _write_downstream_physics_outputs(
     pd.DataFrame(charge_rows).to_csv(target / output_cfg.get("drop_charge_results_csv", "drop_charge_results.csv"), index=False)
     _write_json(target / output_cfg.get("drop_charge_failures_json", "drop_charge_failures.json"), {"failures": failures})
     _write_json(target / output_cfg.get("model_comparison_json", "model_comparison.json"), elementary.get("model_comparison", {}))
+    _write_json(target / output_cfg.get("plots_data_json", "plots_data.json"), build_elementary_plots_data(elementary, drop_results))
     _write_json(
         target / output_cfg.get("uncertainty_details_json", "uncertainty_details.json"),
         {
@@ -543,8 +550,12 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
         "elementary_charge_result_json",
         "validity_report_json",
         "visualization_layers_json",
+        "plots_data_json",
     ]:
-        path = root / output[key]
+        filename = output.get(key)
+        if not filename:
+            continue
+        path = root / filename
         if not path.exists():
             errors.append(f"missing file: {path.name}")
         else:
