@@ -75,12 +75,23 @@ def _quantized_log_likelihood(
     lambda_decay: float,
     nmax: int,
 ) -> float:
+    return float(np.sum(_quantized_log_density(charges, sigmas, e_C, tau_C, lambda_decay, nmax)))
+
+
+def _quantized_log_density(
+    charges: np.ndarray,
+    sigmas: np.ndarray,
+    e_C: float,
+    tau_C: float,
+    lambda_decay: float,
+    nmax: int,
+) -> np.ndarray:
     n_values = np.arange(1, nmax + 1, dtype=float)
     log_prior = -float(lambda_decay) * (n_values - 1.0)
     log_prior = log_prior - logsumexp(log_prior)
     sigma_total = np.sqrt(np.square(sigmas[:, None]) + float(tau_C) ** 2)
     log_components = log_prior[None, :] + _normal_logpdf(charges[:, None], n_values[None, :] * float(e_C), sigma_total)
-    return float(np.sum(logsumexp(log_components, axis=1)))
+    return logsumexp(log_components, axis=1)
 
 
 def _fit_quantized_profile(charges: np.ndarray, sigmas: np.ndarray, cfg: dict[str, Any]) -> QuantizedFit:
@@ -484,12 +495,16 @@ def _fit_gmm(values: np.ndarray, sigmas: np.ndarray, max_components: int, seed: 
 
 
 def _continuous_log_likelihood(charges: np.ndarray, sigmas: np.ndarray, model: dict[str, Any]) -> float:
+    return float(np.sum(_continuous_log_density(charges, sigmas, model)))
+
+
+def _continuous_log_density(charges: np.ndarray, sigmas: np.ndarray, model: dict[str, Any]) -> np.ndarray:
     weights = np.asarray(model["weights"], dtype=float)
     means = np.asarray(model["means"], dtype=float)
     variances = np.asarray(model["variances"], dtype=float)
     total_sigma = np.sqrt(variances[None, :] + np.square(sigmas[:, None]))
     log_components = np.log(weights[None, :]) + _normal_logpdf(charges[:, None], means[None, :], total_sigma)
-    return float(np.sum(logsumexp(log_components, axis=1)))
+    return logsumexp(log_components, axis=1)
 
 
 def _cv_splits(n: int, cfg: dict[str, Any]) -> tuple[str, list[tuple[np.ndarray, np.ndarray]], int, int]:
@@ -541,6 +556,7 @@ def _predictive_model_comparison(charges: np.ndarray, sigmas: np.ndarray, cfg: d
     continuous_scores = []
     method, splits, folds, repeats = _cv_splits(len(charges), cfg)
     per_split_delta = []
+    per_split_observation = []
     for split_index, (train_idx, test_idx) in enumerate(splits):
         train_charges = charges[train_idx]
         train_sigmas = sigmas[train_idx]
@@ -549,27 +565,69 @@ def _predictive_model_comparison(charges: np.ndarray, sigmas: np.ndarray, cfg: d
         q_fit = _fit_quantized_profile(train_charges, train_sigmas, fit_cfg)
         e_min, _e_max = _predeclared_prior_interval()
         nmax = max(1, int(math.ceil(float(max(np.max(train_charges), np.max(test_charge))) / e_min)) + 1)
-        q_score = _quantized_log_likelihood(test_charge, test_sigma, q_fit.e_C, q_fit.tau_C, q_fit.lambda_decay, nmax)
+        q_density = _quantized_log_density(test_charge, test_sigma, q_fit.e_C, q_fit.tau_C, q_fit.lambda_decay, nmax)
+        q_score = float(np.sum(q_density))
         max_components = min(4, max(1, len(train_charges) // 3))
         c_model = _fit_gmm(train_charges, train_sigmas, max_components=max_components, seed=seed + split_index)
-        c_score = _continuous_log_likelihood(test_charge, test_sigma, c_model)
+        c_density = _continuous_log_density(test_charge, test_sigma, c_model)
+        c_score = float(np.sum(c_density))
         quantized_scores.append(q_score)
         continuous_scores.append(c_score)
         per_split_delta.append(float(q_score - c_score))
+        fold_id = int(split_index % max(int(folds), 1))
+        repeat_id = int(split_index // max(int(folds), 1)) if method == "repeated_5fold_predictive_likelihood" else 0
+        for local_index, observation_index in enumerate(test_idx.tolist()):
+            q_log = float(q_density[local_index])
+            c_log = float(c_density[local_index])
+            per_split_observation.append(
+                {
+                    "observation_index": int(observation_index),
+                    "split_id": int(split_index),
+                    "fold_id": fold_id,
+                    "repeat_id": repeat_id,
+                    "quantized_log_predictive_density": q_log,
+                    "continuous_log_predictive_density": c_log,
+                    "delta_log_predictive_density": float(q_log - c_log),
+                }
+            )
     quantized_elpd = float(np.sum(quantized_scores))
     continuous_elpd = float(np.sum(continuous_scores))
     delta = quantized_elpd - continuous_elpd
     final_model = _fit_gmm(charges, sigmas, max_components=min(4, max(1, len(charges) // 3)), seed=seed)
     delta_arr = np.asarray(per_split_delta, dtype=float)
+    per_observation = []
+    for observation_index in range(len(charges)):
+        rows = [row for row in per_split_observation if row["observation_index"] == observation_index]
+        if not rows:
+            continue
+        q_sum = float(sum(float(row["quantized_log_predictive_density"]) for row in rows))
+        c_sum = float(sum(float(row["continuous_log_predictive_density"]) for row in rows))
+        per_observation.append(
+            {
+                "observation_index": int(observation_index),
+                "split_count": int(len(rows)),
+                "quantized_log_predictive_density": q_sum,
+                "continuous_log_predictive_density": c_sum,
+                "delta_log_predictive_density": float(q_sum - c_sum),
+            }
+        )
     comparison: dict[str, object] = {
         "continuous_model": "approximate_heteroscedastic_deconvolved_gmm",
         "heteroscedastic": True,
         "continuous_components": int(final_model["components"]),
         "continuous_bic": float(final_model["bic"]),
+        "continuous_density_model": {
+            "model_type": "approximate_heteroscedastic_deconvolved_gmm",
+            "weights": [float(value) for value in np.asarray(final_model["weights"], dtype=float).tolist()],
+            "means_C": [float(value) for value in np.asarray(final_model["means"], dtype=float).tolist()],
+            "variances_C2": [float(value) for value in np.asarray(final_model["variances"], dtype=float).tolist()],
+        },
         "comparison_method": method,
         "folds": int(folds),
         "repeats": int(repeats),
         "per_split_delta_elpd": per_split_delta,
+        "per_split_observation_log_predictive_density": per_split_observation,
+        "per_observation_log_predictive_density": per_observation,
         "delta_elpd_se": float(np.std(delta_arr, ddof=1) / math.sqrt(len(delta_arr))) if len(delta_arr) > 1 else 0.0,
         "quantized_elpd": quantized_elpd,
         "continuous_elpd": continuous_elpd,

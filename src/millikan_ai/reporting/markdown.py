@@ -82,6 +82,7 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
     charge_failures = _read_json(root / output.get("drop_charge_failures_json", "drop_charge_failures.json"))
     model_comparison = _read_json(root / output.get("model_comparison_json", "model_comparison.json"))
     uncertainty = _read_json(root / output.get("uncertainty_details_json", "uncertainty_details.json"))
+    plots_data = _read_json(root / output.get("plots_data_json", "plots_data.json"))
     drop_result_rows = _drop_result_rows(multi_drop)
     video = diagnostics.get("video", {})
     grid = diagnostics.get("grid", {})
@@ -103,6 +104,7 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
         "elementary_charge_result_json",
         "model_comparison_json",
         "uncertainty_details_json",
+        "plots_data_json",
         "visualization_layers_json",
         "run_manifest_json",
     ]
@@ -191,6 +193,18 @@ def write_analysis_report(run_dir: str | Path, config: dict[str, Any]) -> Path:
         f"- Delta ELPD: `{_fmt(model_comparison.get('delta_elpd'))}`",
         f"- 证据等级: `{model_comparison.get('evidence_label', 'insufficient')}`",
         f"- 连续模型: `{model_comparison.get('continuous_model', '')}`",
+        "",
+        "## 交互式可视化数据",
+        "",
+        f"- 文件: `{output.get('plots_data_json', 'plots_data.json')}`",
+        f"- schema_version: `{plots_data.get('schema_version', '')}`",
+        f"- 图表: `{', '.join((plots_data.get('charts') or {}).keys())}`",
+        f"- plots status: `{plots_data.get('status', '')}`",
+        f"- bounded_estimate_available: `{elementary.get('bounded_estimate_available')}`",
+        f"- quantization_favored: `{elementary.get('quantization_favored')}`",
+        f"- quantization_supported: `{elementary.get('quantization_supported')}`",
+        f"- fundamental_spacing_identified: `{elementary.get('fundamental_spacing_identified')}`",
+        "实验电荷点和模型比较图是诊断性可视化数据；`quantization_favored=true` 不等同于正式证明量子化，正式支持应以 `quantization_supported` 和 `evidence_label` 为准。",
         "",
         "## 平台速度结果",
         "",

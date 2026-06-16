@@ -162,6 +162,7 @@ output:
   drop_charge_failures_json: drop_charge_failures.json
   model_comparison_json: model_comparison.json
   uncertainty_details_json: uncertainty_details.json
+  plots_data_json: plots_data.json
   quality_scores_json: quality_scores.json
   elementary_charge_result_json: elementary_charge_result.json
   validity_report_json: validity_report.json

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from millikan_ai.elementary.estimate import estimate_elementary_charge
+from millikan_ai.elementary.plots import build_elementary_plots_data
 from millikan_ai.physics.charge import compute_drop_result, eta_eff, solve_radius_with_cunningham
 from millikan_ai.physics.viscosity import resolve_air_viscosity
 from millikan_ai.segments.fitting import fit_track_segments
@@ -432,6 +433,15 @@ def _write_report(run_dir: Path, result: dict[str, Any]) -> None:
             f"- delta_elpd: `{comparison.get('delta_elpd')}`",
             f"- evidence_label: `{comparison.get('evidence_label', 'not_calibrated')}`",
             "",
+            "## Interactive Visualization Data",
+            "",
+            "- `plots_data.json` contains frontend-neutral data for charge distribution, integer assignment, phase residual, and model comparison charts.",
+            f"- bounded_estimate_available: `{elementary.get('bounded_estimate_available')}`",
+            f"- quantization_favored: `{elementary.get('quantization_favored')}`",
+            f"- quantization_supported: `{elementary.get('quantization_supported')}`",
+            f"- fundamental_spacing_identified: `{elementary.get('fundamental_spacing_identified')}`",
+            "- A positive model-comparison score is diagnostic unless `quantization_supported=true`.",
+            "",
             "## Uncertainty Contributors",
             "",
             f"- uncertainty status: `{result['uncertainty_details'].get('status')}`",
@@ -499,12 +509,7 @@ def run_downstream_analysis(
     model_comparison = elementary.get("model_comparison", {})
     uncertainty_details = _build_uncertainty_details(drop_results, config, elementary)
     _annotate_systematic_uncertainty(drop_results, uncertainty_details)
-    plots_data = {
-        "elementary_profile": {
-            "candidate_modes": elementary.get("harmonic_analysis", {}).get("candidate_modes", []),
-        },
-        "leave_one_drop_out": elementary.get("stability", {}).get("leave_one_drop_out", []),
-    }
+    plots_data = build_elementary_plots_data(elementary, drop_results)
 
     drop_segments.to_csv(target / "drop_track_segments.csv", index=False)
     velocity_results = _write_velocity_results(target, drop_segments, drop_results)

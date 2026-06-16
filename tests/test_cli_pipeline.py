@@ -379,6 +379,8 @@ def test_pipeline_estimates_elementary_charge_from_three_valid_drops(tmp_path: P
     quality_rows = pd.read_csv(run_dir / "trajectory_quality_scores.csv")
     validity = json.loads((run_dir / "validity_report.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    plots = json.loads((run_dir / "plots_data.json").read_text(encoding="utf-8"))
+    report = (run_dir / "analysis_report.md").read_text(encoding="utf-8")
     assert multi["valid_drop_count"] == 3
     assert len(charge_results) == multi["valid_drop_count"]
     assert failures["failures"] == []
@@ -394,6 +396,11 @@ def test_pipeline_estimates_elementary_charge_from_three_valid_drops(tmp_path: P
     assert validity["bounded_estimate_available"] is True
     assert manifest["status"]["valid_for_elementary_charge"] is False
     assert manifest["status"]["bounded_estimate_available"] is True
+    assert manifest["files"]["plots_data_json"].endswith("plots_data.json")
+    assert any(panel["id"] == "elementary_charge_visualization" for panel in manifest["frontend_panels"])
+    assert plots["schema_version"] == 2
+    assert set(plots["charts"]) == {"charge_distribution", "integer_assignment", "phase_residual", "model_comparison"}
+    assert "## 交互式可视化数据" in report
     assert manifest["status"]["elementary_status"] == elementary["status"]
 
 
