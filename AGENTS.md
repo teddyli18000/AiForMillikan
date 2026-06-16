@@ -9,7 +9,7 @@ This project analyzes Millikan oil drop experiment videos. The current backend i
 - `src/millikan_ai/video/`: OpenCV video metadata, frame sampling, and diagnostic frames.
 - `src/millikan_ai/api.py`: public backend API for CLI and future PySide6/Qt frontend integration.
 - `src/millikan_ai/calibration/`: screen/ROI/grid calibration and physical scale estimation.
-- `src/millikan_ai/tracking/`: scored detection, Kalman/LK/detection fusion, adaptive multi-drop tracking, deduplication, and overlays.
+- `src/millikan_ai/tracking/`: Trackpy-based local single-drop tracking, static/grid-calibration mask handling, adaptive multi-drop seed scheduling, segment cutoffs, deduplication, and overlays. Older Kalman/LK fusion helpers may remain as tested utilities but are not the main tracking backend.
 - `src/millikan_ai/quality/`: deterministic runtime quality adapter; training remains under `training_quality_filter/`.
 - `src/millikan_ai/segments/`: voltage platform segmentation and terminal velocity fitting.
 - `src/millikan_ai/physics/`: physics-based single-drop charge inversion.
@@ -60,8 +60,10 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - Single-drop elementary-charge estimation must report insufficient independent drops rather than inventing `e_hat`.
 - Platform velocity fitting in the downstream scientific path fits the full provided constant-voltage platform, optionally trimming only `segment.boundary_guard_frames`; do not restore fixed transient trimming or highest-R2 sub-window selection.
 - Candidate tracking and segment validation must reject stationary grid/bright-spot candidates using `segment.min_motion_displacement_px`.
-- Tracking must process each video frame once for shared blob detection across active seeds; LK optical flow should run on a local patch around the tracked point rather than the full video frame.
+- Tracking must process each video frame once for shared preprocessing across active Trackpy single-drop states. Each active state should run only a local Trackpy search around its predicted point; do not re-read the full video per candidate.
 - Candidate tracking must stay inside the detected grid/tracking ROI so watermarks, manufacturer text, and border highlights are not eligible droplets.
+- Trackpy multi-drop tracking uses the teammate single-drop local search and velocity extrapolation as the base. Do not replace it with a new global MOT/Hungarian tracker without a separate plan.
+- Grid-line neighborhoods are unreliable regions. When a predicted droplet enters the grid mask safety band, cut the current segment with `end_reason=grid_occlusion`, preserve prior reliable points, and do not automatically reconnect across the grid.
 - Candidate ranking should penalize candidates too close to grid lines or tracking ROI edges using `tracking.min_grid_line_distance_px`, `tracking.min_grid_clear_fraction`, `tracking.min_tracking_roi_margin_px`, and `tracking.min_roi_clear_fraction`.
 - CLI manual platform inputs use `--platform START_FRAME:END_FRAME:VOLTAGE`; generated configs are written under `runs/manual_configs/` and platforms use `source=manual_cli`. Auto-boundary runs use `--auto-platform-count N` plus repeated `--platform-value V` and write platform rows with `source=auto_boundary_manual_voltage`.
 - `run_manifest.json` is the frontend-facing machine-readable entry point for a completed run. Keep it stable and update `docs/frontend_backend_interface.md` when adding/removing output artifacts or panel contracts.

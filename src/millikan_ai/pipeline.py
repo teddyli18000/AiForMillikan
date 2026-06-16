@@ -461,6 +461,13 @@ def run_pipeline(
         quality_rows,
     )
     _write_json(target / output_cfg["visualization_layers_json"], visualization_layers)
+    tracking_diagnostics = {
+        "backend": str(config.get("tracking", {}).get("tracker_backend", "trackpy_single_drop")),
+        "candidate_count": int(len(candidate_summary)),
+        "selected_candidate_count": int(candidate_summary["selected_for_multi_drop"].astype(bool).sum()) if "selected_for_multi_drop" in candidate_summary else 0,
+        "duplicate_track_count": int((candidate_summary["reject_reason"].astype(str) == "duplicate_track").sum()) if "reject_reason" in candidate_summary else 0,
+        "end_reason_counts": candidate_summary["end_reason"].astype(str).value_counts().to_dict() if "end_reason" in candidate_summary else {},
+    }
     diagnostics = {
         "video": meta.to_dict(),
         "roi": {
@@ -479,6 +486,7 @@ def run_pipeline(
             "flags": config.get("auto_platform_detection_result", {}).get("flags", []),
         },
         "drop_count": int(multi_drop_results["num_total_drops"]),
+        "tracking": tracking_diagnostics,
         "track_rows": int(len(best_track)),
         "all_track_rows": int(len(drop_tracks)),
         "segment_rows": int(len(segments)),

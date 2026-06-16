@@ -119,6 +119,7 @@ Each run should also expose:
 - selected droplet marker
 - selected droplet trajectory
 - all selected droplet trajectories in the `drop_tracks` layer when more than one track is selected
+- Trackpy segment diagnostics on trajectory points when present, including `segment_id`, `blocked_by_grid`, and `end_reason`
 
 Standalone downstream runs write a concise debugging report and machine outputs without video visualization layers. Use `drop_charge_results.csv`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, and `plots_data.json` for those panels.
 
@@ -194,9 +195,15 @@ The backend validates frame ranges and records manual entries as non-OCR sources
 
 `candidate_tracks_summary.csv` may include extra diagnostic columns beyond the required schema. The UI should surface them when present:
 
+- `num_points` and `duration_s`: reliable detected points and total candidate segment duration.
+- `blocked_by_grid_count` and `end_reason`: whether/why the Trackpy single-drop segment ended, such as `grid_occlusion`, `missing_limit`, `roi_exit`, `jump_rejected`, or `video_end`.
+- `max_step_px`, `step_p95_px`, and `path_efficiency`: motion continuity diagnostics.
+- `vy_px_s`, `vx_px_s`, `r2_y`, and `rmse_y`: whole-segment linear motion diagnostics used for ranking.
+- `mass_cv`: Trackpy mass stability diagnostic.
 - `grid_clear_fraction`: fraction of valid detections not too close to detected grid lines.
 - `roi_clear_fraction`: fraction of valid detections not too close to the tracking ROI edge.
 - `reject_reason`: comma-separated hard-rule reasons such as `too_close_to_grid_lines`, `too_close_to_tracking_roi_edge`, or `insufficient_stable_platform_fits`.
+- `duplicate_of`: the retained candidate id when this row was rejected as `duplicate_track`.
 - `selected_for_multi_drop`: whether this candidate was tracked through the multi-drop q evaluation path.
 - `drop_id`: per-drop result id when the candidate was selected for multi-drop evaluation.
 - `q_valid`: whether the candidate produced a physically valid q result.
@@ -226,4 +233,4 @@ The current default tracks up to `tracking.max_drops: 20` distinct trajectories 
 
 ## Current Quality Scope
 
-The backend uses Kalman + bidirectional LK + detection fusion and an explainable rule adapter. The adapter is not trained and exposes `mode=mock_rule_adapter`, `trained=false`. The UI should display `quality_score`, `keep`, `q_valid`, and `reject_reasons`.
+The backend uses the Trackpy single-droplet local tracker as the main tracking base. Multiple candidate seeds are tracked independently, grid-line neighborhoods terminate the current reliable segment, duplicate trajectories are removed before q evaluation, and no cross-grid reconnection is attempted. The deterministic quality adapter remains untrained and exposes `mode=mock_rule_adapter`, `trained=false`. The UI should display `quality_score`, `keep`, `q_valid`, and `reject_reasons`.

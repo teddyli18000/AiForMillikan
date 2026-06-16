@@ -43,12 +43,26 @@ auto_platform_detection:
   descriptor_height: 32
 
 tracking:
+  tracker_backend: trackpy_single_drop
   top_k_seeds: 30
   seed_sample_frames: 6
   seed_merge_distance_px: 18
   seed_min_grid_line_distance_px: 0
   max_drops: 20
   multi_drop_min_trajectory_distance_px: 20
+  trackpy_diameter: 5
+  trackpy_invert: false
+  trackpy_minmass: 80.0
+  trackpy_local_search_radius_px: 45
+  trackpy_max_accept_distance_px: 30
+  trackpy_memory_frames: 5
+  trackpy_local_topn: 20
+  trackpy_static_grid_mask_enabled: true
+  trackpy_grid_mask_max_frames: 160
+  grid_reject_dilate_px: 0
+  grid_occlusion_radius_px: 0
+  skip_detection_on_grid: true
+  trackpy_max_jump_px: 0
   max_search_radius_px: 35
   max_missing_frames: 15
   min_blob_area_px: 3
