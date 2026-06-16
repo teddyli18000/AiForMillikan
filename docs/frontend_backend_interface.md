@@ -122,6 +122,8 @@ Each run should also expose:
 
 Standalone downstream runs write a concise debugging report and machine outputs without video visualization layers. Use `drop_charge_results.csv`, `elementary_charge_result.json`, `model_comparison.json`, `uncertainty_details.json`, and `plots_data.json` for those panels.
 
+Elementary-charge output is a predeclared bounded inversion over the fixed internal interval `[1.35e-19, 1.90e-19] C`. This interval is not a user setting. `elementary_charge_result.json.valid` is retained only as numeric-fit compatibility; UI validity must use `fundamental_spacing_identified`.
+
 `diagnostic_overlay.jpg` is a rendered preview of the same concepts. The UI should prefer `visualization_layers.json` for interactive overlays and use the image as a quick preview or fallback.
 
 ## Run Manifest Schema
@@ -130,7 +132,7 @@ Standalone downstream runs write a concise debugging report and machine outputs 
 
 - `schema_version`: integer contract version.
 - `run_dir`: run output directory.
-- `status`: `video_readable`, `valid_for_q`, `valid_for_elementary_charge`, `drop_valid`, `ml_training`, and combined `flags`.
+- `status`: `video_readable`, `valid_for_q`, `valid_for_elementary_charge`, `elementary_estimation_ready`, `bounded_estimate_available`, `quantization_supported`, `elementary_status`, `drop_valid`, `ml_training`, and combined `flags`.
 - `counts`: platform, selected drop, physically valid drop, selected/default track row, and selected/default segment counts.
 - `coordinate_system`: pixel and time conventions for frontend rendering.
 - `video`: metadata copied from `diagnostics.json`.
@@ -141,7 +143,7 @@ Standalone downstream runs write a concise debugging report and machine outputs 
 - `files`: all output artifact paths keyed by config output name.
 - `frontend_panels`: ordered panel suggestions for the desktop UI.
 
-The UI should not infer validity from file existence. Use `status.valid_for_q`, `status.valid_for_elementary_charge`, and `status.flags`.
+The UI should not infer validity from file existence. Use `status.valid_for_q`, `status.valid_for_elementary_charge`, and `status.flags`. `status.valid_for_elementary_charge` is true only when `fundamental_spacing_identified=true`; a bounded candidate alone should be displayed as diagnostic/partial, not as a successful elementary-charge result.
 
 ## Validity Report
 
@@ -150,7 +152,9 @@ The UI should not infer validity from file existence. Use `status.valid_for_q`, 
 Important fields:
 
 - `overall_valid_for_q`: whether the current run satisfies q calculation requirements.
-- `overall_valid_for_elementary_charge`: whether blind elementary-charge estimation produced a valid result.
+- `overall_valid_for_elementary_charge`: whether bounded elementary-charge estimation identified a primitive fundamental spacing with calibrated support.
+- `elementary_estimation_ready`: whether enough successful q values exist to attempt the estimator; this is not final validity.
+- `bounded_estimate_available`, `quantization_supported`, and `elementary_status`: compact estimator state for UI badges and warnings.
 - `blocking_failed_checks`: check ids that block q validity.
 - `checks`: detailed pass/fail objects with `id`, `passed`, `message`, and `details`.
 - `combined_flags`: flags collected from diagnostics, q calculation, and elementary-charge estimation.
