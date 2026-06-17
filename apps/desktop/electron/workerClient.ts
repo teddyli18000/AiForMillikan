@@ -112,11 +112,16 @@ export class WorkerClient {
 function resolveWorkerLaunch(): { command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } {
   if (app.isPackaged) {
     const executable = path.join(process.resourcesPath, "worker", "millikan-desktop-worker.exe");
+    const runRoot = path.join(app.getPath("userData"), "runs");
     return {
       command: executable,
       args: [],
-      cwd: path.dirname(executable),
-      env: process.env
+      cwd: app.getPath("userData"),
+      env: {
+        ...process.env,
+        MILLIKAN_DEFAULT_CONFIG: path.join(process.resourcesPath, "configs", "default.yaml"),
+        MILLIKAN_RUN_ROOT: runRoot
+      }
     };
   }
   const projectRoot = findProjectRoot();

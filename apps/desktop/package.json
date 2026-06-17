@@ -50,6 +50,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../../configs/default.yaml",
+        "to": "configs/default.yaml"
       }
     ],
     "win": {
