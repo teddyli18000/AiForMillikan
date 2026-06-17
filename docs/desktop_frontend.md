@@ -82,3 +82,19 @@ The UI must keep voltage OCR disabled on mainline. Automatic platform detection
 only suggests frame boundaries; voltage values are user-supplied. The final
 scientific success badge must use `fundamental_spacing_identified`, not the
 legacy bounded-fit `valid` field.
+
+## Normal Mode UX
+
+Normal mode is the default desktop route for formal single-drop measurement. It
+uses an embedded annotation workspace: video preview, target droplet box/point,
+suggested fall-window markers, second-based start/end nudge controls, tracking
+status overlay, q record basket, and a blind-inversion switch.
+
+The UI should keep the workflow dynamic. Users add q records one at a time from
+one or more videos; the app must not require an up-front video count. Before
+final report/export, show the count of selected q records that are actually
+usable for blind inversion.
+
+Formula presentation must be readable math, not raw code identifiers. Prefer
+code-native SVG/math components; locally rendered LaTeX images are acceptable
+when they have been visually checked.

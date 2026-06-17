@@ -19,6 +19,9 @@ Supported worker operations:
 - `analysis.loadRun`: load `run_manifest.json` and frontend-facing artifacts for an existing run.
 - `analysis.validate`: validate a run directory and return checklist/report artifacts.
 - `downstream.run`: run standalone downstream physics/e analysis from accepted trajectories.
+- `normal.suggestWindow`: suggest a single normal-mode balance-to-0 V fall window from voltage-display change events.
+- `normal.runSingleDrop`: run the normal-mode user-marked single-drop tracker and balance-fall q calculation.
+- `normal.estimateElementary`: run both blind-inversion algorithms for the currently selected normal-mode q records.
 - `report.export`: copy Markdown, CSV/JSON, overlay, plots data, and a reproducibility manifest into a user-selected package folder or zip.
 
 The renderer must not read arbitrary files directly. It should use Electron IPC
@@ -222,6 +225,41 @@ Voltage OCR is not part of the current `develop`/`main` backend flow. The UI sho
 The backend can detect visual voltage-display changes with the user-provided platform count and write `auto_platform_suggestions.csv`. The UI should show suggested stable intervals and transition windows, then ask the user to enter or confirm voltage values. Accepted rows are written to `platforms.csv` with `source=auto_boundary_manual_voltage`.
 
 The backend validates frame ranges and records manual entries as non-OCR sources. The UI must not label manually entered voltages as automatic OCR. If no manual platforms are provided, the backend writes `requires_manual_platforms`; if suggestions exist without accepted voltage values, it writes `requires_manual_platform_voltages`.
+
+## Normal Balance-Fall UI Contract
+
+Normal mode is a separate desktop flow for one user-marked droplet under the
+fixed experiment order `U_balance -> 0 V`. It does not ask for the number of
+videos or droplets at setup time. Each successful run contributes one q record to
+the session basket, and the UI must display the number of selected usable q
+records before enabling or exporting blind inversion.
+
+Normal-mode worker payloads should use seconds for reviewed start/end controls
+and may include source frame fields for reproducibility. The user-facing controls
+must not require frame-number entry.
+
+Required normal-mode bundle fields:
+
+- `mode: "normal_balance_fall"`;
+- `video`;
+- `input.balance_voltage_V`;
+- `target` as a point or box in video pixel coordinates;
+- `suggested_window` and `confirmed_window`;
+- `grid_calibration` with the second and penultimate horizontal grid lines;
+- `tracking_points` with `status` values `tracking`, `missing`, or `reacquired`;
+- `events` for missing/reacquired review;
+- `fit_interval`;
+- `fit_diagnostics`;
+- `q_record`;
+- optional `blind_inversion.normal_algorithm` and
+  `blind_inversion.experimental_algorithm`.
+
+Prediction-only `missing` points are visualization aids only. They must not be
+used as velocity-fit points or as measurement interval endpoints.
+
+Reports should omit normal-mode blind-inversion sections when fewer than three
+selected usable q records exist or when both algorithms return unreliable
+results.
 
 ## Candidate Quality Fields
 
