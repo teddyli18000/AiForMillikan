@@ -63,6 +63,7 @@ function installMockApi(overrides: Partial<DesktopApi> = {}) {
       experimental_algorithm: { bounded_estimate_available: true, quantization_supported: false, status: "bounded_estimate_evidence_not_calibrated" }
     })),
     writeNormalV2SessionReport: vi.fn(),
+    exportNormalV2Bundle: vi.fn(async () => ({ destination_dir: "runs/normal_v2/export_test", files: [] })),
     onAnalysisProgress: (callback) => {
       listeners.push(callback);
       return () => undefined;
@@ -147,5 +148,8 @@ describe("Millikan desktop app normal mode", () => {
     expect(await screen.findByText(/Normal e/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Experimental 算法/ }));
     expect(screen.getByText(/bounded_estimate_evidence_not_calibrated/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /导出 session 包/ }));
+    expect(api.exportNormalV2Bundle).toHaveBeenCalled();
   });
 });

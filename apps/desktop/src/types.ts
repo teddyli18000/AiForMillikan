@@ -208,5 +208,6 @@ export type DesktopApi = {
   loadNormalV2Session: (payload: { session_path: string }) => Promise<unknown>;
   estimateNormalV2Elementary: (payload: { records: Array<Record<string, unknown>> }) => Promise<unknown>;
   writeNormalV2SessionReport: (payload: unknown) => Promise<unknown>;
+  exportNormalV2Bundle: (payload: unknown) => Promise<unknown>;
   onAnalysisProgress: (callback: (progress: ProgressEvent) => void) => () => void;
 };

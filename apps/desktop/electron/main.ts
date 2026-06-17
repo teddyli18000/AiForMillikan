@@ -86,6 +86,7 @@ function registerIpc(): void {
   ipcMain.handle("normalV2:sessionLoad", (_event, payload) => worker.request("normalV2.sessionLoad", payload));
   ipcMain.handle("normalV2:estimateElementary", (_event, payload) => worker.request("normalV2.estimateElementary", payload));
   ipcMain.handle("normalV2:sessionReport", (_event, payload) => worker.request("normalV2.sessionReport", payload));
+  ipcMain.handle("normalV2:exportBundle", (_event, payload) => worker.request("normalV2.exportBundle", payload));
 
   ipcMain.handle("analysis:run", (event, payload) =>
     worker.request("analysis.run", payload, (progress) => {

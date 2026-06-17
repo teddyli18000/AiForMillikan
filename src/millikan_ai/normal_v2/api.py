@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -224,18 +225,58 @@ def export_bundle_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     report_path.write_text(report, encoding="utf-8")
     files.extend([session_path, q_records_path, inversion_path, report_path])
 
+    measurement_root = destination / "measurements"
+    for row in session.get("records", []) or []:
+        copied = _copy_measurement_artifacts(row, measurement_root)
+        files.extend(copied)
+
     manifest = {
         "schema_version": 1,
         "mode": "normal_v2_session_export",
         "record_count": len(session.get("records", []) or []),
         "selected_valid_count": len([row for row in session.get("records", []) or [] if row.get("valid") and row.get("selected", True)]),
-        "files": [path.name for path in files],
+        "files": [_relative_export_path(path, destination) for path in files],
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     files.append(manifest_path)
-    file_list_path.write_text("\n".join(path.name for path in files + [file_list_path]) + "\n", encoding="utf-8")
+    file_list_path.write_text("\n".join(_relative_export_path(path, destination) for path in files + [file_list_path]) + "\n", encoding="utf-8")
     files.append(file_list_path)
     return {"destination_dir": str(destination), "files": [str(path) for path in files], "manifest": manifest}
+
+
+def _copy_measurement_artifacts(record: dict[str, Any], measurement_root: Path) -> list[Path]:
+    run_dir_value = record.get("run_dir")
+    record_id = str(record.get("record_id") or "unknown_record")
+    if not run_dir_value:
+        return []
+    run_dir = Path(str(run_dir_value))
+    if not run_dir.exists():
+        return []
+    target_dir = measurement_root / _safe_export_name(record_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    copied: list[Path] = []
+    for name in [
+        "normal_track.csv",
+        "normal_track.json",
+        "normal_result.json",
+        "normal_visualization_layers.json",
+        "normal_report.md",
+        "normal_manifest.json",
+    ]:
+        source = run_dir / name
+        if source.exists() and source.is_file():
+            target = target_dir / name
+            shutil.copy2(source, target)
+            copied.append(target)
+    return copied
+
+
+def _relative_export_path(path: Path, root: Path) -> str:
+    return path.relative_to(root).as_posix()
+
+
+def _safe_export_name(value: str) -> str:
+    return "".join(char if char.isalnum() or char in {"_", "-", "."} else "_" for char in value)[:80] or "record"
 
 
 def _experimental_estimate(records: list[dict[str, Any]]) -> dict[str, Any]:

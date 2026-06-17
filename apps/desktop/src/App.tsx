@@ -1,4 +1,4 @@
-import { DragEvent, useMemo, useRef, useState } from "react";
+import { DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, BoxSelect, FileVideo, Play, RefreshCw, Save, Search, Square, Trash2 } from "lucide-react";
 import { desktopApi } from "./lib/desktopApi";
 import type { VideoMetadata } from "./types";
@@ -38,10 +38,31 @@ export default function App() {
     inversion: "idle"
   });
 
+  const setStepState = (name: string, value: StepState) => setStep((current) => ({ ...current, [name]: value }));
   const selectedValid = useMemo(() => records.filter((record) => record.valid && record.selected !== false), [records]);
   const canSuggest = Boolean(api && metadata && Number(balanceVoltage) > 0);
   const canTrack = Boolean(api && metadata && windowSuggestion && target && Number(balanceVoltage) > 0);
   const canInvert = selectedValid.length >= 3;
+
+  useEffect(() => {
+    let canceled = false;
+    void Promise.resolve(api?.loadNormalV2Session({ session_path: sessionPath })).then((result: any) => {
+      if (canceled || !result?.session) {
+        return;
+      }
+      setRecords(result.session.records || []);
+      setInversion(result.session.inversion || null);
+      setStepState("records", (result.session.records || []).length ? "complete" : "idle");
+      setStatus("已恢复普通模式 session");
+    }).catch(() => {
+      if (!canceled) {
+        setStatus("renderer ready");
+      }
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [api]);
 
   if (!api) {
     return (
@@ -52,8 +73,6 @@ export default function App() {
       </main>
     );
   }
-
-  const setStepState = (name: string, value: StepState) => setStep((current) => ({ ...current, [name]: value }));
 
   const inspectVideoPath = async (path: string) => {
     setVideoPath(path);
@@ -166,6 +185,19 @@ export default function App() {
     setStatus("双算法完成并写入 session");
   };
 
+  const exportBundle = async () => {
+    if (!records.length) {
+      return;
+    }
+    const destination = `runs/normal_v2/export_${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    const result = (await api.exportNormalV2Bundle({
+      destination_dir: destination,
+      session: { schema_version: 1, records },
+      inversion
+    })) as any;
+    setStatus(`导出完成：${result.destination_dir ?? destination}`);
+  };
+
   const deleteRecord = (id: string) => {
     const next = records.filter((record) => record.record_id !== id);
     setRecords(next);
@@ -276,6 +308,7 @@ export default function App() {
             </div>
           ))}
           <button className="primary-button" disabled={!canInvert} title={canInvert ? "" : "至少需要 3 条已选有效 q"} onClick={runInversion}><Save size={16} />运行双算法</button>
+          <button className="ghost-button" disabled={!records.length} title={records.length ? "" : "先保存至少一条 q 记录"} onClick={exportBundle}><Save size={16} />导出 session 包</button>
         </section>
 
         <section className="inversion-panel">

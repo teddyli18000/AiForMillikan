@@ -18,6 +18,7 @@ const api = {
   loadNormalV2Session: (payload: unknown) => ipcRenderer.invoke("normalV2:sessionLoad", payload),
   estimateNormalV2Elementary: (payload: unknown) => ipcRenderer.invoke("normalV2:estimateElementary", payload),
   writeNormalV2SessionReport: (payload: unknown) => ipcRenderer.invoke("normalV2:sessionReport", payload),
+  exportNormalV2Bundle: (payload: unknown) => ipcRenderer.invoke("normalV2:exportBundle", payload),
   onAnalysisProgress: (callback: (progress: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: unknown) => callback(progress);
     ipcRenderer.on("analysis:progress", listener);

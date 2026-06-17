@@ -72,8 +72,19 @@ def test_worker_runs_normal_v2_single_drop_and_writes_artifacts(tmp_path: Path):
 
 def test_worker_normal_v2_session_roundtrip_and_report(tmp_path: Path):
     session_path = tmp_path / "session.json"
+    run_dir = tmp_path / "run_a"
+    run_dir.mkdir()
+    for name in [
+        "normal_track.csv",
+        "normal_track.json",
+        "normal_result.json",
+        "normal_visualization_layers.json",
+        "normal_report.md",
+        "normal_manifest.json",
+    ]:
+        (run_dir / name).write_text(name, encoding="utf-8")
     records = [
-        {"record_id": "a", "video_path": "v.mp4", "target_frame": 1, "window": {}, "q_C": 3.204e-19, "sigma_q_C": 0.04e-19, "valid": True, "selected": True, "flags": [], "run_dir": None},
+        {"record_id": "a", "video_path": "v.mp4", "target_frame": 1, "window": {}, "q_C": 3.204e-19, "sigma_q_C": 0.04e-19, "valid": True, "selected": True, "flags": [], "run_dir": str(run_dir)},
         {"record_id": "b", "video_path": "v.mp4", "target_frame": 2, "window": {}, "q_C": 4.806e-19, "sigma_q_C": 0.04e-19, "valid": True, "selected": True, "flags": [], "run_dir": None},
         {"record_id": "c", "video_path": "v.mp4", "target_frame": 3, "window": {}, "q_C": 8.010e-19, "sigma_q_C": 0.04e-19, "valid": True, "selected": True, "flags": [], "run_dir": None},
     ]
@@ -112,5 +123,22 @@ def test_worker_normal_v2_session_roundtrip_and_report(tmp_path: Path):
         }
     )[-1]
     assert exported["type"] == "result"
-    files = {Path(path).name for path in exported["payload"]["files"]}
-    assert {"normal_v2_session.json", "normal_v2_q_records.json", "normal_v2_report.md", "normal_v2_manifest.json", "file_list.txt"} <= files
+    relative_files = {
+        Path(path).relative_to(export_dir).as_posix()
+        for path in exported["payload"]["files"]
+    }
+    assert {
+        "normal_v2_session.json",
+        "normal_v2_q_records.json",
+        "normal_v2_report.md",
+        "normal_v2_manifest.json",
+        "file_list.txt",
+        "measurements/a/normal_track.csv",
+        "measurements/a/normal_track.json",
+        "measurements/a/normal_result.json",
+        "measurements/a/normal_visualization_layers.json",
+        "measurements/a/normal_report.md",
+        "measurements/a/normal_manifest.json",
+    } <= relative_files
+    file_list = (export_dir / "file_list.txt").read_text(encoding="utf-8")
+    assert "measurements/a/normal_track.csv" in file_list
