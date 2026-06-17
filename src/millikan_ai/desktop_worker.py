@@ -21,6 +21,9 @@ from millikan_ai.api import (
 )
 from millikan_ai.config import load_config
 from millikan_ai.downstream import run_downstream_analysis
+from millikan_ai.normal.api import run_normal_single_drop_from_payload
+from millikan_ai.normal.elementary import estimate_both_algorithms
+from millikan_ai.normal.voltage import suggest_normal_fall_window
 from millikan_ai.pipeline import validate_run
 from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 from millikan_ai.video.reader import inspect_video
@@ -152,6 +155,9 @@ def _artifact_bundle(run_dir: Path, limit_tables: int = 400) -> Json:
         "uncertainty_details": _read_json(file_path("uncertainty_details_json", "uncertainty_details.json")),
         "quality_scores": _read_json(file_path("quality_scores_json", "quality_scores.json")),
         "plots_data": _read_json(file_path("plots_data_json", "plots_data.json")),
+        "normal_result": _read_json(file_path("normal_result_json", "normal_result.json")),
+        "normal_visualization_layers": _read_json(file_path("normal_visualization_layers_json", "normal_visualization_layers.json")),
+        "normal_report_md": _read_text(file_path("normal_report_md", "normal_report.md")),
         "tables": {
             "platforms": _read_csv_records(file_path("platforms_csv", "platforms.csv"), limit_tables),
             "auto_platform_suggestions": _read_csv_records(file_path("auto_platform_suggestions_csv", "auto_platform_suggestions.csv"), limit_tables),
@@ -161,6 +167,7 @@ def _artifact_bundle(run_dir: Path, limit_tables: int = 400) -> Json:
             "drop_charge_results": _read_csv_records(file_path("drop_charge_results_csv", "drop_charge_results.csv"), limit_tables),
             "platform_velocity_results": _read_csv_records(file_path("platform_velocity_results_csv", "platform_velocity_results.csv"), limit_tables),
             "trajectory_quality_scores": _read_csv_records(file_path("trajectory_quality_scores_csv", "trajectory_quality_scores.csv"), limit_tables),
+            "normal_q_records": _read_csv_records(file_path("normal_q_records_csv", "normal_q_records.csv"), limit_tables),
         },
     }
 
@@ -263,6 +270,29 @@ def _op_downstream_run(payload: Json, _request_id: str) -> Json:
     }
 
 
+def _op_normal_suggest_window(payload: Json, _request_id: str) -> Json:
+    config_path = _value(payload, "config_path", None) or "configs/default.yaml"
+    return suggest_normal_fall_window(_value(payload, "video_path"), config_path)
+
+
+def _op_normal_run_single_drop(payload: Json, _request_id: str) -> Json:
+    result = run_normal_single_drop_from_payload(payload)
+    return {
+        "run_dir": result["run_dir"],
+        "manifest": result["manifest"],
+        "normal_result": result,
+        "artifacts": _artifact_bundle(Path(str(result["run_dir"]))),
+    }
+
+
+def _op_normal_estimate_elementary(payload: Json, _request_id: str) -> Json:
+    config = load_config(_value(payload, "config_path", None) or "configs/default.yaml")
+    overrides = _value(payload, "config_overrides", None)
+    if isinstance(overrides, dict):
+        _merge_dict(config, overrides)
+    return estimate_both_algorithms(_value(payload, "q_records", []) or [], config)
+
+
 def _merge_dict(base: Json, overrides: Json) -> None:
     for key, value in overrides.items():
         if isinstance(value, dict) and isinstance(base.get(key), dict):
@@ -358,6 +388,9 @@ OPS: dict[str, Callable[[Json, str], Json]] = {
     "analysis.loadRun": _op_analysis_load_run,
     "analysis.validate": _op_analysis_validate,
     "downstream.run": _op_downstream_run,
+    "normal.suggestWindow": _op_normal_suggest_window,
+    "normal.runSingleDrop": _op_normal_run_single_drop,
+    "normal.estimateElementary": _op_normal_estimate_elementary,
     "report.export": _op_report_export,
 }
 

@@ -42,6 +42,17 @@ auto_platform_detection:
   descriptor_width: 96
   descriptor_height: 32
 
+normal_mode:
+  change_merge_window_s: 2.0
+  stable_after_change_s: 0.2
+  max_search_radius_px: 80
+  search_radius_growth_per_missing_px: 8
+  max_accept_distance_px: 60
+  accept_distance_growth_per_missing_px: 4
+  min_fit_points: 5
+  integer_fit_grid_points: 1200
+  fallback_scale_y_m_per_px: 0.0
+
 tracking:
   tracker_backend: trackpy_single_drop
   top_k_seeds: 30
