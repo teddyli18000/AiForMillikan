@@ -24,17 +24,16 @@ export function MathDerivation({ artifacts }: MathDerivationProps) {
         <ArrowRight className="flow-arrow" size={18} />
         <FormulaCard title="2. 下落速度" expression="fall" detail="普通模式只使用真实 tracking 点拟合 0V 下落速度" />
         <ArrowRight className="flow-arrow" size={18} />
-        <FormulaCard title="3. 单滴物理" expression="velocity" detail={`alpha=${fmtNumber(drop?.fit?.alpha_m_s)} gamma=${fmtNumber(drop?.fit?.gamma_m_s_V)}`} />
+        <FormulaCard title="3. 单滴物理" expression="velocity" detail={`截距 α=${fmtNumber(drop?.fit?.alpha_m_s)}；斜率 γ=${fmtNumber(drop?.fit?.gamma_m_s_V)}`} />
         <ArrowRight className="flow-arrow" size={18} />
         <FormulaCard title="4. 半径与电荷" expression="charge" detail={`q=${fmtCharge(drop?.result?.charge_abs_C)}; r=${fmtNumber(Number(drop?.result?.radius_m) * 1e6)} μm`} />
         <ArrowRight className="flow-arrow" size={18} />
-        <FormulaCard title="5. 盲反演 e" expression="elementary" detail={`e=${fmtCharge(e?.e_hat_C)}; sigma=${fmtCharge(e?.sigma_e_C)}`} />
+        <FormulaCard title="5. 盲反演 e" expression="elementary" detail={`估计 e=${fmtCharge(e?.e_hat_C)}；不确定度=${fmtCharge(e?.sigma_e_C)}`} />
       </div>
       <div className="derivation-note">
         <FunctionSquare size={17} />
         <span>
-          主估计来自固定物理区间 [1.35e-19, 1.90e-19] C 内的 profile likelihood 全局最大值。若
-          fundamental_spacing_identified=false，界面只显示为诊断候选，不宣称完成证明。
+          主估计来自固定物理区间 [1.35 × 10⁻¹⁹, 1.90 × 10⁻¹⁹] C 内的 profile likelihood 全局最大值。若元电荷间距未被识别，界面只显示为诊断候选，不宣称完成证明。
         </span>
       </div>
     </section>
@@ -52,20 +51,70 @@ function FormulaCard({ title, expression, detail }: { title: string; expression:
 }
 
 function MathExpression({ kind }: { kind: "time" | "fall" | "velocity" | "charge" | "elementary" }) {
-  const labels = {
-    time: ["t", "=", "k", "/", "f_s"],
-    fall: ["y(t)", "=", "y_0", "+", "v_g t"],
-    velocity: ["v", "=", "α", "−", "γ U"],
-    charge: ["q", "=", "6π", "η_eff(r)", "r d γ"],
-    elementary: ["q", "=", "n e", "+", "ε"]
+  const expression = {
+    time: (
+      <>
+        <span>t</span>
+        <span className="math-op">=</span>
+        <span>k</span>
+        <span className="math-op">/</span>
+        <span>
+          f<sub>s</sub>
+        </span>
+      </>
+    ),
+    fall: (
+      <>
+        <span>y(t)</span>
+        <span className="math-op">=</span>
+        <span>
+          y<sub>0</sub>
+        </span>
+        <span className="math-op">+</span>
+        <span>
+          v<sub>g</sub>t
+        </span>
+      </>
+    ),
+    velocity: (
+      <>
+        <span>v</span>
+        <span className="math-op">=</span>
+        <span>α</span>
+        <span className="math-op">−</span>
+        <span>γU</span>
+      </>
+    ),
+    charge: (
+      <>
+        <span>q</span>
+        <span className="math-op">=</span>
+        <span>
+          6πη<sub>eff</sub>(r)
+        </span>
+        <span>rΔργ</span>
+      </>
+    ),
+    elementary: (
+      <>
+        <span>q</span>
+        <span className="math-op">=</span>
+        <span>ne</span>
+        <span className="math-op">+</span>
+        <span>ε</span>
+      </>
+    )
+  }[kind];
+  const ariaLabel = {
+    time: "time equals frame index divided by sample rate",
+    fall: "vertical position equals initial position plus falling velocity times time",
+    velocity: "velocity equals alpha minus gamma times voltage",
+    charge: "charge equals six pi eta effective times radius times density contrast times gamma",
+    elementary: "charge equals integer multiple of elementary charge plus residual"
   }[kind];
   return (
-    <div className="math-expression" aria-label={labels.join(" ")}>
-      {labels.map((label, index) => (
-        <span key={`${label}-${index}`} className={index % 2 === 1 ? "math-op" : ""}>
-          {label}
-        </span>
-      ))}
+    <div className="math-expression" aria-label={ariaLabel}>
+      {expression}
     </div>
   );
 }

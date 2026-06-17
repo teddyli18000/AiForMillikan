@@ -65,7 +65,7 @@ input:focus-visible {
 
 .desktop-frame {
   min-height: 100vh;
-  padding: 18px 22px 22px;
+  padding: 18px 22px 76px;
 }
 
 .splash {
@@ -254,7 +254,22 @@ button:hover:not(:disabled) {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 1;
+}
+
+.primary-button:disabled,
+.hero-action:disabled {
+  color: #718096;
+  background: linear-gradient(180deg, #e7edf5, #dbe4ee);
+  box-shadow: none;
+}
+
+.ghost-button:disabled,
+.icon-button:disabled {
+  color: #9aa7b7;
+  background: rgba(238, 243, 248, 0.72);
+  border-color: rgba(32, 48, 70, 0.08);
+  box-shadow: none;
 }
 
 .shimmer-line {
@@ -1563,6 +1578,12 @@ td {
   font-weight: 600;
 }
 
+.math-expression sub,
+.math-expression sup {
+  font-size: 0.62em;
+  line-height: 0;
+}
+
 .math-expression .math-op {
   color: #486076;
   font-weight: 500;
@@ -1663,7 +1684,7 @@ td {
 
 @media (max-width: 720px) {
   .desktop-frame {
-    padding: 12px;
+    padding: 12px 12px 18px;
   }
 
   .path-row,
@@ -1706,6 +1727,14 @@ td {
   .drop-zone h2,
   .result-hero h2 {
     font-size: 32px;
+  }
+
+  .status-toast {
+    position: static;
+    transform: none;
+    width: fit-content;
+    margin: 14px auto 0;
+    text-align: center;
   }
 }
 

@@ -28,6 +28,7 @@ describe("Millikan desktop app", () => {
     await userEvent.click(screen.getByRole("button", { name: /开始分析/ }));
     expect(await screen.findByText("数学推导", {}, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.queryByText(/q_i/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/y_0|v_g|η_eff|fundamental_spacing_identified/)).not.toBeInTheDocument();
     expect(screen.getByText("证据强度")).toBeInTheDocument();
   });
 
