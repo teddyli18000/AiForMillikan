@@ -20,15 +20,15 @@ export function MathDerivation({ artifacts }: MathDerivationProps) {
         <Sigma size={24} />
       </div>
       <div className="derivation-flow">
-        <FormulaCard title="1. 视频坐标" expression="time_s = frame_idx / fps" detail="+Y 向下；网格标定得到 scale_y_m_per_px" />
+        <FormulaCard title="1. 视频坐标" expression="time" detail="+Y 向下；网格标定得到纵向比例尺" />
         <ArrowRight className="flow-arrow" size={18} />
-        <FormulaCard title="2. 平台速度" expression="y(t) = a_i + v_i t" detail="在每个恒定电压平台拟合终端速度 v_i" />
+        <FormulaCard title="2. 下落速度" expression="fall" detail="普通模式只使用真实 tracking 点拟合 0V 下落速度" />
         <ArrowRight className="flow-arrow" size={18} />
-        <FormulaCard title="3. 单滴物理" expression="v = α - γU" detail={`α=${fmtNumber(drop?.fit?.alpha_m_s)} γ=${fmtNumber(drop?.fit?.gamma_m_s_V)}`} />
+        <FormulaCard title="3. 单滴物理" expression="velocity" detail={`alpha=${fmtNumber(drop?.fit?.alpha_m_s)} gamma=${fmtNumber(drop?.fit?.gamma_m_s_V)}`} />
         <ArrowRight className="flow-arrow" size={18} />
-        <FormulaCard title="4. 半径与电荷" expression="q = 6πη_eff(r)rdγ" detail={`q=${fmtCharge(drop?.result?.charge_abs_C)}; r=${fmtNumber(Number(drop?.result?.radius_m) * 1e6)} μm`} />
+        <FormulaCard title="4. 半径与电荷" expression="charge" detail={`q=${fmtCharge(drop?.result?.charge_abs_C)}; r=${fmtNumber(Number(drop?.result?.radius_m) * 1e6)} μm`} />
         <ArrowRight className="flow-arrow" size={18} />
-        <FormulaCard title="5. 盲反演 e" expression="q_i ≈ n_i e + ε_i" detail={`e_hat=${fmtCharge(e?.e_hat_C)}; σ=${fmtCharge(e?.sigma_e_C)}`} />
+        <FormulaCard title="5. 盲反演 e" expression="elementary" detail={`e=${fmtCharge(e?.e_hat_C)}; sigma=${fmtCharge(e?.sigma_e_C)}`} />
       </div>
       <div className="derivation-note">
         <FunctionSquare size={17} />
@@ -41,12 +41,31 @@ export function MathDerivation({ artifacts }: MathDerivationProps) {
   );
 }
 
-function FormulaCard({ title, expression, detail }: { title: string; expression: string; detail: string }) {
+function FormulaCard({ title, expression, detail }: { title: string; expression: "time" | "fall" | "velocity" | "charge" | "elementary"; detail: string }) {
   return (
     <div className="formula-card">
       <span>{title}</span>
-      <code>{expression}</code>
+      <MathExpression kind={expression} />
       <small>{detail}</small>
+    </div>
+  );
+}
+
+function MathExpression({ kind }: { kind: "time" | "fall" | "velocity" | "charge" | "elementary" }) {
+  const labels = {
+    time: ["t", "=", "k", "/", "f_s"],
+    fall: ["y(t)", "=", "y_0", "+", "v_g t"],
+    velocity: ["v", "=", "α", "−", "γ U"],
+    charge: ["q", "=", "6π", "η_eff(r)", "r d γ"],
+    elementary: ["q", "=", "n e", "+", "ε"]
+  }[kind];
+  return (
+    <div className="math-expression" aria-label={labels.join(" ")}>
+      {labels.map((label, index) => (
+        <span key={`${label}-${index}`} className={index % 2 === 1 ? "math-op" : ""}>
+          {label}
+        </span>
+      ))}
     </div>
   );
 }

@@ -13,13 +13,13 @@ export function ChargeCharts({ plots }: ChartsProps) {
 
   return (
     <div className="chart-grid">
-      <ChartPanel title="电荷分布" subtitle="q_i 与量子化/连续预测密度">
+      <ChartPanel title="电荷分布" subtitle="观测电荷与量子化/连续预测密度">
         <DensityChart observations={charge?.observations ?? []} quantized={charge?.quantized_density ?? []} continuous={charge?.continuous_density ?? []} />
       </ChartPanel>
-      <ChartPanel title="整数倍归属" subtitle="q_i -> n_hat e">
+      <ChartPanel title="整数倍归属" subtitle="观测电荷到整数倍归属">
         <AssignmentChart points={assignment?.points ?? []} />
       </ChartPanel>
-      <ChartPanel title="相位残差" subtitle="q/e - round(q/e)">
+      <ChartPanel title="相位残差" subtitle="电荷除以候选元电荷后的余量">
         <PhaseChart points={phase?.points ?? []} />
       </ChartPanel>
       <ChartPanel title="模型比较" subtitle="逐滴 predictive density 差值">

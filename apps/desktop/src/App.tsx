@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { ManualPlatform, ProgressEvent, RunArtifacts, VideoMetadata } from "./types";
+import type { NormalElementaryEstimate, NormalQRecord, NormalTarget, NormalWindow } from "./types";
 import { desktopApi } from "./lib/desktopApi";
 import { demoArtifacts } from "./data/demo";
 import { SplashScreen } from "./components/SplashScreen";
 import { TopBar } from "./components/TopBar";
 import { SetupView } from "./components/SetupView";
+import { NormalSetupView } from "./components/NormalSetupView";
 import { AnalysisWorkspace } from "./components/AnalysisWorkspace";
 import { ResultsView } from "./components/ResultsView";
 import "./styles/app.css";
 
 type View = "setup" | "analysis" | "results";
+type ProductMode = "normal" | "experimental";
 
 const initialPlatforms: ManualPlatform[] = [
   { platform_id: "P001", start_frame: 0, end_frame: 156, voltage_V: 0, source: "manual_ui" },
@@ -21,8 +24,14 @@ const initialPlatforms: ManualPlatform[] = [
 export default function App() {
   const [entered, setEntered] = useState(false);
   const [view, setView] = useState<View>("setup");
+  const [productMode, setProductMode] = useState<ProductMode>("normal");
   const [videoPath, setVideoPath] = useState("");
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
+  const [balanceVoltage, setBalanceVoltage] = useState(240);
+  const [normalTarget, setNormalTarget] = useState<NormalTarget | null>(null);
+  const [normalWindow, setNormalWindow] = useState<NormalWindow | null>(null);
+  const [qRecords, setQRecords] = useState<NormalQRecord[]>([]);
+  const [normalElementary, setNormalElementary] = useState<NormalElementaryEstimate | null>(null);
   const [platformCount, setPlatformCount] = useState(3);
   const [platforms, setPlatforms] = useState<ManualPlatform[]>(initialPlatforms);
   const [suggestions, setSuggestions] = useState<Array<Record<string, unknown>>>([]);
@@ -52,9 +61,95 @@ export default function App() {
       const result = await desktopApi.inspectVideo({ video_path: path });
       setMetadata(result.metadata);
       setVideoPath(result.metadata.path || path);
+      setNormalWindow({
+        fall_start_frame: 0,
+        fall_end_frame: Math.max(0, (result.metadata.frame_count || 1) - 1)
+      });
       setMessage("视频检查完成。");
     } catch (error) {
       setMessage(`视频检查失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const suggestNormalWindow = async () => {
+    if (!videoPath) {
+      setMessage("请先选择实验视频。");
+      return;
+    }
+    try {
+      const result = (await desktopApi.suggestNormalWindow({ video_path: videoPath })) as {
+        suggested_window?: { fall_start_frame?: number; fall_end_frame?: number; flags?: string[] };
+      };
+      const suggested = result.suggested_window;
+      if (suggested?.fall_start_frame != null) {
+        setNormalWindow({
+          fall_start_frame: Number(suggested.fall_start_frame),
+          fall_end_frame: Number(suggested.fall_end_frame ?? metadata?.frame_count ?? 1) - 1
+        });
+        setMessage(suggested.flags?.length ? `已生成普通模式边界建议：${suggested.flags.join(", ")}` : "已生成普通模式边界建议。");
+      }
+    } catch (error) {
+      setMessage(`普通模式边界建议失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const runNormalAnalysis = async () => {
+    if (!videoPath || !normalTarget || !normalWindow) {
+      setMessage("请先选择视频、标注油滴并确认下落窗口。");
+      return;
+    }
+    setIsRunning(true);
+    setProgress({ percent: 0.2, label: "normal tracking" });
+    setView("analysis");
+    try {
+      const response = await desktopApi.runNormalSingleDrop({
+        video_path: videoPath,
+        balance_voltage_V: balanceVoltage,
+        target: normalTarget,
+        confirmed_window: normalWindow
+      });
+      const normal = response.normal_result ?? response.artifacts?.normal_result;
+      const qRecord = normal?.q_record;
+      if (qRecord?.record_id) {
+        setQRecords((current) => {
+          const existing = new Set(current.map((record) => record.record_id));
+          const nextRecord = { ...qRecord, selected: qRecord.selected !== false };
+          return existing.has(nextRecord.record_id) ? current : [...current, nextRecord];
+        });
+      }
+      setArtifacts({
+        ...(response.artifacts ?? {}),
+        run_dir: response.run_dir ?? response.artifacts?.run_dir,
+        manifest: response.manifest ?? response.artifacts?.manifest,
+        normal_result: normal
+      });
+      setProgress({ percent: 1, label: "normal q record" });
+      setView("results");
+      const usableNow = qRecord?.usable_for_inversion ? qRecords.filter((record) => record.selected !== false && record.usable_for_inversion).length + 1 : qRecords.filter((record) => record.selected !== false && record.usable_for_inversion).length;
+      setMessage(`普通模式完成。当前可用于盲反演的 q：${usableNow}`);
+    } catch (error) {
+      setMessage(`普通模式分析失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const toggleQRecord = (recordId: string) => {
+    setQRecords((current) => current.map((record) => (record.record_id === recordId ? { ...record, selected: record.selected === false } : record)));
+  };
+
+  const estimateNormalElementary = async () => {
+    const usable = qRecords.filter((record) => record.selected !== false && record.usable_for_inversion).length;
+    if (usable < 3) {
+      setMessage(`可用于盲反演的 q 只有 ${usable} 条，至少需要 3 条。`);
+      return;
+    }
+    try {
+      const result = await desktopApi.estimateNormalElementary({ q_records: qRecords });
+      setNormalElementary(result);
+      setMessage(`双盲反演完成。可用 q：${result.usable_q_count}`);
+    } catch (error) {
+      setMessage(`双盲反演失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -74,6 +169,9 @@ export default function App() {
     try {
       const result = await desktopApi.loadRun({ run_dir: runDir });
       setArtifacts(result.artifacts);
+      if (result.artifacts.normal_result?.q_record) {
+        setQRecords([result.artifacts.normal_result.q_record]);
+      }
       setProgress({ percent: 1, label: "loaded run" });
       setView("results");
       setMessage("已加载运行结果。");
@@ -163,6 +261,10 @@ export default function App() {
       return;
     }
     try {
+      const usable = qRecords.filter((record) => record.selected !== false && record.usable_for_inversion).length;
+      if (productMode === "normal") {
+        setMessage(`导出前检查：当前可用于盲反演的 q 为 ${usable} 条。`);
+      }
       const result = await desktopApi.exportReport({ run_dir: artifacts.run_dir, include_pdf: true, mode: "folder" });
       setMessage(JSON.stringify(result).includes("canceled") ? "已取消导出。" : "报告和数据包已导出。");
     } catch (error) {
@@ -189,25 +291,50 @@ export default function App() {
             <AnimatePresence mode="wait">
               {view === "setup" && (
                 <motion.div key="setup" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
-                  <SetupView
-                    videoPath={videoPath}
-                    metadata={metadata}
-                    platformCount={platformCount}
-                    platforms={platforms}
-                    suggestions={suggestions}
-                    onOpenVideo={openVideo}
-                    onVideoPath={setVideoPath}
-                    onInspect={inspectVideo}
-                    onPlatformCount={updatePlatformCount}
-                    onPlatformChange={(index, platform) => setPlatforms((current) => current.map((item, itemIndex) => (itemIndex === index ? platform : item)))}
-                    onAddPlatform={() => updatePlatformCount(platformCount + 1)}
-                    onRemovePlatform={(index) => {
-                      setPlatforms((current) => current.filter((_item, itemIndex) => itemIndex !== index));
-                      setPlatformCount((current) => Math.max(1, current - 1));
-                    }}
-                    onDetectBoundaries={detectBoundaries}
-                    onRun={runAnalysis}
-                  />
+                  {productMode === "normal" ? (
+                    <NormalSetupView
+                      videoPath={videoPath}
+                      metadata={metadata}
+                      balanceVoltage={balanceVoltage}
+                      target={normalTarget}
+                      window={normalWindow}
+                      qRecords={qRecords}
+                      elementary={normalElementary}
+                      isRunning={isRunning}
+                      onOpenVideo={openVideo}
+                      onVideoPath={setVideoPath}
+                      onInspect={inspectVideo}
+                      onBalanceVoltage={setBalanceVoltage}
+                      onTarget={setNormalTarget}
+                      onSuggestWindow={suggestNormalWindow}
+                      onWindow={setNormalWindow}
+                      onRun={runNormalAnalysis}
+                      onToggleRecord={toggleQRecord}
+                      onEstimate={estimateNormalElementary}
+                      onUseExperimental={() => setProductMode("experimental")}
+                    />
+                  ) : (
+                    <SetupView
+                      videoPath={videoPath}
+                      metadata={metadata}
+                      platformCount={platformCount}
+                      platforms={platforms}
+                      suggestions={suggestions}
+                      onOpenVideo={openVideo}
+                      onVideoPath={setVideoPath}
+                      onInspect={inspectVideo}
+                      onPlatformCount={updatePlatformCount}
+                      onPlatformChange={(index, platform) => setPlatforms((current) => current.map((item, itemIndex) => (itemIndex === index ? platform : item)))}
+                      onAddPlatform={() => updatePlatformCount(platformCount + 1)}
+                      onRemovePlatform={(index) => {
+                        setPlatforms((current) => current.filter((_item, itemIndex) => itemIndex !== index));
+                        setPlatformCount((current) => Math.max(1, current - 1));
+                      }}
+                      onDetectBoundaries={detectBoundaries}
+                      onRun={runAnalysis}
+                      onUseNormal={() => setProductMode("normal")}
+                    />
+                  )}
                 </motion.div>
               )}
               {view === "analysis" && (
@@ -217,7 +344,7 @@ export default function App() {
               )}
               {view === "results" && (
                 <motion.div key="results" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
-                  <ResultsView artifacts={artifacts ?? demoArtifacts} onExport={exportReport} onOpenRun={openRunFolder} />
+                  <ResultsView artifacts={artifacts ?? demoArtifacts} normalRecords={qRecords} normalElementary={normalElementary} onExport={exportReport} onOpenRun={openRunFolder} />
                 </motion.div>
               )}
             </AnimatePresence>

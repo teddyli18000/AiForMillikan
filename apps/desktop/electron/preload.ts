@@ -10,6 +10,9 @@ const api = {
   loadRun: (payload: unknown) => ipcRenderer.invoke("analysis:loadRun", payload),
   validateRun: (payload: unknown) => ipcRenderer.invoke("analysis:validate", payload),
   runDownstream: (payload: unknown) => ipcRenderer.invoke("downstream:run", payload),
+  suggestNormalWindow: (payload: unknown) => ipcRenderer.invoke("normal:suggestWindow", payload),
+  runNormalSingleDrop: (payload: unknown) => ipcRenderer.invoke("normal:runSingleDrop", payload),
+  estimateNormalElementary: (payload: unknown) => ipcRenderer.invoke("normal:estimateElementary", payload),
   exportReport: (payload: unknown) => ipcRenderer.invoke("report:export", payload),
   openPath: (targetPath: string) => ipcRenderer.invoke("shell:openPath", targetPath),
   onAnalysisProgress: (callback: (progress: unknown) => void) => {

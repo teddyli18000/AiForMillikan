@@ -63,7 +63,7 @@ export function AnalysisWorkspace({ artifacts, progress, isRunning, onRun, onSho
           <SignalCard icon={<Gauge size={18} />} label="q 计算有效" value={manifest?.status?.valid_for_q ? "是" : "待验证"} tone={manifest?.status?.valid_for_q ? "good" : "warn"} />
           <SignalCard icon={<Film size={18} />} label="有效油滴数" value={fmtNumber(manifest?.counts?.valid_drops, 0)} />
           <SignalCard icon={<AlertTriangle size={18} />} label="元电荷诊断" value={elementary?.status ?? "等待运行"} tone={elementary?.fundamental_spacing_identified ? "good" : "warn"} />
-          <SignalCard icon={<Gauge size={18} />} label="e_hat" value={fmtCharge(elementary?.elementary_charge?.e_hat_C)} />
+          <SignalCard icon={<Gauge size={18} />} label="估计 e" value={fmtCharge(elementary?.elementary_charge?.e_hat_C)} />
         </div>
       </section>
 

@@ -1,16 +1,22 @@
 import { AlertTriangle, CheckCircle2, Download, ExternalLink, FlaskConical, Gauge, ShieldCheck } from "lucide-react";
 import type { RunArtifacts } from "../types";
+import type { NormalElementaryEstimate, NormalQRecord } from "../types";
 import { evidenceLabel, fmtCharge, fmtNumber } from "../lib/format";
 import { ChargeCharts } from "./Charts";
 import { MathDerivation } from "./MathDerivation";
 
 type ResultsViewProps = {
   artifacts: RunArtifacts | null;
+  normalRecords?: NormalQRecord[];
+  normalElementary?: NormalElementaryEstimate | null;
   onExport: () => void;
   onOpenRun: () => void;
 };
 
-export function ResultsView({ artifacts, onExport, onOpenRun }: ResultsViewProps) {
+export function ResultsView({ artifacts, normalRecords = [], normalElementary, onExport, onOpenRun }: ResultsViewProps) {
+  if (artifacts?.manifest?.mode === "normal_balance_fall" || artifacts?.normal_result) {
+    return <NormalResultsView artifacts={artifacts} normalRecords={normalRecords} normalElementary={normalElementary} onExport={onExport} onOpenRun={onOpenRun} />;
+  }
   const elementary = artifacts?.elementary_charge_result;
   const manifest = artifacts?.manifest;
   const validity = artifacts?.validity_report;
@@ -30,7 +36,7 @@ export function ResultsView({ artifacts, onExport, onOpenRun }: ResultsViewProps
           </p>
         </div>
         <div className="result-kpis">
-          <Kpi icon={<FlaskConical size={20} />} label="e_hat" value={fmtCharge(e?.e_hat_C)} />
+          <Kpi icon={<FlaskConical size={20} />} label="估计 e" value={fmtCharge(e?.e_hat_C)} />
           <Kpi icon={<Gauge size={20} />} label="不确定度" value={fmtCharge(e?.sigma_e_C)} />
           <Kpi icon={<ShieldCheck size={20} />} label="有效油滴数" value={fmtNumber(manifest?.counts?.valid_drops ?? elementary?.num_used_drops, 0)} />
           <Kpi icon={supported ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />} label="证据强度" value={String(comparison.evidence_label ?? status)} tone={supported ? "good" : "warn"} />
@@ -97,6 +103,81 @@ export function ResultsView({ artifacts, onExport, onOpenRun }: ResultsViewProps
           </button>
         </div>
       </section>
+    </main>
+  );
+}
+
+function NormalResultsView({
+  artifacts,
+  normalRecords,
+  normalElementary,
+  onExport,
+  onOpenRun
+}: {
+  artifacts: RunArtifacts;
+  normalRecords: NormalQRecord[];
+  normalElementary?: NormalElementaryEstimate | null;
+  onExport: () => void;
+  onOpenRun: () => void;
+}) {
+  const normal = artifacts.normal_result;
+  const q = normal?.q_record;
+  const usable = normalRecords.filter((record) => record.selected !== false && record.usable_for_inversion).length;
+  return (
+    <main className="results-view">
+      <section className="result-hero normal-result-hero">
+        <div className="result-hero__copy">
+          <span className={q?.usable_for_inversion ? "status-pill success" : "status-pill warning"}>{q?.usable_for_inversion ? "q 可用" : "诊断 q"}</span>
+          <h2>普通模式结果</h2>
+          <p>已完成单滴平衡-下落测量。最终报告导出前，当前可用于盲反演的 q 记录数为 {usable}。</p>
+        </div>
+        <div className="result-kpis">
+          <Kpi icon={<FlaskConical size={20} />} label="q" value={fmtCharge(q?.q_C ?? q?.result?.q_C)} />
+          <Kpi icon={<Gauge size={20} />} label="sigma q" value={fmtCharge(q?.sigma_q_C ?? q?.result?.sigma_q_total_C)} />
+          <Kpi icon={<ShieldCheck size={20} />} label="可用 q 数" value={fmtNumber(usable, 0)} tone={usable >= 3 ? "good" : "warn"} />
+          <Kpi icon={q?.usable_for_inversion ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />} label="反演状态" value={normalElementary?.normal_algorithm?.status ?? (usable >= 3 ? "待运行" : "不足 3 条")} tone={usable >= 3 ? "good" : "warn"} />
+        </div>
+      </section>
+      <section className="glass-panel data-section">
+        <div className="panel-heading">
+          <span>q 记录</span>
+          <button className="ghost-button" onClick={onOpenRun}>
+            <ExternalLink size={16} />
+            打开运行目录
+          </button>
+        </div>
+        <div className="table-wrap result-table">
+          <table>
+            <thead>
+              <tr>
+                <th>record</th>
+                <th>q</th>
+                <th>sigma</th>
+                <th>usable</th>
+                <th>flags</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(normalRecords.length ? normalRecords : q ? [q] : []).map((record) => (
+                <tr key={record.record_id}>
+                  <td>{record.record_id}</td>
+                  <td>{fmtCharge(record.q_C ?? record.result?.q_C)}</td>
+                  <td>{fmtCharge(record.sigma_q_C ?? record.result?.sigma_q_total_C)}</td>
+                  <td>{record.usable_for_inversion ? "yes" : "no"}</td>
+                  <td>{(record.flags ?? []).join(", ") || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="panel-actions right">
+          <button className="primary-button" disabled={!artifacts?.run_dir} onClick={onExport}>
+            <Download size={17} />
+            导出报告
+          </button>
+        </div>
+      </section>
+      <MathDerivation artifacts={artifacts} />
     </main>
   );
 }

@@ -1,5 +1,5 @@
 import { ChangeEvent, DragEvent } from "react";
-import { FileVideo, Plus, Search, SlidersHorizontal, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, FileVideo, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, UploadCloud } from "lucide-react";
 import type { ManualPlatform, VideoMetadata } from "../types";
 import { fmtNumber } from "../lib/format";
 
@@ -18,6 +18,7 @@ type SetupViewProps = {
   onRemovePlatform: (index: number) => void;
   onDetectBoundaries: () => void;
   onRun: () => void;
+  onUseNormal: () => void;
 };
 
 export function SetupView({
@@ -34,7 +35,8 @@ export function SetupView({
   onAddPlatform,
   onRemovePlatform,
   onDetectBoundaries,
-  onRun
+  onRun,
+  onUseNormal
 }: SetupViewProps) {
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -47,6 +49,17 @@ export function SetupView({
 
   return (
     <main className="setup-grid">
+      <section className="glass-panel experimental-warning">
+        <div>
+          <AlertTriangle size={18} />
+          <strong>Experimental 多滴流程</strong>
+          <span>用于探索和演示，自动多滴身份保持需人工复核。正式单滴测量建议使用普通模式。</span>
+        </div>
+        <button className="ghost-button" onClick={onUseNormal}>
+          <RotateCcw size={16} />
+          回到普通模式
+        </button>
+      </section>
       <section
         className="drop-zone"
         onDragOver={(event) => event.preventDefault()}
