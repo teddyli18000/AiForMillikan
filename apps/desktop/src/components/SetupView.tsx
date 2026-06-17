@@ -12,6 +12,7 @@ type SetupViewProps = {
   onOpenVideo: () => void;
   onVideoPath: (path: string) => void;
   onInspect: (path?: string) => void;
+  onVideoDrop: (path: string) => void;
   onPlatformCount: (count: number) => void;
   onPlatformChange: (index: number, platform: ManualPlatform) => void;
   onAddPlatform: () => void;
@@ -30,6 +31,7 @@ export function SetupView({
   onOpenVideo,
   onVideoPath,
   onInspect,
+  onVideoDrop,
   onPlatformCount,
   onPlatformChange,
   onAddPlatform,
@@ -41,9 +43,9 @@ export function SetupView({
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const file = event.dataTransfer.files.item(0) as (File & { path?: string }) | null;
-    if (file?.path) {
-      onVideoPath(file.path);
-      onInspect(file.path);
+    const path = file?.path || event.dataTransfer.getData("text/plain");
+    if (path) {
+      onVideoDrop(decodeURI(path.replace(/^file:\/\/\//i, "")).replace(/\//g, "\\"));
     }
   };
 

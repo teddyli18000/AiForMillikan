@@ -185,6 +185,78 @@ input:focus-visible {
   font-weight: 520;
 }
 
+.splash-loader {
+  width: min(420px, 82vw);
+  margin: -36px auto 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.splash-loader div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #506176;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.splash-loader i {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #278cff, #32c7ff);
+  box-shadow: 0 8px 20px rgba(22, 119, 255, 0.24);
+  transition: width 180ms ease;
+}
+
+.splash-mode-card {
+  width: min(640px, 90vw);
+  margin: 0 auto 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.splash-mode-card button {
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 13px 15px;
+  border-radius: 18px;
+  color: #283548;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(37, 55, 78, 0.13);
+  box-shadow: 0 14px 30px rgba(41, 66, 102, 0.12);
+  cursor: pointer;
+}
+
+.splash-mode-card button.active {
+  border-color: rgba(22, 119, 255, 0.46);
+  background: rgba(231, 242, 255, 0.86);
+  box-shadow: 0 16px 34px rgba(22, 119, 255, 0.18);
+}
+
+.splash-mode-card button:disabled {
+  cursor: wait;
+}
+
+.splash-mode-card svg {
+  grid-row: 1 / span 2;
+  color: var(--accent);
+}
+
+.splash-mode-card span {
+  font-weight: 780;
+}
+
+.splash-mode-card small {
+  color: var(--muted);
+}
+
 .hero-action,
 .primary-button,
 .ghost-button,
@@ -440,7 +512,7 @@ button:disabled {
 }
 
 .normal-workbench {
-  max-width: 1540px;
+  max-width: 1720px;
   margin: 18px auto 0;
   display: grid;
   gap: 18px;
@@ -474,7 +546,7 @@ button:disabled {
 .normal-grid,
 .normal-bottom-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
+  grid-template-columns: minmax(760px, 1.55fr) minmax(360px, 0.45fr);
   gap: 18px;
 }
 
@@ -563,6 +635,15 @@ button:disabled {
   background: rgba(22, 119, 255, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.72);
   box-shadow: 0 0 0 7px rgba(22, 119, 255, 0.12), 0 16px 32px rgba(0, 0, 0, 0.26);
+  pointer-events: none;
+}
+
+.target-selection {
+  position: absolute;
+  border: 2px solid #38d9ff;
+  border-radius: 8px;
+  background: rgba(56, 217, 255, 0.1);
+  box-shadow: 0 0 0 9999px rgba(2, 6, 14, 0.16), 0 0 0 4px rgba(56, 217, 255, 0.18);
   pointer-events: none;
 }
 

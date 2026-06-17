@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import type { DragEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { ManualPlatform, ProgressEvent, RunArtifacts, VideoMetadata } from "./types";
 import type { NormalElementaryEstimate, NormalQRecord, NormalTarget, NormalWindow } from "./types";
 import { desktopApi } from "./lib/desktopApi";
-import { demoArtifacts } from "./data/demo";
 import { SplashScreen } from "./components/SplashScreen";
 import { TopBar } from "./components/TopBar";
 import { SetupView } from "./components/SetupView";
@@ -61,6 +61,7 @@ export default function App() {
       const result = await desktopApi.inspectVideo({ video_path: path });
       setMetadata(result.metadata);
       setVideoPath(result.metadata.path || path);
+      setNormalTarget(null);
       setNormalWindow({
         fall_start_frame: 0,
         fall_end_frame: Math.max(0, (result.metadata.frame_count || 1) - 1)
@@ -156,9 +157,36 @@ export default function App() {
   const openVideo = async () => {
     const path = await desktopApi.openVideoDialog();
     if (path) {
-      setVideoPath(path);
       await inspectVideo(path);
     }
+  };
+
+  const acceptVideoFile = async (path: string) => {
+    if (!path) {
+      return;
+    }
+    await inspectVideo(path);
+  };
+
+  useEffect(() => {
+    const handleNativeDrop = (event: MessageEvent) => {
+      const path = typeof event.data?.path === "string" && event.data.type === "millikan-video-drop" ? event.data.path : "";
+      if (path) {
+        void acceptVideoFile(path);
+      }
+    };
+    window.addEventListener("message", handleNativeDrop);
+    return () => window.removeEventListener("message", handleNativeDrop);
+  }, []);
+
+  const handleVideoDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const path = extractDroppedVideoPath(event);
+    if (!path) {
+      setMessage("拖入失败：请直接拖入一个本地视频文件。");
+      return;
+    }
+    void acceptVideoFile(path);
   };
 
   const openRun = async () => {
@@ -249,7 +277,6 @@ export default function App() {
       setMessage(response.validation_errors?.length ? `分析完成，但有 ${response.validation_errors.length} 个校验问题。` : "分析完成。");
     } catch (error) {
       setMessage(`分析失败：${error instanceof Error ? error.message : String(error)}`);
-      setArtifacts((current) => current ?? demoArtifacts);
     } finally {
       setIsRunning(false);
     }
@@ -283,10 +310,18 @@ export default function App() {
       <AnimatePresence mode="wait">
         {!entered ? (
           <motion.div key="splash" initial={{ opacity: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: 0.42 }}>
-            <SplashScreen onEnter={() => setEntered(true)} />
+            <SplashScreen selectedMode={productMode} onModeChange={setProductMode} onEnter={() => setEntered(true)} />
           </motion.div>
         ) : (
-          <motion.div key="app" className="desktop-frame" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.48 }}>
+          <motion.div
+            key="app"
+            className="desktop-frame"
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.48 }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleVideoDrop}
+          >
             <TopBar view={view} onViewChange={setView} onLoadRun={openRun} onExport={exportReport} hasRun={Boolean(artifacts?.run_dir)} />
             <AnimatePresence mode="wait">
               {view === "setup" && (
@@ -304,6 +339,7 @@ export default function App() {
                       onOpenVideo={openVideo}
                       onVideoPath={setVideoPath}
                       onInspect={inspectVideo}
+                      onVideoDrop={acceptVideoFile}
                       onBalanceVoltage={setBalanceVoltage}
                       onTarget={setNormalTarget}
                       onSuggestWindow={suggestNormalWindow}
@@ -323,6 +359,7 @@ export default function App() {
                       onOpenVideo={openVideo}
                       onVideoPath={setVideoPath}
                       onInspect={inspectVideo}
+                      onVideoDrop={acceptVideoFile}
                       onPlatformCount={updatePlatformCount}
                       onPlatformChange={(index, platform) => setPlatforms((current) => current.map((item, itemIndex) => (itemIndex === index ? platform : item)))}
                       onAddPlatform={() => updatePlatformCount(platformCount + 1)}
@@ -344,7 +381,7 @@ export default function App() {
               )}
               {view === "results" && (
                 <motion.div key="results" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
-                  <ResultsView artifacts={artifacts ?? demoArtifacts} normalRecords={qRecords} normalElementary={normalElementary} onExport={exportReport} onOpenRun={openRunFolder} />
+                  <ResultsView artifacts={artifacts} normalRecords={qRecords} normalElementary={normalElementary} onExport={exportReport} onOpenRun={openRunFolder} />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -356,4 +393,13 @@ export default function App() {
       </AnimatePresence>
     </div>
   );
+}
+
+function extractDroppedVideoPath(event: DragEvent<HTMLElement>) {
+  const file = event.dataTransfer.files.item(0) as (File & { path?: string }) | null;
+  const directPath = file?.path || event.dataTransfer.getData("text/plain");
+  if (!directPath) {
+    return "";
+  }
+  return decodeURI(directPath.replace(/^file:\/\/\//i, "")).replace(/\//g, "\\");
 }

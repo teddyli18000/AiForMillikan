@@ -1,10 +1,10 @@
 export function fmtNumber(value: unknown, digits = 3): string {
   if (value === null || value === undefined || value === "") {
-    return "—";
+    return "-";
   }
   const number = Number(value);
   if (!Number.isFinite(number)) {
-    return "—";
+    return "-";
   }
   if (Math.abs(number) >= 1e4 || (number !== 0 && Math.abs(number) < 1e-3)) {
     return number.toExponential(digits);
@@ -15,7 +15,7 @@ export function fmtNumber(value: unknown, digits = 3): string {
 export function fmtCharge(value: unknown): string {
   const number = Number(value);
   if (!Number.isFinite(number)) {
-    return "—";
+    return "-";
   }
   return `${(number / 1e-19).toLocaleString("zh-CN", { maximumFractionDigits: 3 })} ×10⁻¹⁹ C`;
 }
@@ -23,7 +23,7 @@ export function fmtCharge(value: unknown): string {
 export function fmtPercent(value: unknown): string {
   const number = Number(value);
   if (!Number.isFinite(number)) {
-    return "—";
+    return "-";
   }
   return `${Math.round(number * 100)}%`;
 }

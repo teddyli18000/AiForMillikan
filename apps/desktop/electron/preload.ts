@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const api = {
   openVideoDialog: () => ipcRenderer.invoke("dialog:openVideo"),
@@ -25,3 +25,25 @@ const api = {
 contextBridge.exposeInMainWorld("millikan", api);
 
 export type MillikanDesktopApi = typeof api;
+
+window.addEventListener(
+  "dragover",
+  (event) => {
+    event.preventDefault();
+  },
+  true
+);
+
+window.addEventListener(
+  "drop",
+  (event) => {
+    const file = event.dataTransfer?.files.item(0);
+    const filePath = file ? webUtils.getPathForFile(file) : "";
+    if (!filePath) {
+      return;
+    }
+    event.preventDefault();
+    window.postMessage({ type: "millikan-video-drop", path: filePath }, "*");
+  },
+  true
+);

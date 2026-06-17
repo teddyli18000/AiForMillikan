@@ -1,4 +1,5 @@
-import { MouseEvent, useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { DragEvent, PointerEvent } from "react";
 import { motion } from "framer-motion";
 import {
   BadgeCheck,
@@ -31,6 +32,7 @@ type NormalSetupViewProps = {
   onOpenVideo: () => void;
   onVideoPath: (path: string) => void;
   onInspect: (path?: string) => void;
+  onVideoDrop: (path: string) => void;
   onBalanceVoltage: (value: number) => void;
   onTarget: (target: NormalTarget) => void;
   onSuggestWindow: () => void;
@@ -53,6 +55,7 @@ export function NormalSetupView({
   onOpenVideo,
   onVideoPath,
   onInspect,
+  onVideoDrop,
   onBalanceVoltage,
   onTarget,
   onSuggestWindow,
@@ -63,6 +66,8 @@ export function NormalSetupView({
   onUseExperimental
 }: NormalSetupViewProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const dragStartRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  const [selection, setSelection] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const usableSelectedCount = qRecords.filter((record) => record.selected !== false && record.usable_for_inversion).length;
   const selectedCount = qRecords.filter((record) => record.selected !== false).length;
   const videoSrc = useMemo(() => toFileUrl(videoPath), [videoPath]);
@@ -88,14 +93,51 @@ export function NormalSetupView({
     onWindow({ ...current, fall_end_frame: next });
   };
 
-  const handleStageClick = (event: MouseEvent<HTMLDivElement>) => {
-    const rect = stageRef.current?.getBoundingClientRect();
-    if (!rect || !metadata?.width || !metadata.height) {
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files.item(0) as (File & { path?: string }) | null;
+    const path = file?.path || event.dataTransfer.getData("text/plain");
+    if (path) {
+      onVideoDrop(path.replace(/^file:\/\/\//i, "").replace(/\//g, "\\"));
+    }
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (!metadata?.width || !metadata.height) {
       return;
     }
-    const x = ((event.clientX - rect.left) / rect.width) * metadata.width;
-    const y = ((event.clientY - rect.top) / rect.height) * metadata.height;
-    onTarget({ x_px: x, y_px: y, frame: window?.fall_start_frame ?? 0 });
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    dragStartRef.current = { clientX: event.clientX, clientY: event.clientY };
+    setSelection(clientSelection(stageRef.current, event.clientX, event.clientY, event.clientX, event.clientY));
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const start = dragStartRef.current;
+    if (!start) {
+      return;
+    }
+    setSelection(clientSelection(stageRef.current, start.clientX, start.clientY, event.clientX, event.clientY));
+  };
+
+  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    const start = dragStartRef.current;
+    dragStartRef.current = null;
+    if (!start || !metadata?.width || !metadata.height) {
+      setSelection(null);
+      return;
+    }
+    const picked = imageBoxFromClientRect(start.clientX, start.clientY, event.clientX, event.clientY, stageRef.current, metadata.width, metadata.height);
+    if (!picked) {
+      setSelection(null);
+      return;
+    }
+    setSelection(picked.css);
+    onTarget({
+      x_px: picked.box[0] + picked.box[2] / 2,
+      y_px: picked.box[1] + picked.box[3] / 2,
+      frame: window?.fall_start_frame ?? 0,
+      box: picked.box
+    });
   };
 
   return (
@@ -118,9 +160,23 @@ export function NormalSetupView({
             <span>视频标注</span>
             <small>{target ? `x ${fmtNumber(target.x_px)} / y ${fmtNumber(target.y_px)}` : "点击目标油滴"}</small>
           </div>
-          <div className="normal-video-shell" ref={stageRef} onClick={handleStageClick}>
+          <div
+            className="normal-video-shell"
+            data-testid="normal-video-shell"
+            aria-label="框选目标油滴"
+            ref={stageRef}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleDrop}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={() => {
+              dragStartRef.current = null;
+              setSelection(null);
+            }}
+          >
             {videoSrc ? (
-              <video src={videoSrc} controls muted className="normal-video" />
+              <video src={videoSrc} muted className="normal-video" />
             ) : (
               <div className="normal-video-placeholder">
                 <motion.span
@@ -148,9 +204,10 @@ export function NormalSetupView({
                 <Target size={24} />
               </motion.span>
             )}
+            {selection && <span className="target-selection" style={selection} />}
             <div className="annotation-hint">
               <MousePointer2 size={15} />
-              <span>点击画面标注油滴中心</span>
+              <span>{target ? "可重新拖拽框选目标油滴" : "拖拽矩形框选目标油滴"}</span>
             </div>
           </div>
         </div>
@@ -306,6 +363,53 @@ function clampFrame(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function clientSelection(stage: HTMLDivElement | null, x0: number, y0: number, x1: number, y1: number) {
+  const rect = stage?.getBoundingClientRect();
+  if (!rect) {
+    return null;
+  }
+  const left = Math.max(0, Math.min(x0, x1) - rect.left);
+  const top = Math.max(0, Math.min(y0, y1) - rect.top);
+  const width = Math.min(rect.width - left, Math.abs(x1 - x0));
+  const height = Math.min(rect.height - top, Math.abs(y1 - y0));
+  return { left, top, width, height };
+}
+
+function imageBoxFromClientRect(x0: number, y0: number, x1: number, y1: number, stage: HTMLDivElement | null, imageWidth: number, imageHeight: number) {
+  const rect = stage?.getBoundingClientRect();
+  if (!rect) {
+    return null;
+  }
+  const videoAspect = imageWidth / imageHeight;
+  const shellAspect = rect.width / rect.height;
+  const displayWidth = shellAspect > videoAspect ? rect.height * videoAspect : rect.width;
+  const displayHeight = shellAspect > videoAspect ? rect.height : rect.width / videoAspect;
+  const offsetX = rect.left + (rect.width - displayWidth) / 2;
+  const offsetY = rect.top + (rect.height - displayHeight) / 2;
+  const leftClient = Math.max(offsetX, Math.min(x0, x1));
+  const rightClient = Math.min(offsetX + displayWidth, Math.max(x0, x1));
+  const topClient = Math.max(offsetY, Math.min(y0, y1));
+  const bottomClient = Math.min(offsetY + displayHeight, Math.max(y0, y1));
+  if (rightClient <= leftClient || bottomClient <= topClient) {
+    return null;
+  }
+  const minDisplaySize = 8;
+  const boxLeft = ((leftClient - offsetX) / displayWidth) * imageWidth;
+  const boxTop = ((topClient - offsetY) / displayHeight) * imageHeight;
+  const boxWidth = Math.max(((rightClient - leftClient) / displayWidth) * imageWidth, (minDisplaySize / displayWidth) * imageWidth);
+  const boxHeight = Math.max(((bottomClient - topClient) / displayHeight) * imageHeight, (minDisplaySize / displayHeight) * imageHeight);
+  const css = {
+    left: leftClient - rect.left,
+    top: topClient - rect.top,
+    width: Math.max(minDisplaySize, rightClient - leftClient),
+    height: Math.max(minDisplaySize, bottomClient - topClient)
+  };
+  return {
+    box: [boxLeft, boxTop, Math.min(imageWidth - boxLeft, boxWidth), Math.min(imageHeight - boxTop, boxHeight)] as [number, number, number, number],
+    css
+  };
+}
+
 function toFileUrl(path: string) {
   if (!path) {
     return "";
@@ -315,4 +419,3 @@ function toFileUrl(path: string) {
   }
   return `file:///${path.replace(/\\/g, "/").replace(/^\/+/, "")}`;
 }
-
