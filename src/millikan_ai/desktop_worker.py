@@ -23,6 +23,7 @@ from millikan_ai.config import load_config
 from millikan_ai.downstream import run_downstream_analysis
 from millikan_ai.normal_v2.api import (
     estimate_elementary_from_payload,
+    export_bundle_from_payload,
     load_session_from_payload,
     run_single_drop_from_payload,
     save_session_from_payload,
@@ -318,6 +319,10 @@ def _op_normal_v2_session_report(payload: Json, _request_id: str) -> Json:
     return session_report_from_payload(payload)
 
 
+def _op_normal_v2_export_bundle(payload: Json, _request_id: str) -> Json:
+    return export_bundle_from_payload(payload)
+
+
 def _export_run_package(run_dir: Path, destination: Path) -> list[Path]:
     manifest = _read_json(run_dir / "run_manifest.json")
     files = manifest.get("files", {}) if isinstance(manifest.get("files"), dict) else {}
@@ -397,6 +402,7 @@ OPS: dict[str, Callable[[Json, str], Json]] = {
     "normalV2.sessionLoad": _op_normal_v2_session_load,
     "normalV2.estimateElementary": _op_normal_v2_estimate_elementary,
     "normalV2.sessionReport": _op_normal_v2_session_report,
+    "normalV2.exportBundle": _op_normal_v2_export_bundle,
 }
 
 

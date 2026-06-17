@@ -203,6 +203,41 @@ def session_report_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {"report_md": report}
 
 
+def export_bundle_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    destination = Path(_value(payload, "destination_dir"))
+    destination.mkdir(parents=True, exist_ok=True)
+    session = dict(_value(payload, "session"))
+    inversion = _value(payload, "inversion", None)
+    report = render_session_report(session, inversion)
+    files: list[Path] = []
+
+    session_path = destination / "normal_v2_session.json"
+    q_records_path = destination / "normal_v2_q_records.json"
+    inversion_path = destination / "normal_v2_inversion.json"
+    report_path = destination / "normal_v2_report.md"
+    manifest_path = destination / "normal_v2_manifest.json"
+    file_list_path = destination / "file_list.txt"
+
+    session_path.write_text(json.dumps({"schema_version": 1, **session, "inversion": inversion}, indent=2, ensure_ascii=False), encoding="utf-8")
+    q_records_path.write_text(json.dumps(session.get("records", []), indent=2, ensure_ascii=False), encoding="utf-8")
+    inversion_path.write_text(json.dumps(inversion or {}, indent=2, ensure_ascii=False), encoding="utf-8")
+    report_path.write_text(report, encoding="utf-8")
+    files.extend([session_path, q_records_path, inversion_path, report_path])
+
+    manifest = {
+        "schema_version": 1,
+        "mode": "normal_v2_session_export",
+        "record_count": len(session.get("records", []) or []),
+        "selected_valid_count": len([row for row in session.get("records", []) or [] if row.get("valid") and row.get("selected", True)]),
+        "files": [path.name for path in files],
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    files.append(manifest_path)
+    file_list_path.write_text("\n".join(path.name for path in files + [file_list_path]) + "\n", encoding="utf-8")
+    files.append(file_list_path)
+    return {"destination_dir": str(destination), "files": [str(path) for path in files], "manifest": manifest}
+
+
 def _experimental_estimate(records: list[dict[str, Any]]) -> dict[str, Any]:
     try:
         from millikan_ai.elementary.estimate import estimate_elementary_charge

@@ -98,3 +98,19 @@ def test_worker_normal_v2_session_roundtrip_and_report(tmp_path: Path):
     )[-1]
     assert "Blind inversion" in report_path.read_text(encoding="utf-8")
     assert report["payload"]["report_path"] == str(report_path)
+
+    export_dir = tmp_path / "export"
+    exported = _send_worker(
+        {
+            "id": "export",
+            "op": "normalV2.exportBundle",
+            "payload": {
+                "destination_dir": str(export_dir),
+                "session": {"records": records},
+                "inversion": estimate["payload"],
+            },
+        }
+    )[-1]
+    assert exported["type"] == "result"
+    files = {Path(path).name for path in exported["payload"]["files"]}
+    assert {"normal_v2_session.json", "normal_v2_q_records.json", "normal_v2_report.md", "normal_v2_manifest.json", "file_list.txt"} <= files
