@@ -21,6 +21,13 @@ from millikan_ai.api import (
 )
 from millikan_ai.config import load_config
 from millikan_ai.downstream import run_downstream_analysis
+from millikan_ai.normal_v2.api import (
+    estimate_elementary_from_payload,
+    load_session_from_payload,
+    run_single_drop_from_payload,
+    save_session_from_payload,
+    session_report_from_payload,
+)
 from millikan_ai.pipeline import validate_run
 from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 from millikan_ai.video.reader import inspect_video
@@ -286,6 +293,26 @@ def _op_report_export(payload: Json, _request_id: str) -> Json:
     return {"destination": destination, "files": exported}
 
 
+def _op_normal_v2_run_single_drop(payload: Json, _request_id: str) -> Json:
+    return run_single_drop_from_payload(payload)
+
+
+def _op_normal_v2_session_save(payload: Json, _request_id: str) -> Json:
+    return save_session_from_payload(payload)
+
+
+def _op_normal_v2_session_load(payload: Json, _request_id: str) -> Json:
+    return load_session_from_payload(payload)
+
+
+def _op_normal_v2_estimate_elementary(payload: Json, _request_id: str) -> Json:
+    return estimate_elementary_from_payload(payload)
+
+
+def _op_normal_v2_session_report(payload: Json, _request_id: str) -> Json:
+    return session_report_from_payload(payload)
+
+
 def _export_run_package(run_dir: Path, destination: Path) -> list[Path]:
     manifest = _read_json(run_dir / "run_manifest.json")
     files = manifest.get("files", {}) if isinstance(manifest.get("files"), dict) else {}
@@ -359,6 +386,11 @@ OPS: dict[str, Callable[[Json, str], Json]] = {
     "analysis.validate": _op_analysis_validate,
     "downstream.run": _op_downstream_run,
     "report.export": _op_report_export,
+    "normalV2.runSingleDrop": _op_normal_v2_run_single_drop,
+    "normalV2.sessionSave": _op_normal_v2_session_save,
+    "normalV2.sessionLoad": _op_normal_v2_session_load,
+    "normalV2.estimateElementary": _op_normal_v2_estimate_elementary,
+    "normalV2.sessionReport": _op_normal_v2_session_report,
 }
 
 
