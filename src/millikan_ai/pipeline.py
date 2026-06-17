@@ -11,6 +11,7 @@ import pandas as pd
 from millikan_ai.calibration.grid import Roi, calibrate_grid, default_voltage_roi
 from millikan_ai.config import load_config, save_config
 from millikan_ai.elementary.estimate import estimate_elementary_charge
+from millikan_ai.elementary.plots import build_elementary_plots_data
 from millikan_ai.outputs.schemas import (
     AUTO_PLATFORM_SUGGESTION_COLUMNS,
     BEST_TRACK_COLUMNS,
@@ -104,7 +105,11 @@ def _build_run_manifest(
         "status": {
             "video_readable": bool(diagnostics.get("video", {}).get("readable")),
             "valid_for_q": bool(drop_result.get("valid")),
-            "valid_for_elementary_charge": bool(elementary.get("valid")),
+            "valid_for_elementary_charge": bool(elementary.get("fundamental_spacing_identified")),
+            "elementary_estimation_ready": bool(elementary.get("fit_valid")) or bool(elementary.get("bounded_estimate_available")),
+            "bounded_estimate_available": bool(elementary.get("bounded_estimate_available")),
+            "quantization_supported": elementary.get("quantization_supported"),
+            "elementary_status": elementary.get("status"),
             "drop_valid": bool(drop_result.get("valid")),
             "ml_training": bool(quality_scores.get("ml_training", False)),
             "flags": flags,
@@ -147,6 +152,11 @@ def _build_run_manifest(
             {"id": "multi_drop_segments", "source": files.get("drop_track_segments_csv")},
             {"id": "charge_result", "source": files.get("drop_results_json")},
             {"id": "multi_drop_results", "source": files.get("multi_drop_results_json")},
+            {
+                "id": "elementary_charge_visualization",
+                "source": files.get("plots_data_json"),
+                "status_source": files.get("elementary_charge_result_json"),
+            },
             {"id": "quality", "source": files.get("quality_scores_json")},
             {"id": "quality_scores", "source": files.get("trajectory_quality_scores_csv")},
             {"id": "validity", "source": files.get("validity_report_json")},
@@ -205,6 +215,101 @@ def _annotate_candidate_physics(candidate_summary: pd.DataFrame, drop_results: l
         annotated.loc[mask, "charge_abs_C"] = result.get("charge_abs_C")
         annotated.loc[mask, "radius_m"] = result.get("radius_m")
     return annotated
+
+
+def _write_downstream_physics_outputs(
+    target: Path,
+    output_cfg: dict,
+    drop_segments: pd.DataFrame,
+    drop_results: list[dict[str, object]],
+    elementary: dict[str, object],
+) -> None:
+    velocity_rows = []
+    drop_id_by_track = {str(drop.get("track_id", "")): str(drop.get("drop_id", "")) for drop in drop_results}
+    if not drop_segments.empty:
+        for row in drop_segments.to_dict("records"):
+            velocity_rows.append(
+                {
+                    "drop_id": drop_id_by_track.get(str(row.get("track_id", "")), ""),
+                    "track_id": row.get("track_id", ""),
+                    "platform_id": row.get("platform_id", ""),
+                    "voltage_V": row.get("voltage_V"),
+                    "velocity_px_s": row.get("vy_px_s"),
+                    "velocity_m_s": row.get("vy_m_s"),
+                    "sigma_velocity_random_m_s": row.get("sigma_vy"),
+                    "velocity_ci_95_m_s": row.get("velocity_ci_95_m_s"),
+                    "fit_method": row.get("fit_method", ""),
+                    "uncertainty_method": row.get("uncertainty_method", ""),
+                    "num_points": row.get("num_points"),
+                    "duration_s": row.get("duration_s"),
+                    "rmse_px": row.get("rmse_y"),
+                    "r2_diagnostic": row.get("r2_y"),
+                    "slope_first_half": row.get("slope_first_half"),
+                    "slope_second_half": row.get("slope_second_half"),
+                    "residual_autocorrelation_lag1": row.get("residual_autocorrelation_lag1"),
+                    "warnings": row.get("flags", ""),
+                }
+            )
+    pd.DataFrame(velocity_rows).to_csv(target / output_cfg.get("platform_velocity_results_csv", "platform_velocity_results.csv"), index=False)
+
+    charge_rows = []
+    failures = []
+    for drop in drop_results:
+        fit = drop.get("fit", {}) or {}
+        result = drop.get("result", {}) or {}
+        if bool(drop.get("valid")):
+            charge_rows.append(
+                {
+                    "drop_id": drop.get("drop_id", ""),
+                    "track_id": drop.get("track_id", ""),
+                    "num_platforms": len(drop.get("platforms", []) or []),
+                    "validation_level": fit.get("validation_level", ""),
+                    "alpha_m_s": fit.get("alpha_m_s"),
+                    "gamma_m_s_V": fit.get("gamma_m_s_V"),
+                    "sigma_alpha_random": fit.get("sigma_alpha_random"),
+                    "sigma_gamma_random": fit.get("sigma_gamma_random"),
+                    "radius_m": result.get("radius_m"),
+                    "sigma_radius_random_m": result.get("sigma_radius_random_m"),
+                    "sigma_radius_systematic_m": result.get("sigma_radius_systematic_m"),
+                    "charge_abs_C": result.get("charge_abs_C"),
+                    "sigma_charge_random_C": result.get("sigma_charge_random_C", result.get("sigma_charge_C")),
+                    "sigma_charge_systematic_C": result.get("sigma_charge_systematic_C"),
+                    "sigma_charge_total_C": result.get("sigma_charge_total_C", result.get("sigma_charge_C")),
+                    "charge_ci95_low_C": result.get("charge_ci95_low_C"),
+                    "charge_ci95_high_C": result.get("charge_ci95_high_C"),
+                    "voltage_span_V": fit.get("voltage_span_V"),
+                    "intercept_extrapolation_ratio": fit.get("intercept_extrapolation_ratio"),
+                    "fit_chi_square": fit.get("fit_chi_square"),
+                    "fit_dof": fit.get("fit_dof"),
+                    "warnings": ";".join(str(flag) for flag in drop.get("flags", []) if str(flag)),
+                }
+            )
+        else:
+            failures.append(
+                {
+                    "drop_id": drop.get("drop_id", ""),
+                    "track_id": drop.get("track_id", ""),
+                    "stage": "single_drop_physics",
+                    "errors": list(drop.get("flags", []) or []),
+                    "diagnostics": {"fit": fit},
+                }
+            )
+    pd.DataFrame(charge_rows).to_csv(target / output_cfg.get("drop_charge_results_csv", "drop_charge_results.csv"), index=False)
+    _write_json(target / output_cfg.get("drop_charge_failures_json", "drop_charge_failures.json"), {"failures": failures})
+    _write_json(target / output_cfg.get("model_comparison_json", "model_comparison.json"), elementary.get("model_comparison", {}))
+    _write_json(target / output_cfg.get("plots_data_json", "plots_data.json"), build_elementary_plots_data(elementary, drop_results))
+    _write_json(
+        target / output_cfg.get("uncertainty_details_json", "uncertainty_details.json"),
+        {
+            "status": "partial",
+            "random_uncertainty": "single-drop q uses velocity-fit covariance propagation",
+            "systematic_uncertainty": "shared systematic Monte Carlo not yet implemented",
+            "elementary": {
+                "profile_ci_95_C": elementary.get("elementary_charge", {}).get("profile_ci_95_C"),
+                "bootstrap_ci_95_C": elementary.get("elementary_charge", {}).get("ci_95_C"),
+            },
+        },
+    )
 
 
 def _candidate_rank_map(candidate_summary: pd.DataFrame) -> dict[str, int]:
@@ -348,8 +453,9 @@ def run_pipeline(
     quality_scores["drop_valid"] = bool(drop_result.get("valid"))
     quality_scores["drop_flags"] = drop_result.get("flags", [])
     _write_json(target / output_cfg["quality_scores_json"], quality_scores)
-    elementary = estimate_elementary_charge(kept_drop_results, config)
+    elementary = estimate_elementary_charge(drop_results, config)
     _write_json(target / output_cfg["elementary_charge_result_json"], elementary)
+    _write_downstream_physics_outputs(target, output_cfg, drop_segments, drop_results, elementary)
     _emit_progress(progress_callback, 0.86, "write visualization outputs")
     visualization_layers = build_visualization_layers(
         meta,
@@ -362,6 +468,13 @@ def run_pipeline(
         quality_rows,
     )
     _write_json(target / output_cfg["visualization_layers_json"], visualization_layers)
+    tracking_diagnostics = {
+        "backend": str(config.get("tracking", {}).get("tracker_backend", "trackpy_single_drop")),
+        "candidate_count": int(len(candidate_summary)),
+        "selected_candidate_count": int(candidate_summary["selected_for_multi_drop"].astype(bool).sum()) if "selected_for_multi_drop" in candidate_summary else 0,
+        "duplicate_track_count": int((candidate_summary["reject_reason"].astype(str) == "duplicate_track").sum()) if "reject_reason" in candidate_summary else 0,
+        "end_reason_counts": candidate_summary["end_reason"].astype(str).value_counts().to_dict() if "end_reason" in candidate_summary else {},
+    }
     diagnostics = {
         "video": meta.to_dict(),
         "roi": {
@@ -380,6 +493,7 @@ def run_pipeline(
             "flags": config.get("auto_platform_detection_result", {}).get("flags", []),
         },
         "drop_count": int(multi_drop_results["num_total_drops"]),
+        "tracking": tracking_diagnostics,
         "track_rows": int(len(best_track)),
         "all_track_rows": int(len(drop_tracks)),
         "segment_rows": int(len(segments)),
@@ -410,7 +524,7 @@ def run_pipeline(
         segments,
         candidate_summary,
         multi_drop_results,
-        int(config["elementary"]["min_drops"]),
+        int(config["elementary"].get("min_drops_for_estimation", config["elementary"].get("min_drops", 3))),
     )
     _write_json(target / output_cfg["validity_report_json"], validity_report)
     write_summary(target, config)
@@ -444,8 +558,12 @@ def validate_run(run_dir: str | Path, config_path: str | Path = "configs/default
         "elementary_charge_result_json",
         "validity_report_json",
         "visualization_layers_json",
+        "plots_data_json",
     ]:
-        path = root / output[key]
+        filename = output.get(key)
+        if not filename:
+            continue
+        path = root / filename
         if not path.exists():
             errors.append(f"missing file: {path.name}")
         else:
@@ -475,8 +593,10 @@ def write_summary(run_dir: str | Path, config: dict | None = None) -> Path:
     config = config or load_config(root / "run_config.yaml")
     diagnostics_path = root / config["output"]["diagnostics_json"]
     drop_path = root / config["output"]["drop_results_json"]
+    elementary_path = root / config["output"].get("elementary_charge_result_json", "elementary_charge_result.json")
     diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8")) if diagnostics_path.exists() else {}
     drop = json.loads(drop_path.read_text(encoding="utf-8")) if drop_path.exists() else {}
+    elementary = json.loads(elementary_path.read_text(encoding="utf-8")) if elementary_path.exists() else {}
     lines = [
         f"Run: {root.name}",
         f"Video: {diagnostics.get('video', {}).get('path', '')}",
@@ -484,7 +604,11 @@ def write_summary(run_dir: str | Path, config: dict | None = None) -> Path:
         f"Track rows: {diagnostics.get('track_rows', 0)}",
         f"Segment rows: {diagnostics.get('segment_rows', 0)}",
         f"Drop valid: {drop.get('valid')}",
-        f"Flags: {', '.join(diagnostics.get('flags', []) + drop.get('flags', []))}",
+        f"Elementary fit valid: {elementary.get('fit_valid')}",
+        f"Elementary bounded estimate available: {elementary.get('bounded_estimate_available')}",
+        f"Elementary fundamental spacing identified: {elementary.get('fundamental_spacing_identified')}",
+        f"Elementary status: {elementary.get('status', '')}",
+        f"Flags: {', '.join(diagnostics.get('flags', []) + drop.get('flags', []) + elementary.get('flags', []))}",
     ]
     target = root / config["output"]["summary_txt"]
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")

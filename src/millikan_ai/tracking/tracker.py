@@ -10,98 +10,164 @@ import pandas as pd
 
 from millikan_ai.calibration.grid import GridCalibration, Roi
 from millikan_ai.segments.fitting import fit_line, select_stable_window
-from millikan_ai.tracking.detector import Blob, detect_blobs
-from millikan_ai.tracking.fusion import KalmanPointTracker, track_lk_bidirectional
+from millikan_ai.tracking import grid_mask as grid_mask_utils
+from millikan_ai.tracking.trackpy_core import (
+    SingleDropTrackingConfig,
+    TrackpyDropState,
+    locate_features_in_roi,
+    preprocess_frame_for_droplets,
+)
 from millikan_ai.video.reader import inspect_video
 
 
 @dataclass(frozen=True)
 class TrackSeed:
-    blob: Blob
+    x_px: float
+    y_px: float
+    mass: float
+    size: float
+    ecc: float
     start_frame: int
-
-
-def _distance(a: Blob, b: Blob) -> float:
-    return math.hypot(a.x_px - b.x_px, a.y_px - b.y_px)
 
 
 def _point_distance(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def _select_detection(
-    blobs: list[Blob],
-    predicted: tuple[float, float],
-    lk_point: tuple[float, float] | None,
-    previous: Blob,
-    motion: KalmanPointTracker,
-    tracking_cfg: dict,
-) -> Blob | None:
-    max_radius = float(tracking_cfg["max_search_radius_px"])
-    mahalanobis_gate = float(tracking_cfg.get("mahalanobis_gate", 6.0))
-    lk_gate = float(tracking_cfg.get("lk_detection_gate_px", 12.0))
-    max_area_ratio = float(tracking_cfg.get("max_area_ratio", 3.0))
-    candidates: list[tuple[float, Blob]] = []
-    for blob in blobs:
-        predicted_distance = _point_distance((blob.x_px, blob.y_px), predicted)
-        if predicted_distance > max_radius:
-            continue
-        lk_distance = _point_distance((blob.x_px, blob.y_px), lk_point) if lk_point is not None else float("inf")
-        kalman_consistent = motion.mahalanobis_distance((blob.x_px, blob.y_px)) <= mahalanobis_gate
-        lk_consistent = lk_point is not None and lk_distance <= lk_gate
-        if not kalman_consistent and not lk_consistent:
-            continue
-        area_ratio = max(blob.area_px, previous.area_px) / max(min(blob.area_px, previous.area_px), 1e-6)
-        if area_ratio > max_area_ratio:
-            continue
-        if lk_point is not None and not lk_consistent and predicted_distance > max_radius / 2:
-            continue
-        morphology_penalty = abs(math.log(max(blob.area_px, 1e-6) / max(previous.area_px, 1e-6)))
-        lk_cost = lk_distance if lk_point is not None else 0.0
-        cost = predicted_distance + 0.5 * lk_cost + 3.0 * morphology_penalty - 2.0 * blob.confidence
-        candidates.append((cost, blob))
-    return min(candidates, key=lambda item: item[0])[1] if candidates else None
+def _trackpy_config(tracking_cfg: dict) -> SingleDropTrackingConfig:
+    return SingleDropTrackingConfig(
+        diameter=grid_mask_utils.ensure_odd(int(tracking_cfg.get("trackpy_diameter", tracking_cfg.get("diameter", 5)))),
+        invert=bool(tracking_cfg.get("trackpy_invert", False)),
+        minmass=float(tracking_cfg.get("trackpy_minmass", 80.0)),
+        local_search_radius=float(tracking_cfg.get("trackpy_local_search_radius_px", tracking_cfg.get("max_search_radius_px", 45.0))),
+        max_accept_distance=float(tracking_cfg.get("trackpy_max_accept_distance_px", tracking_cfg.get("max_search_radius_px", 30.0))),
+        single_memory=int(tracking_cfg.get("trackpy_memory_frames", tracking_cfg.get("max_missing_frames", 5))),
+        local_topn=int(tracking_cfg.get("trackpy_local_topn", 20)),
+        grid_reject_dilate_px=int(tracking_cfg.get("grid_reject_dilate_px", 0)),
+        grid_occlusion_radius=int(tracking_cfg.get("grid_occlusion_radius_px", tracking_cfg.get("min_grid_line_distance_px", 0))),
+        skip_detection_on_grid=bool(tracking_cfg.get("skip_detection_on_grid", True)),
+        max_jump_px=float(tracking_cfg.get("trackpy_max_jump_px", 0.0)),
+    )
 
 
-def _collect_track_seeds(
-    cap: cv2.VideoCapture,
-    frame_count: int,
-    microscope_roi: Roi,
+def _near_roi_edge(x_px: float, y_px: float, roi: Roi, min_margin_px: float) -> bool:
+    if min_margin_px <= 0:
+        return False
+    return min(x_px - roi.x, roi.x + roi.w - x_px, y_px - roi.y, roi.y + roi.h - y_px) < min_margin_px
+
+
+def _near_grid_mask(x_px: float, y_px: float, grid_mask: np.ndarray | None, radius_px: float) -> bool:
+    if grid_mask is None or radius_px <= 0:
+        return False
+    height, width = grid_mask.shape[:2]
+    x = int(round(x_px))
+    y = int(round(y_px))
+    r = int(round(radius_px))
+    x0 = max(0, x - r)
+    y0 = max(0, y - r)
+    x1 = min(width, x + r + 1)
+    y1 = min(height, y + r + 1)
+    return x0 < x1 and y0 < y1 and np.count_nonzero(grid_mask[y0:y1, x0:x1]) > 0
+
+
+def _feature_value(row: pd.Series, name: str, default: float = float("nan")) -> float:
+    return float(row[name]) if name in row.index and pd.notna(row[name]) else default
+
+
+def _build_tracking_grid_mask(
+    video_path: str | Path,
+    frame_shape: tuple[int, int],
     grid: GridCalibration | None,
     tracking_cfg: dict,
+) -> tuple[np.ndarray | None, dict[str, object]]:
+    dilate_px = int(tracking_cfg.get("grid_reject_dilate_px", tracking_cfg.get("min_grid_line_distance_px", 0)))
+    use_static = bool(tracking_cfg.get("trackpy_static_grid_mask_enabled", True))
+    static_mask = None
+    static_status = "disabled"
+    if use_static:
+        try:
+            static_mask = grid_mask_utils.build_static_grid_mask(
+                video_path,
+                start_frame=0,
+                max_frames=int(tracking_cfg.get("trackpy_grid_mask_max_frames", 160)),
+                roi=None,
+            )
+            static_status = "ok" if static_mask is not None else "disabled_coverage"
+        except Exception as exc:
+            static_status = f"failed:{type(exc).__name__}"
+            static_mask = None
+    calibration_mask = grid_mask_utils.build_grid_mask_from_calibration(frame_shape, grid, dilate_px=dilate_px)
+    if static_mask is not None and calibration_mask is not None:
+        mask = cv2.bitwise_or(static_mask, calibration_mask)
+        source = "static_or_calibration"
+    elif static_mask is not None:
+        mask = static_mask
+        source = "static"
+    else:
+        mask = calibration_mask
+        source = "calibration" if calibration_mask is not None else "none"
+    diagnostics = {
+        "source": source,
+        "static_status": static_status,
+        "coverage": float(np.count_nonzero(mask)) / float(mask.size) if mask is not None else 0.0,
+    }
+    return mask, diagnostics
+
+
+def _collect_trackpy_seeds(
+    video_path: str | Path,
+    frame_count: int,
+    microscope_roi: Roi,
+    tracking_cfg: dict,
+    track_config: SingleDropTrackingConfig,
+    grid_mask: np.ndarray | None,
 ) -> list[TrackSeed]:
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
     sample_count = max(1, min(int(tracking_cfg.get("seed_sample_frames", 6)), frame_count))
     frame_indices = sorted(set(np.linspace(0, max(frame_count - 1, 0), sample_count, dtype=int).tolist()))
-    min_area = float(tracking_cfg["min_blob_area_px"])
-    max_area = float(tracking_cfg["max_blob_area_px"])
-    min_grid_distance = float(tracking_cfg.get("seed_min_grid_line_distance_px", 0))
     min_roi_margin = float(tracking_cfg.get("min_tracking_roi_margin_px", 0))
-    nms_distance = float(tracking_cfg.get("detection_nms_distance_px", 6))
+    min_grid_distance = float(tracking_cfg.get("seed_min_grid_line_distance_px", tracking_cfg.get("min_grid_line_distance_px", 0)))
     candidates: list[TrackSeed] = []
     for frame_idx in frame_indices:
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ok, frame = cap.read()
         if not ok:
             continue
-        blobs = detect_blobs(
-            frame,
-            microscope_roi,
-            min_area,
-            max_area,
-            grid=grid,
-            min_grid_distance_px=min_grid_distance,
-            min_roi_margin_px=min_roi_margin,
-            nms_distance_px=nms_distance,
-        )
-        candidates.extend(TrackSeed(blob=blob, start_frame=frame_idx) for blob in blobs)
-    candidates.sort(key=lambda seed: (seed.start_frame, -seed.blob.confidence))
+        gray = preprocess_frame_for_droplets(frame, None)
+        features = locate_features_in_roi(gray, microscope_roi, track_config, grid_mask=grid_mask)
+        if features.empty:
+            continue
+        sort_column = "mass" if "mass" in features.columns else "signal"
+        if sort_column in features.columns:
+            features = features.sort_values(sort_column, ascending=False)
+        for _, row in features.iterrows():
+            x = float(row["x"])
+            y = float(row["y"])
+            if _near_roi_edge(x, y, microscope_roi, min_roi_margin):
+                continue
+            if _near_grid_mask(x, y, grid_mask, min_grid_distance):
+                continue
+            candidates.append(
+                TrackSeed(
+                    x_px=x,
+                    y_px=y,
+                    mass=_feature_value(row, "mass"),
+                    size=_feature_value(row, "size"),
+                    ecc=_feature_value(row, "ecc"),
+                    start_frame=int(frame_idx),
+                )
+            )
+    cap.release()
+    candidates.sort(key=lambda seed: (seed.start_frame, -float(seed.mass if np.isfinite(seed.mass) else 0.0)))
     merge_distance = float(tracking_cfg.get("seed_merge_distance_px", 18))
     seeds: list[TrackSeed] = []
     for candidate in candidates:
-        if any(_distance(candidate.blob, existing.blob) < merge_distance for existing in seeds):
+        if any(_point_distance((candidate.x_px, candidate.y_px), (existing.x_px, existing.y_px)) < merge_distance for existing in seeds):
             continue
         seeds.append(candidate)
-        if len(seeds) >= int(tracking_cfg["top_k_seeds"]):
+        if len(seeds) >= int(tracking_cfg.get("top_k_seeds", 30)):
             break
     return seeds
 
@@ -110,7 +176,6 @@ def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, 
     if not rows or platforms.empty:
         return 0, 0.0, 0.0
     frame = pd.DataFrame(rows)
-    transient = float(config["segment"]["transient_drop_s"])
     min_duration = float(config["segment"]["stable_min_duration_s"])
     min_points = int(config["segment"]["min_valid_points"])
     min_r2 = float(config["segment"]["min_fit_r2"])
@@ -119,7 +184,7 @@ def _platform_fit_score(rows: list[dict[str, object]], platforms: pd.DataFrame, 
     r2_values = []
     vx_values = []
     for platform in platforms.to_dict("records"):
-        start = float(platform["start_time_s"]) + transient
+        start = float(platform["start_time_s"])
         end = float(platform["end_time_s"])
         segment = frame[(frame["time_s"] >= start) & (frame["time_s"] <= end) & (frame["is_valid_detection"].astype(bool))]
         if len(segment) < max(2, min_points):
@@ -179,6 +244,102 @@ def _roi_clear_fraction(rows: list[dict[str, object]], roi: Roi, min_margin_px: 
     return clear / len(valid_rows)
 
 
+def _summarize_track(
+    candidate_id: str,
+    rows: list[dict[str, object]],
+    platforms: pd.DataFrame,
+    config: dict,
+    grid: GridCalibration | None,
+    roi: Roi,
+) -> dict[str, object]:
+    valid_rows = [row for row in rows if bool(row.get("is_valid_detection"))]
+    invalid_count = len(rows) - len(valid_rows)
+    missing_ratio = invalid_count / max(len(rows), 1)
+    total_duration = float(rows[-1]["time_s"] - rows[0]["time_s"]) if len(rows) > 1 else 0.0
+    if valid_rows:
+        x_values = np.asarray([float(row["x_px"]) for row in valid_rows], dtype=float)
+        y_values = np.asarray([float(row["y_px"]) for row in valid_rows], dtype=float)
+        times = np.asarray([float(row["time_s"]) for row in valid_rows], dtype=float)
+    else:
+        x_values = np.asarray([], dtype=float)
+        y_values = np.asarray([], dtype=float)
+        times = np.asarray([], dtype=float)
+    steps = np.hypot(np.diff(x_values), np.diff(y_values)) if len(x_values) > 1 else np.asarray([], dtype=float)
+    path_length = float(steps.sum()) if steps.size else 0.0
+    displacement = float(np.hypot(x_values[-1] - x_values[0], y_values[-1] - y_values[0])) if len(x_values) > 1 else 0.0
+    platform_count = len({row["platform_id"] for row in valid_rows if row.get("platform_id")})
+    fit_usable_count, mean_r2, drift_score = _platform_fit_score(rows, platforms, config)
+    coverage_basis = fit_usable_count if not platforms.empty else platform_count
+    coverage_score = min(1.0, coverage_basis / max(len(platforms), 1)) if not platforms.empty else min(1.0, total_duration / 3.0)
+    continuity_score = 1.0 - missing_ratio
+    min_grid_distance = float(config["tracking"].get("min_grid_line_distance_px", 0))
+    min_grid_clear = float(config["tracking"].get("min_grid_clear_fraction", 0))
+    min_roi_margin = float(config["tracking"].get("min_tracking_roi_margin_px", 0))
+    min_roi_clear = float(config["tracking"].get("min_roi_clear_fraction", 0))
+    grid_clear_fraction = _grid_clear_fraction(rows, grid, min_grid_distance)
+    roi_clear_fraction = _roi_clear_fraction(rows, roi, min_roi_margin)
+    grid_score = 0.0 if grid_clear_fraction < min_grid_clear else grid_clear_fraction
+    roi_score = 0.0 if roi_clear_fraction < min_roi_clear else roi_clear_fraction
+    masses = np.asarray([float(row["mass"]) for row in valid_rows if np.isfinite(float(row.get("mass", np.nan)))], dtype=float)
+    mass_cv = float(masses.std() / max(abs(masses.mean()), 1e-9)) if masses.size else 1.0
+    if len(times) >= 2:
+        y_fit = fit_line(times, y_values)
+        x_fit = fit_line(times, x_values)
+    else:
+        y_fit = {"slope": 0.0, "r2": 0.0, "rmse": 0.0}
+        x_fit = {"slope": 0.0}
+    morphology_score = 1.0 / (1.0 + mass_cv)
+    score = max(
+        0.0,
+        min(
+            1.0,
+            0.24 * continuity_score
+            + 0.26 * coverage_score
+            + 0.18 * max(0.0, min(1.0, float(y_fit["r2"])))
+            + 0.10 * drift_score
+            + 0.08 * grid_score
+            + 0.08 * roi_score
+            + 0.06 * morphology_score,
+        ),
+    )
+    reject_reasons = []
+    if not (fit_usable_count >= min(2, len(platforms)) or platforms.empty):
+        reject_reasons.append("insufficient_stable_platform_fits")
+    if grid_clear_fraction < min_grid_clear:
+        reject_reasons.append("too_close_to_grid_lines")
+    if roi_clear_fraction < min_roi_clear:
+        reject_reasons.append("too_close_to_tracking_roi_edge")
+    end_reason = str(rows[-1].get("end_reason") or "video_end") if rows else "empty"
+    return {
+        "candidate_id": candidate_id,
+        "usable_platform_count": platform_count,
+        "total_duration_s": total_duration,
+        "missing_ratio": missing_ratio,
+        "score_total": score,
+        "fit_usable_platform_count": fit_usable_count,
+        "mean_speed_fit_r2": mean_r2,
+        "drift_score": drift_score,
+        "grid_clear_fraction": grid_clear_fraction,
+        "roi_clear_fraction": roi_clear_fraction,
+        "num_points": len(valid_rows),
+        "duration_s": total_duration,
+        "blocked_by_grid_count": sum(1 for row in rows if bool(row.get("blocked_by_grid"))),
+        "max_step_px": float(steps.max()) if steps.size else 0.0,
+        "step_p95_px": float(np.percentile(steps, 95)) if steps.size else 0.0,
+        "path_efficiency": displacement / max(path_length, 1e-9),
+        "vy_px_s": float(y_fit["slope"]),
+        "vx_px_s": float(x_fit["slope"]),
+        "r2_y": float(y_fit["r2"]),
+        "rmse_y": float(y_fit["rmse"]),
+        "mass_cv": mass_cv,
+        "end_reason": end_reason,
+        "rank": 0,
+        "reject_reason": ",".join(reject_reasons),
+        "duplicate_of": "",
+        "selected_for_multi_drop": False,
+    }
+
+
 def _track_seed_candidates(
     video_path: str | Path,
     video_id: str,
@@ -192,21 +353,14 @@ def _track_seed_candidates(
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
     tracking_cfg = config["tracking"]
-    min_area = float(tracking_cfg["min_blob_area_px"])
-    max_area = float(tracking_cfg["max_blob_area_px"])
-    min_grid_distance = float(tracking_cfg.get("min_grid_line_distance_px", 0))
-    min_grid_clear = float(tracking_cfg.get("min_grid_clear_fraction", 0))
-    min_roi_margin = float(tracking_cfg.get("min_tracking_roi_margin_px", 0))
-    min_roi_clear = float(tracking_cfg.get("min_roi_clear_fraction", 0))
-    nms_distance = float(tracking_cfg.get("detection_nms_distance_px", 6))
-    lk_window = int(tracking_cfg.get("lk_window_size_px", 21))
-    lk_levels = int(tracking_cfg.get("lk_pyramid_levels", 3))
-    lk_fb_error = float(tracking_cfg.get("lk_max_forward_backward_error_px", 1.5))
-    lk_photo_error = float(tracking_cfg.get("lk_max_photometric_error", 30))
-    max_missing_frames = int(tracking_cfg.get("max_missing_frames", 15))
-    process_noise = float(tracking_cfg.get("kalman_process_noise", 1.0))
-    measurement_noise = float(tracking_cfg.get("kalman_measurement_noise", 2.0))
-    seeds = _collect_track_seeds(cap, meta.frame_count, microscope_roi, grid, tracking_cfg)
+    track_config = _trackpy_config(tracking_cfg)
+    ok, first_frame = cap.read()
+    if not ok:
+        cap.release()
+        return {}, []
+    frame_shape = first_frame.shape[:2]
+    grid_mask, _grid_mask_diagnostics = _build_tracking_grid_mask(video_path, frame_shape, grid, tracking_cfg)
+    seeds = _collect_trackpy_seeds(video_path, meta.frame_count, microscope_roi, tracking_cfg, track_config, grid_mask)
     if not seeds:
         cap.release()
         return {}, [
@@ -221,230 +375,58 @@ def _track_seed_candidates(
                 "selected_for_multi_drop": False,
             }
         ]
-    tracks: dict[str, list[dict[str, object]]] = {}
-    summaries = []
+
     seeds_by_frame: dict[int, list[tuple[int, TrackSeed]]] = {}
-    for seed_idx, track_seed in enumerate(seeds, start=1):
-        seeds_by_frame.setdefault(track_seed.start_frame, []).append((seed_idx, track_seed))
+    for seed_idx, seed in enumerate(seeds, start=1):
+        seeds_by_frame.setdefault(seed.start_frame, []).append((seed_idx, seed))
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-    active: list[dict[str, object]] = []
-    completed: list[dict[str, object]] = []
+    active: list[TrackpyDropState] = []
+    completed: list[TrackpyDropState] = []
     for frame_idx in range(meta.frame_count):
-        starting_seeds = seeds_by_frame.get(frame_idx, [])
-        if not active and not starting_seeds:
-            cap.grab()
-            continue
         ok, frame = cap.read()
         if not ok:
             break
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        blobs = detect_blobs(
-            frame,
-            microscope_roi,
-            min_area,
-            max_area,
-            grid=grid,
-            min_grid_distance_px=min_grid_distance,
-            min_roi_margin_px=min_roi_margin,
-            nms_distance_px=nms_distance,
-        )
-        for seed_idx, track_seed in starting_seeds:
-            seed = track_seed.blob
+        gray = preprocess_frame_for_droplets(frame, None)
+        for seed_idx, seed in seeds_by_frame.get(frame_idx, []):
             active.append(
-                {
-                    "seed_idx": seed_idx,
-                    "current": seed,
-                    "motion": KalmanPointTracker(
-                        seed.x_px,
-                        seed.y_px,
-                        dt=1.0 / meta.fps if meta.fps else 1.0 / 30.0,
-                        process_noise=process_noise,
-                        measurement_noise=measurement_noise,
-                    ),
-                    "previous_gray": None,
-                    "previous_point": (seed.x_px, seed.y_px),
-                    "rows": [],
-                    "missing": 0,
-                    "consecutive_missing": 0,
-                }
+                TrackpyDropState(
+                    track_id=f"candidate_{seed_idx:03d}",
+                    video_id=video_id,
+                    start_frame=frame_idx,
+                    initial_position=np.array([seed.x_px, seed.y_px], dtype=float),
+                    config=track_config,
+                    roi=microscope_roi,
+                    fps=meta.fps or 30.0,
+                )
             )
-
-        next_active: list[dict[str, object]] = []
+        next_active = []
         for state in active:
-            seed_idx = int(state["seed_idx"])
-            current = state["current"]
-            motion = state["motion"]
-            previous_gray = state["previous_gray"]
-            previous_point = state["previous_point"]
-            missing = int(state["missing"])
-            consecutive_missing = int(state["consecutive_missing"])
-            assert isinstance(current, Blob)
-            assert isinstance(motion, KalmanPointTracker)
-            predicted = motion.predict()
-            lk_result = None
-            if previous_gray is not None:
-                lk_result = track_lk_bidirectional(
-                    previous_gray,
-                    gray,
-                    previous_point,
-                    window_size_px=lk_window,
-                    pyramid_levels=lk_levels,
-                    max_forward_backward_error_px=lk_fb_error,
-                    max_photometric_error=lk_photo_error,
-                )
-            lk_point = lk_result[0] if lk_result is not None else None
-            lk_prediction_gate = float(tracking_cfg.get("lk_prediction_gate_px", 12.0))
-            if lk_point is not None and _point_distance(lk_point, predicted) > lk_prediction_gate:
-                lk_point = None
-            detection = _select_detection(blobs, predicted, lk_point, current, motion, tracking_cfg)
-            if detection is not None:
-                current = detection
-                corrected = motion.correct((current.x_px, current.y_px))
-                previous_point = corrected
-                valid = True
-                tracking_source = "detection"
-                consecutive_missing = 0
-            elif lk_point is not None:
-                lk_weight = float(tracking_cfg.get("lk_measurement_weight", 0.25))
-                fused_point = (
-                    (1.0 - lk_weight) * predicted[0] + lk_weight * lk_point[0],
-                    (1.0 - lk_weight) * predicted[1] + lk_weight * lk_point[1],
-                )
-                corrected = motion.correct(fused_point)
-                current = Blob(
-                    corrected[0],
-                    corrected[1],
-                    current.radius_px,
-                    current.area_px,
-                    current.brightness,
-                    current.contrast,
-                    current.circularity,
-                    current.confidence,
-                )
-                previous_point = corrected
-                valid = True
-                tracking_source = "lk"
-                consecutive_missing = 0
-            else:
-                missing += 1
-                consecutive_missing += 1
-                current = Blob(
-                    predicted[0],
-                    predicted[1],
-                    current.radius_px,
-                    current.area_px,
-                    current.brightness,
-                    current.contrast,
-                    current.circularity,
-                    current.confidence,
-                )
-                previous_point = predicted
-                valid = False
-                tracking_source = "kalman_prediction"
-            time_s = frame_idx / meta.fps if meta.fps else 0.0
-            platform_id = ""
-            voltage = np.nan
-            if not platforms.empty:
-                hit = platforms[(platforms["start_time_s"] <= time_s) & (platforms["end_time_s"] >= time_s)]
-                if not hit.empty:
-                    platform_id = str(hit.iloc[0]["platform_id"])
-                    voltage = float(hit.iloc[0]["voltage_V"])
-            rows = state["rows"]
-            assert isinstance(rows, list)
-            rows.append(
-                {
-                    "video_id": video_id,
-                    "track_id": f"candidate_{seed_idx:03d}",
-                    "frame_idx": frame_idx,
-                    "time_s": time_s,
-                    "x_px": current.x_px,
-                    "y_px": current.y_px,
-                    "radius_px": current.radius_px,
-                    "area_px": current.area_px,
-                    "brightness": current.brightness,
-                    "voltage_V": voltage,
-                    "platform_id": platform_id,
-                    "is_valid_detection": valid,
-                    "tracking_source": tracking_source,
-                }
-            )
-            state["current"] = current
-            state["previous_gray"] = gray
-            state["previous_point"] = previous_point
-            state["missing"] = missing
-            state["consecutive_missing"] = consecutive_missing
-            if consecutive_missing > max_missing_frames:
-                completed.append(state)
-            else:
+            state.step(gray, frame_idx, grid_mask=grid_mask, platforms=platforms)
+            if state.active:
                 next_active.append(state)
+            else:
+                completed.append(state)
         active = next_active
-    completed.extend(active)
-
-    for state in completed:
-        seed_idx = int(state["seed_idx"])
-        rows = state["rows"]
-        missing = int(state["missing"])
-        assert isinstance(rows, list)
-        if not rows:
-            continue
-        missing_ratio = missing / max(len(rows), 1)
-        total_duration = rows[-1]["time_s"] - rows[0]["time_s"] if len(rows) > 1 else 0.0
-        x_values = np.asarray([float(row["x_px"]) for row in rows], dtype=float)
-        y_values = np.asarray([float(row["y_px"]) for row in rows], dtype=float)
-        steps = np.hypot(np.diff(x_values), np.diff(y_values))
-        path_length = float(steps.sum())
-        displacement = float(np.hypot(x_values[-1] - x_values[0], y_values[-1] - y_values[0])) if len(rows) > 1 else 0.0
-        areas = np.asarray([float(row["area_px"]) for row in rows if bool(row["is_valid_detection"])], dtype=float)
-        platform_count = len({row["platform_id"] for row in rows if row["platform_id"]})
-        fit_usable_count, mean_r2, drift_score = _platform_fit_score(rows, platforms, config)
-        coverage_basis = fit_usable_count if not platforms.empty else platform_count
-        coverage_score = min(1.0, coverage_basis / max(len(platforms), 1)) if not platforms.empty else 0.0
-        continuity_score = 1 - missing_ratio
-        grid_clear_fraction = _grid_clear_fraction(rows, grid, min_grid_distance)
-        roi_clear_fraction = _roi_clear_fraction(rows, microscope_roi, min_roi_margin)
-        grid_score = 0.0 if grid_clear_fraction < min_grid_clear else grid_clear_fraction
-        roi_score = 0.0 if roi_clear_fraction < min_roi_clear else roi_clear_fraction
-        score = max(0.0, min(1.0, 0.25 * continuity_score + 0.30 * coverage_score + 0.20 * mean_r2 + 0.10 * drift_score + 0.075 * grid_score + 0.075 * roi_score))
-        reject_reasons = []
-        if not (fit_usable_count >= min(2, len(platforms)) or platforms.empty):
-            reject_reasons.append("insufficient_stable_platform_fits")
-        if grid_clear_fraction < min_grid_clear:
-            reject_reasons.append("too_close_to_grid_lines")
-        if roi_clear_fraction < min_roi_clear:
-            reject_reasons.append("too_close_to_tracking_roi_edge")
-        candidate_id = f"candidate_{seed_idx:03d}"
-        tracks[candidate_id] = rows
-        summaries.append(
-            {
-                "candidate_id": candidate_id,
-                "usable_platform_count": platform_count,
-                "total_duration_s": total_duration,
-                "missing_ratio": missing_ratio,
-                "score_total": score,
-                "fit_usable_platform_count": fit_usable_count,
-                "mean_speed_fit_r2": mean_r2,
-                "drift_score": drift_score,
-                "grid_clear_fraction": grid_clear_fraction,
-                "roi_clear_fraction": roi_clear_fraction,
-                "max_step_px": float(steps.max()) if steps.size else 0.0,
-                "step_p95_px": float(np.percentile(steps, 95)) if steps.size else 0.0,
-                "path_efficiency": displacement / max(path_length, 1e-9),
-                "area_cv": float(areas.std() / max(areas.mean(), 1e-9)) if areas.size else 1.0,
-                "rank": 0,
-                "reject_reason": ",".join(reject_reasons),
-                "selected_for_multi_drop": False,
-            }
-        )
     cap.release()
+    for state in active:
+        state.finish_at_video_end()
+        completed.append(state)
+
+    tracks: dict[str, list[dict[str, object]]] = {}
+    summaries: list[dict[str, object]] = []
+    for state in completed:
+        if not state.rows:
+            continue
+        tracks[state.track_id] = state.rows
+        summaries.append(_summarize_track(state.track_id, state.rows, platforms, config, grid, microscope_roi))
     summaries.sort(
         key=lambda row: (
-            int(row["fit_usable_platform_count"]),
-            int(row["usable_platform_count"]),
-            float(row["total_duration_s"]),
-            -float(row["missing_ratio"]),
-            float(row["mean_speed_fit_r2"]),
-            float(row["score_total"]),
+            int(row.get("fit_usable_platform_count", 0)),
+            int(row.get("usable_platform_count", 0)),
+            float(row.get("score_total", 0.0)),
+            float(row.get("total_duration_s", 0.0)),
+            -float(row.get("missing_ratio", 1.0)),
         ),
         reverse=True,
     )
@@ -476,9 +458,49 @@ def _trajectory_distance(a: list[dict[str, object]], b: list[dict[str, object]])
         first_a = _first_valid_point(a)
         first_b = _first_valid_point(b)
         if first_a is None or first_b is None:
-            return 0.0
+            return float("inf")
         return math.hypot(first_a[0] - first_b[0], first_a[1] - first_b[1])
     return float(np.median(distances))
+
+
+def _deduplicate_track_candidates(
+    tracks: dict[str, list[dict[str, object]]],
+    summaries: list[dict[str, object]],
+    max_drops: int,
+    min_distance_px: float,
+) -> list[str]:
+    selected_ids: list[str] = []
+    selected_tracks: list[list[dict[str, object]]] = []
+    for summary in summaries:
+        candidate_id = str(summary.get("candidate_id", ""))
+        rows = tracks.get(candidate_id, [])
+        if not rows:
+            continue
+        if not _summary_selectable_for_evaluation(summary):
+            summary["selected_for_multi_drop"] = False
+            continue
+        duplicate_of = ""
+        for selected_id, selected_rows in zip(selected_ids, selected_tracks):
+            if _trajectory_distance(rows, selected_rows) < min_distance_px:
+                duplicate_of = selected_id
+                break
+        if duplicate_of:
+            summary["reject_reason"] = "duplicate_track"
+            summary["duplicate_of"] = duplicate_of
+            summary["selected_for_multi_drop"] = False
+            continue
+        summary["selected_for_multi_drop"] = True
+        selected_ids.append(candidate_id)
+        selected_tracks.append(rows)
+        if len(selected_ids) >= max_drops:
+            break
+    return selected_ids
+
+
+def _summary_selectable_for_evaluation(summary: dict[str, object]) -> bool:
+    if int(summary.get("usable_platform_count", 0) or 0) > 0 and int(summary.get("fit_usable_platform_count", 0) or 0) <= 0:
+        return False
+    return True
 
 
 def track_multiple_candidates(
@@ -492,32 +514,19 @@ def track_multiple_candidates(
     tracks, summaries = _track_seed_candidates(video_path, video_id, microscope_roi, platforms, config, grid)
     if not tracks:
         return pd.DataFrame(), pd.DataFrame(summaries)
-
     tracking_cfg = config["tracking"]
-    max_drops = max(1, int(tracking_cfg.get("max_drops", 1)))
-    min_distance = float(tracking_cfg.get("multi_drop_min_trajectory_distance_px", 20))
-    selected_ids: list[str] = []
-    selected_tracks: list[list[dict[str, object]]] = []
-    for summary in summaries:
-        candidate_id = str(summary["candidate_id"])
-        rows = tracks.get(candidate_id, [])
-        if not rows:
-            continue
-        if any(_trajectory_distance(rows, selected) < min_distance for selected in selected_tracks):
-            summary["reject_reason"] = "duplicate_track"
-            continue
-        summary["selected_for_multi_drop"] = True
-        selected_ids.append(candidate_id)
-        selected_tracks.append(rows)
-        if len(selected_ids) >= max_drops:
-            break
-
-    if not selected_tracks and summaries:
+    selected_ids = _deduplicate_track_candidates(
+        tracks,
+        summaries,
+        max_drops=max(1, int(tracking_cfg.get("max_drops", 1))),
+        min_distance_px=float(tracking_cfg.get("multi_drop_min_trajectory_distance_px", 20)),
+    )
+    if not selected_ids and summaries:
         best_id = str(summaries[0]["candidate_id"])
         if best_id in tracks:
             summaries[0]["selected_for_multi_drop"] = True
-            selected_tracks.append(tracks[best_id])
-
+            selected_ids = [best_id]
+    selected_tracks = [tracks[track_id] for track_id in selected_ids if track_id in tracks]
     track_frame = pd.DataFrame([row for rows in selected_tracks for row in rows])
     return track_frame, pd.DataFrame(summaries)
 

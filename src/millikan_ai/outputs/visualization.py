@@ -119,6 +119,9 @@ def build_visualization_layers(
                     "x_px": float(row["x_px"]),
                     "y_px": float(row["y_px"]),
                     "valid": bool(row.get("is_valid_detection", True)),
+                    "segment_id": str(_clean(row.get("segment_id", "")) or ""),
+                    "blocked_by_grid": bool(row.get("blocked_by_grid", False)),
+                    "end_reason": str(_clean(row.get("end_reason", "")) or ""),
                     "platform_id": str(_clean(row.get("platform_id", "")) or ""),
                     "voltage_V": _clean(float(row["voltage_V"])) if row.get("voltage_V") is not None else None,
                 }
@@ -130,10 +133,11 @@ def build_visualization_layers(
                     "drop_id": str(quality.get("drop_id", "")),
                     "quality_score": _clean(quality.get("quality_score")),
                     "keep": bool(quality.get("keep", False)),
-                    "q_valid": bool(quality.get("q_valid", False)),
-                    "reject_reasons": str(quality.get("reject_reasons", "")),
-                    "points": points,
-                }
+                "q_valid": bool(quality.get("q_valid", False)),
+                "reject_reasons": str(quality.get("reject_reasons", "")),
+                "segment_ids": sorted({str(_clean(row.get("segment_id", "")) or "") for row in track.to_dict("records") if row.get("segment_id", "")}),
+                "points": points,
+            }
             )
         layers.append(
             {
@@ -153,6 +157,9 @@ def build_visualization_layers(
                 "x_px": float(row["x_px"]),
                 "y_px": float(row["y_px"]),
                 "valid": bool(row.get("is_valid_detection", True)),
+                "segment_id": str(_clean(row.get("segment_id", "")) or ""),
+                "blocked_by_grid": bool(row.get("blocked_by_grid", False)),
+                "end_reason": str(_clean(row.get("end_reason", "")) or ""),
                 "platform_id": str(_clean(row.get("platform_id", "")) or ""),
                 "voltage_V": _clean(float(row["voltage_V"])) if row.get("voltage_V") is not None else None,
             }

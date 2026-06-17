@@ -10,6 +10,16 @@ from millikan_ai.config import load_config, save_config
 from tests.test_algorithms import _make_voltage_change_video
 
 
+def _fast_config() -> dict:
+    config = load_config("configs/default.yaml")
+    config["elementary"]["e_bootstrap_samples"] = 0
+    config["elementary"]["measurement_mc_samples"] = 0
+    config["elementary"]["null_simulation_samples"] = 0
+    config["physics"]["random_mc_samples"] = 50
+    config["segment"]["velocity_bootstrap_samples_quick"] = 0
+    return config
+
+
 def _make_synthetic_video(path: Path) -> None:
     writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
     for idx in range(120):
@@ -35,7 +45,7 @@ def test_manual_platform_api_builds_schema_rows():
 def test_prepare_analysis_config_writes_manual_platforms(tmp_path: Path):
     video = tmp_path / "synthetic.mp4"
     _make_synthetic_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["project"]["run_root"] = str(tmp_path / "runs")
     config_path = tmp_path / "config.yaml"
     save_config(config, config_path)
@@ -51,7 +61,7 @@ def test_prepare_analysis_config_writes_manual_platforms(tmp_path: Path):
 def test_prepare_auto_platform_config_binds_user_voltage_values(tmp_path: Path):
     video = tmp_path / "auto_platform.mp4"
     _make_voltage_change_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["project"]["run_root"] = str(tmp_path / "runs")
     config["auto_platform_detection"]["sample_stride_frames"] = 3
     config["auto_platform_detection"]["min_platform_duration_s"] = 0.8
@@ -72,11 +82,10 @@ def test_prepare_auto_platform_config_binds_user_voltage_values(tmp_path: Path):
 def test_analyze_video_returns_manifest_for_frontend(tmp_path: Path):
     video = tmp_path / "synthetic.mp4"
     _make_synthetic_video(video)
-    config = load_config("configs/default.yaml")
+    config = _fast_config()
     config["project"]["run_root"] = str(tmp_path / "runs")
     config["roi"]["microscope_roi"] = [20, 20, 240, 200]
     config["segment"]["stable_min_duration_s"] = 0.5
-    config["segment"]["transient_drop_s"] = 0.1
     config["segment"]["min_valid_points"] = 10
     config_path = tmp_path / "config.yaml"
     save_config(config, config_path)

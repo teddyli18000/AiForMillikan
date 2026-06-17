@@ -2,6 +2,8 @@ project:
   name: millikan_ai
   run_root: runs
 
+analysis_mode: quick
+
 video:
   sample_frames: 8
   diagnostics_dir: diagnostics
@@ -16,8 +18,9 @@ calibration:
   min_grid_lines: 4
 
 segment:
+  boundary_guard_frames: 0
+  velocity_bootstrap_samples_quick: 200
   stable_min_duration_s: 2.0
-  transient_drop_s: 0.5
   min_valid_points: 45
   max_missing_ratio: 0.15
   min_fit_r2: 0.90
@@ -40,12 +43,26 @@ auto_platform_detection:
   descriptor_height: 32
 
 tracking:
+  tracker_backend: trackpy_single_drop
   top_k_seeds: 30
   seed_sample_frames: 6
   seed_merge_distance_px: 18
   seed_min_grid_line_distance_px: 0
   max_drops: 20
   multi_drop_min_trajectory_distance_px: 20
+  trackpy_diameter: 5
+  trackpy_invert: false
+  trackpy_minmass: 80.0
+  trackpy_local_search_radius_px: 45
+  trackpy_max_accept_distance_px: 30
+  trackpy_memory_frames: 5
+  trackpy_local_topn: 20
+  trackpy_static_grid_mask_enabled: true
+  trackpy_grid_mask_max_frames: 160
+  grid_reject_dilate_px: 0
+  grid_occlusion_radius_px: 0
+  skip_detection_on_grid: true
+  trackpy_max_jump_px: 0
   max_search_radius_px: 35
   max_missing_frames: 15
   min_blob_area_px: 3
@@ -70,22 +87,50 @@ tracking:
   min_roi_clear_fraction: 0.70
 
 physics:
-  voltage_sign: 1
   plate_distance_m: 0.005
   oil_density_kg_m3: 981.0
-  air_viscosity_Pa_s: 0.0000181
   pressure_Pa: 101325.0
   cunningham_b_Pa_m: 0.0000082
   gravity_m_s2: 9.80665
-  radius_tolerance_m: 1.0e-12
-  max_radius_iterations: 80
+  random_mc_samples: 1000
+  systematic_mc_samples: 0
+  systematic_uncertainty:
+    spatial_scale_rel: 0.0
+    plate_distance_rel: 0.0
+    voltage_scale_rel: 0.0
+    temperature_C: 0.0
+    pressure_rel: 0.0
+    oil_density_rel: 0.0
+    cunningham_b_rel: 0.0
+
+viscosity:
+  source: temperature
+  air_temperature_C: 20.0
+  direct_air_viscosity_Pa_s: null
+  reference_temperature_K: 293.15
+  reference_viscosity_Pa_s: 1.81e-5
+  sutherland_constant_K: 110.4
 
 elementary:
-  min_drops: 3
-  e_min_C: 0.5e-19
-  e_max_C: 2.5e-19
-  grid_points: 800
-  bootstrap_samples: 50
+  min_drops_for_estimation: 3
+  profile_grid_points: 800
+  comparison_profile_grid_points: 120
+  tau_lambda_profile_optimize_points: 16
+  tau_lambda_optimizer_maxiter: 80
+  profile_mode_optimize_relative_threshold: 0.02
+  max_profile_modes_to_optimize: 96
+  omitted_mode_relative_likelihood_threshold: 0.02
+  candidate_mode_min_relative_likelihood: 1.0e-4
+  mode_relative_likelihood_threshold: 0.02
+  harmonic_ratio_tolerance: 0.04
+  harmonic_integer_max: 4
+  e_bootstrap_samples: 1000
+  measurement_mc_samples: 1000
+  null_simulation_samples: 300
+  enable_calibrated_evidence_labels: false
+  systematic_e_profile_grid_points: 80
+  systematic_tau_lambda_profile_optimize_points: 2
+  systematic_tau_lambda_optimizer_maxiter: 20
   random_seed: 42
 
 quality:
@@ -126,6 +171,12 @@ output:
   diagnostics_json: diagnostics.json
   drop_results_json: drop_results.json
   multi_drop_results_json: multi_drop_results.json
+  platform_velocity_results_csv: platform_velocity_results.csv
+  drop_charge_results_csv: drop_charge_results.csv
+  drop_charge_failures_json: drop_charge_failures.json
+  model_comparison_json: model_comparison.json
+  uncertainty_details_json: uncertainty_details.json
+  plots_data_json: plots_data.json
   quality_scores_json: quality_scores.json
   elementary_charge_result_json: elementary_charge_result.json
   validity_report_json: validity_report.json

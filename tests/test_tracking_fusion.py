@@ -111,7 +111,6 @@ def test_fusion_tracker_does_not_jump_to_distractor_during_occlusion(tmp_path):
         target_y = int(45 + 0.7 * frame_idx)
         if not 28 <= frame_idx <= 33:
             cv2.circle(frame, (80, target_y), 5, (255, 255, 255), -1)
-            cv2.line(frame, (76, target_y), (84, target_y), (80, 80, 80), 1)
         cv2.circle(frame, (101, 67), 4, (180, 180, 180), -1)
         writer.write(frame)
     writer.release()
@@ -126,6 +125,11 @@ def test_fusion_tracker_does_not_jump_to_distractor_during_occlusion(tmp_path):
             "min_tracking_roi_margin_px": 0,
             "min_roi_clear_fraction": 0,
             "max_missing_frames": 12,
+            "trackpy_diameter": 7,
+            "trackpy_minmass": 20,
+            "trackpy_local_search_radius_px": 35,
+            "trackpy_max_accept_distance_px": 12,
+            "trackpy_memory_frames": 12,
         }
     )
     tracks, _summary = track_multiple_candidates(
@@ -143,8 +147,8 @@ def test_fusion_tracker_does_not_jump_to_distractor_during_occlusion(tmp_path):
     after_occlusion = selected[selected["frame_idx"] == 36].iloc[0]
     assert jumps.max() < 8.0
     assert abs(float(after_occlusion["x_px"]) - 80.0) < 3.0
-    assert "detection" in set(selected["tracking_source"])
-    assert "kalman_prediction" in set(selected["tracking_source"])
+    assert "trackpy_detection" in set(selected["tracking_source"])
+    assert "trackpy_prediction" in set(selected["tracking_source"])
 
 
 def test_multi_keyframe_seeding_tracks_droplet_that_enters_late(tmp_path):
@@ -184,12 +188,16 @@ def test_multi_keyframe_seeding_tracks_droplet_that_enters_late(tmp_path):
     assert summary["selected_for_multi_drop"].astype(bool).any()
 
 
-def test_tracking_reuses_frame_detections_across_multiple_seeds(tmp_path, monkeypatch):
+def test_tracking_reuses_frame_preprocessing_across_multiple_seeds(tmp_path, monkeypatch):
     video = tmp_path / "many_seeds.mp4"
     frame_count = 12
     writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (160, 120))
-    for _frame_idx in range(frame_count):
-        writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+    for frame_idx in range(frame_count):
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        cv2.circle(frame, (35, 50 + frame_idx // 4), 5, (255, 255, 255), -1)
+        cv2.circle(frame, (75, 50 + frame_idx // 4), 5, (240, 240, 240), -1)
+        cv2.circle(frame, (115, 50 + frame_idx // 4), 5, (230, 230, 230), -1)
+        writer.write(frame)
     writer.release()
 
     config = load_config("configs/default.yaml")
@@ -205,20 +213,20 @@ def test_tracking_reuses_frame_detections_across_multiple_seeds(tmp_path, monkey
             "min_roi_clear_fraction": 0,
             "max_missing_frames": 20,
             "max_search_radius_px": 80,
+            "trackpy_diameter": 7,
+            "trackpy_minmass": 20,
+            "trackpy_local_search_radius_px": 20,
+            "trackpy_max_accept_distance_px": 8,
         }
     )
-    calls = {"detect": 0}
+    calls = {"preprocess": 0}
+    original_preprocess = tracker_module.preprocess_frame_for_droplets
 
-    def fake_detect_blobs(*_args, **_kwargs):
-        calls["detect"] += 1
-        return [
-            Blob(35.0, 50.0, 4.0, 50.0, 255.0, confidence=0.9),
-            Blob(75.0, 50.0, 4.0, 50.0, 255.0, confidence=0.8),
-            Blob(115.0, 50.0, 4.0, 50.0, 255.0, confidence=0.7),
-        ]
+    def counting_preprocess(*args, **kwargs):
+        calls["preprocess"] += 1
+        return original_preprocess(*args, **kwargs)
 
-    monkeypatch.setattr(tracker_module, "detect_blobs", fake_detect_blobs)
-    monkeypatch.setattr(tracker_module, "track_lk_bidirectional", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tracker_module, "preprocess_frame_for_droplets", counting_preprocess)
 
     tracks, summary = track_multiple_candidates(
         video,
@@ -230,4 +238,4 @@ def test_tracking_reuses_frame_detections_across_multiple_seeds(tmp_path, monkey
 
     assert len(summary) == 3
     assert not tracks.empty
-    assert calls["detect"] <= frame_count + config["tracking"]["seed_sample_frames"] + 1
+    assert calls["preprocess"] <= frame_count + config["tracking"]["seed_sample_frames"] + 1

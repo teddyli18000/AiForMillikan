@@ -132,7 +132,7 @@ def _confirm_run(video_path: Path, config_path: Path, platforms: tuple[ManualPla
     print(f"- config: {config_path}")
     print(f"- measurement_distance_m: {config['calibration']['measurement_distance_m']}")
     print(f"- plate_distance_m: {config['physics']['plate_distance_m']}")
-    print(f"- voltage_sign: {config['physics']['voltage_sign']}")
+    print("- direction: +Y downward, positive voltage pushes droplets upward")
     if platforms:
         for index, platform in enumerate(platforms, start=1):
             print(f"- P{index:03d}: frames {platform.start_frame}-{platform.end_frame}, voltage={platform.voltage_V:g} V")
@@ -158,7 +158,6 @@ def run_interactive() -> int:
         "测量距离 measurement_distance_m", float(config["calibration"]["measurement_distance_m"])
     )
     config["physics"]["plate_distance_m"] = _prompt_float_override("极板距离 plate_distance_m", float(config["physics"]["plate_distance_m"]))
-    config["physics"]["voltage_sign"] = _prompt_float_override("电压方向 voltage_sign", float(config["physics"]["voltage_sign"]))
     effective_config_path = _write_interactive_config(config_path, video_path, config)
 
     platform_count = _prompt_int("电压平台数量")
