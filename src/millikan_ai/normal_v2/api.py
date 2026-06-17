@@ -18,6 +18,27 @@ from millikan_ai.normal_v2.records import NormalQRecord, NormalSession, load_ses
 from millikan_ai.normal_v2.reporting import render_session_report
 from millikan_ai.normal_v2.tracking import Detection, NormalTrackingConfig, track_single_drop
 from millikan_ai.normal_v2.velocity import fit_terminal_velocity
+from millikan_ai.normal_v2.voltage_events import ChangePeak, merge_change_operations, normal_window_from_operations
+
+
+def suggest_window_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    video_path = Path(_value(payload, "video_path"))
+    meta = _video_meta(video_path)
+    fps = float(meta["fps"] or 30.0)
+    peaks = _detect_change_peaks(video_path, fps=fps)
+    operations = merge_change_operations(peaks, fps=fps, merge_window_s=0.8)
+    window = normal_window_from_operations(operations, frame_count=int(meta["frame_count"]), fps=fps, stable_after_s=0.2)
+    return {
+        "metadata": meta,
+        "window": {
+            "start_frame": window.start_frame,
+            "end_frame": window.end_frame,
+            "start_time_s": window.start_frame / fps,
+            "end_time_s": window.end_frame / fps,
+            "flags": window.flags,
+        },
+        "operations": [asdict(operation) for operation in operations],
+    }
 
 
 def run_single_drop_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -298,6 +319,35 @@ def _detect_horizontal_grid_lines(video_path: Path, frame_idx: int) -> list[int]
         else:
             groups[-1].append(int(y))
     return [int(round(sum(group) / len(group))) for group in groups]
+
+
+def _detect_change_peaks(video_path: Path, *, fps: float) -> list[ChangePeak]:
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"cannot open video: {video_path}")
+    stride = max(1, int(round(fps / 6.0)))
+    last: np.ndarray | None = None
+    scores: list[tuple[int, float]] = []
+    frame_idx = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if frame_idx % stride == 0:
+            height, width = frame.shape[:2]
+            roi = frame[0 : max(1, int(height * 0.25)), int(width * 0.45) : width]
+            gray = cv2.resize(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY), (96, 32))
+            if last is not None:
+                score = float(np.mean(cv2.absdiff(gray, last)) / 255.0)
+                scores.append((frame_idx, score))
+            last = gray
+        frame_idx += 1
+    cap.release()
+    if not scores:
+        return []
+    values = np.asarray([score for _frame, score in scores], dtype=float)
+    threshold = max(0.04, float(np.mean(values) + 2.5 * np.std(values)))
+    return [ChangePeak(frame_idx=frame, score=score) for frame, score in scores if score >= threshold]
 
 
 def _physical_config(config: dict[str, Any]) -> PhysicalConfig:

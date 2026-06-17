@@ -80,6 +80,12 @@ function registerIpc(): void {
   ipcMain.handle("analysis:loadRun", (_event, payload) => worker.request("analysis.loadRun", payload));
   ipcMain.handle("analysis:validate", (_event, payload) => worker.request("analysis.validate", payload));
   ipcMain.handle("downstream:run", (_event, payload) => worker.request("downstream.run", payload));
+  ipcMain.handle("normalV2:suggestWindow", (_event, payload) => worker.request("normalV2.suggestWindow", payload));
+  ipcMain.handle("normalV2:runSingleDrop", (_event, payload) => worker.request("normalV2.runSingleDrop", payload));
+  ipcMain.handle("normalV2:sessionSave", (_event, payload) => worker.request("normalV2.sessionSave", payload));
+  ipcMain.handle("normalV2:sessionLoad", (_event, payload) => worker.request("normalV2.sessionLoad", payload));
+  ipcMain.handle("normalV2:estimateElementary", (_event, payload) => worker.request("normalV2.estimateElementary", payload));
+  ipcMain.handle("normalV2:sessionReport", (_event, payload) => worker.request("normalV2.sessionReport", payload));
 
   ipcMain.handle("analysis:run", (event, payload) =>
     worker.request("analysis.run", payload, (progress) => {

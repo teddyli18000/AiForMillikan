@@ -202,5 +202,11 @@ export type DesktopApi = {
   runDownstream: (payload: unknown) => Promise<unknown>;
   exportReport: (payload: { run_dir: string; include_pdf?: boolean; mode?: "folder" | "zip" }) => Promise<unknown>;
   openPath: (targetPath: string) => Promise<unknown>;
+  suggestNormalV2Window: (payload: { video_path: string; balance_voltage_V?: number }) => Promise<unknown>;
+  runNormalV2SingleDrop: (payload: unknown) => Promise<unknown>;
+  saveNormalV2Session: (payload: { session_path?: string; records: Array<Record<string, unknown>>; inversion?: unknown }) => Promise<unknown>;
+  loadNormalV2Session: (payload: { session_path: string }) => Promise<unknown>;
+  estimateNormalV2Elementary: (payload: { records: Array<Record<string, unknown>> }) => Promise<unknown>;
+  writeNormalV2SessionReport: (payload: unknown) => Promise<unknown>;
   onAnalysisProgress: (callback: (progress: ProgressEvent) => void) => () => void;
 };

@@ -12,6 +12,12 @@ const api = {
   runDownstream: (payload: unknown) => ipcRenderer.invoke("downstream:run", payload),
   exportReport: (payload: unknown) => ipcRenderer.invoke("report:export", payload),
   openPath: (targetPath: string) => ipcRenderer.invoke("shell:openPath", targetPath),
+  suggestNormalV2Window: (payload: unknown) => ipcRenderer.invoke("normalV2:suggestWindow", payload),
+  runNormalV2SingleDrop: (payload: unknown) => ipcRenderer.invoke("normalV2:runSingleDrop", payload),
+  saveNormalV2Session: (payload: unknown) => ipcRenderer.invoke("normalV2:sessionSave", payload),
+  loadNormalV2Session: (payload: unknown) => ipcRenderer.invoke("normalV2:sessionLoad", payload),
+  estimateNormalV2Elementary: (payload: unknown) => ipcRenderer.invoke("normalV2:estimateElementary", payload),
+  writeNormalV2SessionReport: (payload: unknown) => ipcRenderer.invoke("normalV2:sessionReport", payload),
   onAnalysisProgress: (callback: (progress: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: unknown) => callback(progress);
     ipcRenderer.on("analysis:progress", listener);
