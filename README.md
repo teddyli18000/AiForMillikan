@@ -7,7 +7,7 @@ This stage implements a non-ML backend framework:
 - OpenCV video inspection and diagnostic frames
 - automatic microscope ROI and grid scale calibration
 - manual voltage platform input for trusted voltage/time ranges
-- multi-keyframe droplet detection with Kalman + local-patch bidirectional LK optical flow + detection fusion
+- multi-keyframe droplet seeding with Trackpy-based local single-drop tracking, grid-neighborhood cutoffs, segment scoring, and deduplication
 - terminal velocity fitting
 - physics-based single-drop charge inversion
 - adaptive multi-drop q inversion and explainable rule-based quality filtering
@@ -17,7 +17,7 @@ This stage implements a non-ML backend framework:
 
 ML-based trajectory filtering is intentionally left to `training_quality_filter/`.
 
-Current branch scope: the downstream physics and elementary-charge modules assume upstream has already produced accepted trajectories. The current upstream research direction is to avoid grid-line neighborhoods, first validating the longest reliable continuous segment that does not touch a grid line, then later studying whether segments on both sides of a grid line can be associated. That direction is documented here but is not implemented in this downstream branch.
+Current tracking scope: the backend uses the teammate Trackpy single-droplet local tracker as the upstream tracking base. Multiple seeds are tracked independently, a track segment is cut when the predicted droplet enters a grid-line neighborhood, and grid-crossing reconnection is intentionally not attempted.
 
 ## Setup
 
@@ -240,7 +240,7 @@ $env:PYTHONPATH='src'
 
 `raw_data/2.mp4` currently runs end-to-end with automatic ROI/grid/tracking/overlay and writes `analysis_report.md` when auto-detected platform boundaries are combined with the guide voltage values. With platform values supplied, the backend can select stable droplets and compute real physics-based `q`. Without platform values, the run is explicitly invalid for q calculation.
 
-Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection. Candidate ranking also penalizes tracks that stay too close to grid lines or tracking ROI edges, which reduces false positives from grid intersections and edge highlights. The tracker shares per-frame blob detection across active seeds and runs LK optical flow on a local patch around each tracked point to keep 1080p videos responsive on CPU.
+Tracking is constrained to the detected grid area so watermarks, manufacturer text, and border highlights are excluded from candidate droplet selection. Candidate ranking also penalizes tracks that stay too close to grid lines or tracking ROI edges, which reduces false positives from grid intersections and edge highlights. The tracker samples multiple keyframes for seeds, then processes each video frame once and passes the shared preprocessed gray frame to all active Trackpy single-drop states. Each state searches only a local window around its predicted position.
 
 For frontend review, each run writes `run_manifest.json`, `validity_report.json`, `visualization_layers.json`, `plots_data.json`, and `diagnostic_overlay.jpg`. The manifest is the desktop UI entry point; the validity report lists pass/fail checks; the layer JSON provides structured drawing data for interactive frontend overlays, `plots_data.json` provides renderer-neutral elementary-charge chart data, and the diagnostic image is a rendered preview. See `docs/frontend_backend_interface.md` for the desktop UI contract.
 
@@ -265,7 +265,7 @@ Within each voltage platform, the downstream velocity fitter uses the whole conf
 
 For a single oil drop, elementary-charge blind estimation is intentionally reported as underdetermined because it needs multiple independent `q_i` values.
 
-By default, `tracking.max_drops` is `20`. The tracker samples multiple keyframes, deduplicates trajectories, and evaluates each selected track through the real q pipeline. `drop_results.json` remains the selected/default drop result for backward compatibility.
+By default, `tracking.max_drops` is `20`. The tracker samples multiple keyframes, deduplicates trajectories, and evaluates each selected track through the real q pipeline. `drop_results.json` remains the selected/default drop result for backward compatibility. Track rows may include `segment_id`, `pred_x_px`, `pred_y_px`, `blocked_by_grid`, `missed_count`, `mass`, and `end_reason`; these fields expose the Trackpy local tracker diagnostics while preserving the existing required columns.
 
 Tracked droplets and physically valid droplets are distinct. `candidate_tracks_summary.csv` records post-physics fields such as `q_valid`, `physics_flags`, `charge_abs_C`, and `radius_m`; `run_manifest.json.counts.valid_drops` and `multi_drop_results.json.valid_drop_count` are the authoritative valid-droplet counts for reports and frontend display.
 
