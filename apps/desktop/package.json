@@ -1,0 +1,67 @@
+{
+  "name": "millikan-ai-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "description": "Portable Electron desktop frontend for Millikan AI",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -p tsconfig.electron.json && tsc -p tsconfig.json && vite build",
+    "start": "electron dist-electron/main.js",
+    "test": "vitest run",
+    "worker:build": "node scripts/build-worker.mjs",
+    "package": "npm run build && npm run worker:build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.1",
+    "framer-motion": "^12.23.26",
+    "lucide-react": "^0.561.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.1",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "^4.0.15",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "jsdom": "^27.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7",
+    "vitest": "^4.0.15"
+  },
+  "build": {
+    "appId": "cn.millikan.ai.desktop",
+    "productName": "Millikan AI",
+    "asar": true,
+    "files": [
+      "dist-renderer/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-worker",
+        "to": "worker",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "Millikan-AI-Portable-${version}.exe"
+    },
+    "directories": {
+      "output": "release"
+    }
+  }
+}

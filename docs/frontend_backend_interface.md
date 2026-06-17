@@ -4,7 +4,30 @@ This document defines the current backend contract for the future portable deskt
 
 ## CLI/API Entry Point
 
-The preferred backend entry point for the future desktop app is the Python API:
+The Electron desktop app talks to a Python worker over newline-delimited JSON.
+The worker is implemented in `millikan_ai.desktop_worker` and wraps the same
+public APIs described below. In development Electron starts
+`.venv\Scripts\python -m millikan_ai.desktop_worker`; production packages a
+PyInstaller onefile worker beside the Electron app.
+
+Supported worker operations:
+
+- `video.inspect`: inspect video metadata and optional diagnostic frame data.
+- `platform.detectBoundaries`: suggest voltage-platform frame ranges from visual display changes; voltage values still come from the user.
+- `analysis.run`: run the backend with explicit manual voltage platforms.
+- `analysis.runAuto`: run with auto-detected boundaries plus user-supplied voltage values.
+- `analysis.loadRun`: load `run_manifest.json` and frontend-facing artifacts for an existing run.
+- `analysis.validate`: validate a run directory and return checklist/report artifacts.
+- `downstream.run`: run standalone downstream physics/e analysis from accepted trajectories.
+- `report.export`: copy Markdown, CSV/JSON, overlay, plots data, and a reproducibility manifest into a user-selected package folder or zip.
+
+The renderer must not read arbitrary files directly. It should use Electron IPC
+for file dialogs, run loading, artifact reads, PDF generation, and export.
+Backend output files remain internal run artifacts for reproducibility, while
+the user-facing report is rendered in the app. The UI may offer an export action
+that saves PDF/Markdown plus selected machine-readable files to a chosen path.
+
+The underlying backend entry point remains the Python API:
 
 ```python
 from millikan_ai.api import AnalysisRequest, ManualPlatformInput, analyze_video

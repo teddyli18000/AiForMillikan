@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -424,7 +425,7 @@ def test_primary_drop_selection_prefers_valid_q_over_top_tracking_score():
 
 def test_cli_help_runs():
     result = subprocess.run(
-        [".venv/Scripts/python", "-m", "millikan_ai.cli", "--help"],
+        [sys.executable, "-m", "millikan_ai.cli", "--help"],
         cwd=Path.cwd(),
         text=True,
         capture_output=True,

@@ -75,6 +75,18 @@ For the current `raw_data\2.mp4` demo video, use the guide voltages with automat
 
 The `run` and `analyze` commands print stage progress while the backend is working.
 
+## Desktop App
+
+The Electron + React desktop frontend lives in `apps/desktop`. It connects to
+the same backend through `millikan_ai.desktop_worker`, renders reports,
+diagnostics, plots, uncertainty, validity checks, and math derivation in the UI,
+and keeps generated backend files as reproducibility artifacts. The export
+action saves PDF/Markdown plus selected CSV/JSON/overlay files to a
+user-selected destination.
+
+Development and portable packaging commands are documented in
+`docs/desktop_frontend.md`.
+
 Validate and summarize a run:
 
 ```powershell
