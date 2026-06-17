@@ -8,7 +8,7 @@ import pytest
 
 from millikan_ai.config import load_config
 from millikan_ai.normal.elementary import estimate_both_algorithms, estimate_normal_integer_fit
-from millikan_ai.normal.physics import compute_balance_fall_q, detected_points_for_fit, fit_fall_velocity
+from millikan_ai.normal.physics import FallVelocityFit, compute_balance_fall_q, detected_points_for_fit, fit_fall_velocity
 from millikan_ai.normal.tracking import (
     NormalSingleDropTrackingConfig,
     missing_reacquired_events,
@@ -152,6 +152,33 @@ def test_known_balance_fall_q_recovers_charge_with_uncertainty():
     assert "systematic_uncertainty_incomplete" in q["flags"]
 
 
+def test_invalid_fall_fit_does_not_emit_usable_q():
+    config = load_config("configs/default.yaml")
+    fit = FallVelocityFit(
+        valid=False,
+        flags=["low_y_time_fit_r2"],
+        start_frame=0,
+        end_frame=20,
+        num_points=21,
+        slope_y_px_s=12.0,
+        intercept_y_px=100.0,
+        velocity_m_s=1.2e-4,
+        sigma_velocity_m_s=2.0e-6,
+        r2=0.5,
+        rmse_px=8.0,
+        first_half_slope_y_px_s=20.0,
+        second_half_slope_y_px_s=2.0,
+    )
+
+    q = compute_balance_fall_q(fit, balance_voltage_V=100.0, config=config)
+
+    assert q["valid"] is False
+    assert q["usable_for_inversion"] is False
+    assert q["result"] == {}
+    assert "invalid_fall_velocity_fit" in q["flags"]
+    assert "low_y_time_fit_r2" in q["flags"]
+
+
 def _q_record(index: int, n: int, e_value: float = 1.602e-19, sigma: float = 0.03e-19) -> dict[str, object]:
     return {
         "record_id": f"q_{index:03d}",
@@ -195,4 +222,3 @@ def test_estimate_both_algorithms_reports_usable_count():
     assert result["usable_q_count"] == 3
     assert "normal_algorithm" in result
     assert "experimental_algorithm" in result
-

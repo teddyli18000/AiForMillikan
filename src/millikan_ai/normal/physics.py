@@ -170,6 +170,15 @@ def compute_balance_fall_q(
     config: dict[str, Any],
     record_id: str = "q_001",
 ) -> dict[str, object]:
+    if not velocity_fit.valid:
+        return {
+            "record_id": record_id,
+            "valid": False,
+            "usable_for_inversion": False,
+            "flags": ["invalid_fall_velocity_fit", *velocity_fit.flags],
+            "fit": velocity_fit.to_dict(),
+            "result": {},
+        }
     constants = {**config["physics"], **resolve_air_viscosity(config)}
     radius, charge, flags = _charge_from_velocity(velocity_fit.velocity_m_s, balance_voltage_V, constants)
     if flags or radius is None or charge is None:
@@ -242,4 +251,3 @@ def compute_balance_fall_q(
             "balance_voltage_V": float(balance_voltage_V),
         },
     }
-
