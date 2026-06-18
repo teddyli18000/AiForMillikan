@@ -1,8 +1,9 @@
 import { motion } from "framer-motion";
-import { ChevronRight } from "lucide-react";
+import { Beaker, ChevronRight, ScanSearch } from "lucide-react";
+import type { AppMode } from "../types";
 
 type SplashScreenProps = {
-  onEnter: () => void;
+  onEnter: (mode: AppMode) => void;
 };
 
 export function SplashScreen({ onEnter }: SplashScreenProps) {
@@ -48,11 +49,25 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
         transition={{ duration: 0.72, ease: [0.2, 0.8, 0.2, 1] }}
       >
         <h1>Millikan AI</h1>
-        <p>从实验视频盲反演元电荷</p>
-        <button className="hero-action" onClick={onEnter}>
-          <span>进入分析工作台</span>
-          <ChevronRight size={20} />
-        </button>
+        <p>人机协同测量油滴电荷，盲反演元电荷</p>
+        <div className="mode-picker" aria-label="选择工作模式">
+          <button className="mode-card mode-card--primary" onClick={() => onEnter("normal")}>
+            <span className="mode-card__icon">
+              <ScanSearch size={22} />
+            </span>
+            <strong>Normal</strong>
+            <small>平衡电压 + 0V 下落逐滴测量</small>
+            <ChevronRight size={18} />
+          </button>
+          <button className="mode-card" onClick={() => onEnter("experimental")}>
+            <span className="mode-card__icon">
+              <Beaker size={22} />
+            </span>
+            <strong>Experimental</strong>
+            <small>多滴多平台自动分析实验路线</small>
+            <ChevronRight size={18} />
+          </button>
+        </div>
         <div className="shimmer-line" aria-hidden="true" />
       </motion.div>
     </section>

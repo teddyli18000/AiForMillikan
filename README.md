@@ -1,8 +1,36 @@
 # AiForMillikan
 
-Python backend and CLI for Millikan oil drop experiment video analysis.
+Python backend, Electron desktop frontend, and CLI for Millikan oil drop
+experiment video analysis.
 
-This stage implements a non-ML backend framework:
+## Product Modes
+
+The recommended desktop workflow is `Normal`.
+
+`Normal` is a human-in-the-loop balance-voltage + `0 V` falling measurement
+mode for the physics-themed experiment. The app assists with video import,
+metadata inspection, `0 V` interval suggestions, grid detection, local
+single-drop Trackpy tracking, grid-crossing review, q calculation, session
+records, and blind elementary-charge inversion after at least three kept valid
+q records. Normal may accumulate records across multiple videos.
+
+`Experimental` is the existing automatic multi-drop / multi-platform route. It
+remains useful for experiments and diagnostics, but it is not the main product
+path and should be treated as a half-finished workflow that needs human review.
+
+The AI contribution should be described as intelligent assistance plus blind
+inversion with visible evidence, not as an unreviewed fully automatic answer.
+
+For Normal real-video acceptance, use:
+
+```text
+C:\Users\Teddy\Desktop\追踪\raw_videos\test.mp4
+```
+
+This sample is a short 1920 x 1080, 30 fps video suitable for checking import,
+time-window editing, droplet selection, local tracking, and review UI behavior.
+
+The current Experimental/current-backend stage implements a non-ML backend framework:
 
 - OpenCV video inspection and diagnostic frames
 - automatic microscope ROI and grid scale calibration

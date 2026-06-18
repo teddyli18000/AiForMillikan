@@ -21,11 +21,192 @@ Supported worker operations:
 - `downstream.run`: run standalone downstream physics/e analysis from accepted trajectories.
 - `report.export`: copy Markdown, CSV/JSON, overlay, plots data, and a reproducibility manifest into a user-selected package folder or zip.
 
+Normal-mode operations use a separate `normal.*` namespace and must not call the
+Experimental `analysis.*` flow as a shortcut. Current Normal operations are:
+
+- `normal.initialize`: create or load a Normal session and return saved records.
+- `normal.prepareVideo`: inspect a video, return metadata, create a playable
+  file URL, suggest `0V_start_s` and `0V_end_s`, and return grid diagnostics.
+- `normal.saveMeasurement`: validate per-measurement balance voltage and
+  optional advanced physical-parameter overrides, run the Normal-only local
+  Trackpy single-drop tracker for one user-selected droplet, fit the `0 V`
+  falling velocity, compute `q_i ± sigma_q_i`, and persist the reviewed q
+  record with its artifacts.
+- `normal.updateRecordSelection`: mark a valid q record as kept or excluded.
+- `normal.runInversion`: run the Normal-only weighted integer residual grid
+  search over kept q records.
+- `normal.exportSession`: export the Normal session report, q table, inversion
+  JSON, and review artifacts.
+
+Experimental/current-backend operations remain available for the Experimental
+mode only. The renderer must not mix Normal session records into Experimental
+run manifests or feed Experimental candidate tracks into Normal inversion.
+
 The renderer must not read arbitrary files directly. It should use Electron IPC
 for file dialogs, run loading, artifact reads, PDF generation, and export.
 Backend output files remain internal run artifacts for reproducibility, while
 the user-facing report is rendered in the app. The UI may offer an export action
 that saves PDF/Markdown plus selected machine-readable files to a chosen path.
+
+## Normal Mode Contract
+
+Normal is the main recommended workflow for the physics-themed experiment. It is
+not a fully automatic video-to-e pipeline. The app supplies AI assistance and
+blind inversion, while the user confirms the physical measurements that are
+ambiguous in real videos.
+
+### Normal Session
+
+A Normal session may contain q records from multiple videos. This is intentional
+because the experiment needs several independent droplets, and a single short
+video may not contain enough usable measurements.
+
+Session-level fields:
+
+```json
+{
+  "schema_version": 1,
+  "session_id": "normal_...",
+  "created_at": "...",
+  "updated_at": "...",
+  "records": [],
+  "counts": {
+    "total": 0,
+    "valid": 0,
+    "kept_valid": 0
+  },
+  "eligible_for_inversion": false,
+  "inversion": null
+}
+```
+
+`eligible_for_inversion` is true only when at least three kept records have
+finite positive `q_C` and finite positive `sigma_q_C`.
+
+### Normal Video Preparation
+
+`normal.prepareVideo` returns:
+
+- video metadata: path, fps, frame count, width, height, duration in seconds
+- suggested `0V_start_s` and `0V_end_s`
+- equivalent frame indices for reproducible artifacts
+- detected horizontal grid lines
+- effective measurement region from the second line to the penultimate line
+- `scale_y_m_per_px`
+- warnings/flags when voltage-operation or grid detection confidence is low
+
+All user-facing time controls in Normal use seconds. The UI should offer coarse
+`±1 s` and fine `±0.1 s` nudges for both `0V_start_s` and `0V_end_s`. The UI may
+display frame numbers as secondary provenance, not as the primary editing unit.
+
+### Normal Measurement Record
+
+Each saved Normal record represents one user-reviewed droplet measurement:
+
+```json
+{
+  "record_id": "rec_...",
+  "video_path": "...",
+  "video_sha256_16": "...",
+  "balance_voltage_V": 240.0,
+  "time_window": {
+    "zero_v_start_s": 1.8,
+    "zero_v_end_s": 4.7,
+    "zero_v_start_frame": 54,
+    "zero_v_end_frame": 141
+  },
+  "target": {
+    "target_time_s": 1.5,
+    "source_center": {"x": 430.0, "y": 220.0},
+    "source_video_box": {"x": 424.0, "y": 214.0, "width": 12.0, "height": 12.0}
+  },
+  "parameter_overrides": {},
+  "grid": {},
+  "tracking": {},
+  "crossing_events": [],
+  "q": {
+    "valid": true,
+    "q_C": 6.4e-19,
+    "sigma_q_C": 4.0e-20,
+    "radius_m": 8.0e-7,
+    "flags": []
+  },
+  "status": "valid",
+  "kept": true
+}
+```
+
+The record must keep enough provenance to reproduce the q calculation: the
+video identity, selected droplet position, edited `0 V` window, grid scale,
+physical constants or overrides, track rows, velocity fit, and q uncertainty.
+
+### Normal Tracking And Crossing Review
+
+Normal tracks one selected droplet at a time. The algorithm must be copied or
+reimplemented inside this repository from the teammate local Trackpy
+single-drop tracker at `C:\Users\Teddy\Desktop\追踪`; do not import that external
+project.
+
+The tracker should output per-frame rows with at least:
+
+```csv
+frame_idx,time_s,x_px,y_px,pred_x_px,pred_y_px,detected,missed_count,blocked_by_grid,mass,state,reason
+```
+
+When the predicted or measured droplet enters a grid-line neighborhood, or when
+the track is missing around a grid line, the backend should create a clickable
+`crossing_event`:
+
+```json
+{
+  "id": "crossing_001",
+  "start_time_s": 2.1,
+  "end_time_s": 2.4,
+  "review_start_time_s": 1.1,
+  "review_end_time_s": 3.4,
+  "center_x_px": 430.0,
+  "center_y_px": 512.0,
+  "kind": "grid_crossing_or_reacquire"
+}
+```
+
+The UI should play a local magnified clip of roughly one second before and
+after the crossing. If the video is too short or the crossing is near the
+beginning/end, clip the review window to valid video bounds instead of failing.
+
+### Normal Physical Parameters
+
+Balance voltage is required for each measurement. The following parameters
+default from config and may be overridden in a collapsed advanced panel for the
+current measurement only:
+
+- plate distance
+- grid measurement distance
+- air viscosity or temperature-derived viscosity settings
+- pressure
+- oil density
+- Cunningham correction constant
+- uncertainty settings for the current q estimate
+
+Normal records must store the effective parameters actually used. Parameter
+overrides are not global config changes unless a future explicit "save as
+default" action is added.
+
+### Normal Inversion And Visualization
+
+After at least three kept valid q records exist, `normal.runInversion` runs the
+Normal-only weighted integer residual grid search. It uses each record's
+`q_C` and `sigma_q_C`, assigns integer multiples, reports weighted residuals,
+and exposes chart data showing:
+
+- observed q values with uncertainty
+- nearest `n * e_hat` levels
+- residuals normalized by `sigma_q_C`
+- a quantized-model view against a continuous-model view
+
+Normal inversion is a teaching and evidence tool. It should report whether the
+current dataset supports a stable quantized interpretation, but it must not
+claim proof from a small or unstable sample.
 
 The underlying backend entry point remains the Python API:
 

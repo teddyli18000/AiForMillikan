@@ -175,6 +175,103 @@ export type AnalysisResponse = {
   artifacts?: RunArtifacts;
 };
 
+export type AppMode = "normal" | "experimental";
+
+export type NormalBoundary = {
+  zero_v_start_s: number;
+  zero_v_end_s: number;
+  source?: string;
+};
+
+export type NormalGrid = {
+  line_y_px?: number[];
+  effective_top_px?: number | null;
+  effective_bottom_px?: number | null;
+  scale_y_m_per_px?: number | null;
+  measurement_distance_m?: number | null;
+  flags?: string[];
+  [key: string]: unknown;
+};
+
+export type NormalCrossingEvent = {
+  event_id: string;
+  grid_line_y_px?: number;
+  frame_idx?: number;
+  time_s?: number;
+  review_start_time_s?: number;
+  review_end_time_s?: number;
+  source_video_box?: { x: number; y: number; width: number; height: number };
+  [key: string]: unknown;
+};
+
+export type NormalRecord = {
+  record_id: string;
+  video_path?: string;
+  kept: boolean;
+  valid: boolean;
+  q_C?: number | null;
+  sigma_q_C?: number | null;
+  radius_m?: number | null;
+  fall_velocity_m_s?: number | null;
+  balance_voltage_V?: number | null;
+  flags?: string[];
+  artifacts?: Record<string, string>;
+  crossings?: NormalCrossingEvent[];
+  [key: string]: unknown;
+};
+
+export type NormalSession = {
+  session_root: string;
+  records: NormalRecord[];
+  counts?: {
+    total?: number;
+    valid?: number;
+    kept_valid?: number;
+    selected_valid?: number;
+  };
+  inversion?: NormalInversionResult | null;
+  [key: string]: unknown;
+};
+
+export type NormalPrepareVideoResponse = {
+  session_root: string;
+  video_path: string;
+  video_url?: string;
+  metadata: VideoMetadata;
+  boundary: NormalBoundary & {
+    confidence?: number;
+    diagnostics?: Record<string, unknown>;
+  };
+  grid: NormalGrid;
+  session: NormalSession;
+};
+
+export type NormalMeasurementResponse = {
+  session_root: string;
+  record: NormalRecord;
+  session: NormalSession;
+};
+
+export type NormalInversionResult = {
+  status?: string;
+  e_hat_C?: number | null;
+  sigma_e_C?: number | null;
+  valid_q_count?: number;
+  quantized?: Record<string, unknown>;
+  continuous?: Record<string, unknown>;
+  comparison?: Record<string, unknown>;
+  assignments?: Array<Record<string, unknown>>;
+  plots_data?: Record<string, unknown>;
+  flags?: string[];
+  [key: string]: unknown;
+};
+
+export type NormalInversionResponse = {
+  session_root: string;
+  inversion: NormalInversionResult;
+  session: NormalSession;
+};
+
 export type DesktopApi = {
   openVideoDialog: () => Promise<string | null>;
   openRunDialog: () => Promise<string | null>;
@@ -201,6 +298,17 @@ export type DesktopApi = {
   validateRun: (payload: { run_dir: string; config_path?: string }) => Promise<{ valid: boolean; errors: string[] }>;
   runDownstream: (payload: unknown) => Promise<unknown>;
   exportReport: (payload: { run_dir: string; include_pdf?: boolean; mode?: "folder" | "zip" }) => Promise<unknown>;
+  normalInitialize: (payload?: { session_root?: string; run_root?: string; config_overrides?: Record<string, unknown> }) => Promise<NormalSession>;
+  normalPrepareVideo: (payload: {
+    video_path: string;
+    session_root?: string;
+    run_root?: string;
+    config_overrides?: Record<string, unknown>;
+  }) => Promise<NormalPrepareVideoResponse>;
+  normalSaveMeasurement: (payload: Record<string, unknown>) => Promise<NormalMeasurementResponse>;
+  normalSelectRecord: (payload: { session_root?: string; record_id: string; kept: boolean }) => Promise<NormalSession>;
+  normalRunInversion: (payload?: { session_root?: string; config_overrides?: Record<string, unknown> }) => Promise<NormalInversionResponse>;
+  normalExportSession: (payload?: { session_root?: string }) => Promise<unknown>;
   openPath: (targetPath: string) => Promise<unknown>;
   onAnalysisProgress: (callback: (progress: ProgressEvent) => void) => () => void;
 };

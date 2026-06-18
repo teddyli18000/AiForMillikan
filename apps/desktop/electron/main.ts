@@ -80,6 +80,11 @@ function registerIpc(): void {
   ipcMain.handle("analysis:loadRun", (_event, payload) => worker.request("analysis.loadRun", payload));
   ipcMain.handle("analysis:validate", (_event, payload) => worker.request("analysis.validate", payload));
   ipcMain.handle("downstream:run", (_event, payload) => worker.request("downstream.run", payload));
+  ipcMain.handle("normal:initialize", (_event, payload) => worker.request("normal.initialize", payload || {}));
+  ipcMain.handle("normal:prepareVideo", (_event, payload) => worker.request("normal.prepareVideo", payload));
+  ipcMain.handle("normal:saveMeasurement", (_event, payload) => worker.request("normal.saveMeasurement", payload));
+  ipcMain.handle("normal:updateRecordSelection", (_event, payload) => worker.request("normal.updateRecordSelection", payload));
+  ipcMain.handle("normal:runInversion", (_event, payload) => worker.request("normal.runInversion", payload || {}));
 
   ipcMain.handle("analysis:run", (event, payload) =>
     worker.request("analysis.run", payload, (progress) => {
@@ -94,6 +99,7 @@ function registerIpc(): void {
   );
 
   ipcMain.handle("report:export", async (_event, payload) => exportReport(payload));
+  ipcMain.handle("normal:exportSession", async (_event, payload) => exportNormalSession(payload || {}));
   ipcMain.handle("shell:openPath", (_event, targetPath: string) => shell.openPath(targetPath));
 }
 
@@ -127,5 +133,22 @@ async function exportReport(payload: {
     await fs.writeFile(path.join(destinationDir, "Millikan_AI_Report.pdf"), pdf);
   }
 
+  return { canceled: false, destination: destinationDir, package: workerResult };
+}
+
+async function exportNormalSession(payload: { session_root?: string }): Promise<unknown> {
+  const options = {
+    title: "选择 Normal session 导出位置",
+    properties: ["openDirectory", "createDirectory"]
+  } as Electron.OpenDialogOptions;
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+  if (result.canceled || !result.filePaths[0]) {
+    return { canceled: true };
+  }
+  const destinationDir = result.filePaths[0];
+  const workerResult = await worker.request("normal.exportSession", {
+    session_root: payload.session_root,
+    export_root: destinationDir
+  });
   return { canceled: false, destination: destinationDir, package: workerResult };
 }

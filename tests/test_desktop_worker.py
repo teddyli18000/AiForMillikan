@@ -31,6 +31,17 @@ def _make_synthetic_video(path: Path) -> None:
     writer.release()
 
 
+def _make_normal_synthetic_video(path: Path) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+    for idx in range(120):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        for y in [30, 70, 110, 150, 190]:
+            cv2.line(frame, (24, y), (296, y), (190, 190, 190), 1)
+        cv2.circle(frame, (92, int(82 + idx * 0.24)), 5, (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+
 def _send_worker(message: dict) -> list[dict]:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(Path.cwd() / "src") + os.pathsep + env.get("PYTHONPATH", "")
@@ -94,3 +105,67 @@ def test_desktop_worker_runs_analysis_and_loads_artifacts(tmp_path: Path):
 
     loaded = _send_worker({"id": "load", "op": "analysis.loadRun", "payload": {"runDir": str(run_dir)}})[-1]
     assert loaded["payload"]["artifacts"]["run_dir"] == str(run_dir)
+
+
+def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path):
+    video = tmp_path / "normal_synthetic.mp4"
+    _make_normal_synthetic_video(video)
+    session_root = tmp_path / "normal_session"
+    overrides = {
+        "session": {"session_root": str(session_root), "run_root": str(tmp_path / "normal_runs")},
+        "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 3},
+        "tracking": {"minmass": 20, "memory_frames": 4, "grid_occlusion_radius_px": 1},
+        "fit": {"min_points": 8, "min_duration_s": 0.4, "min_displacement_px": 2.0, "min_r2": 0.2},
+    }
+
+    prepared = _send_worker(
+        {
+            "id": "prepare",
+            "op": "normal.prepareVideo",
+            "payload": {"video_path": str(video), "config_overrides": overrides},
+        }
+    )[-1]
+    assert prepared["type"] == "result"
+    payload = prepared["payload"]
+    assert payload["metadata"]["readable"] is True
+    assert payload["grid"]["valid"] is True
+    assert payload["session"]["counts"]["total"] == 0
+
+    for index in range(3):
+        measured = _send_worker(
+            {
+                "id": f"measure-{index}",
+                "op": "normal.saveMeasurement",
+                "payload": {
+                    "session_root": str(session_root),
+                    "video_path": str(video),
+                    "config_overrides": overrides,
+                    "boundary": {"zero_v_start_s": 0.1, "zero_v_end_s": 2.8, "source": "test_manual"},
+                    "grid": payload["grid"],
+                    "balance_voltage_V": 239.0,
+                    "target": {
+                        "target_frame": 3,
+                        "target_time_s": 0.1,
+                        "source_center": {"x": 92.0, "y": 83.0},
+                        "source_video_box": {"x": 78.0, "y": 69.0, "width": 28.0, "height": 28.0},
+                    },
+                    "parameter_overrides": overrides,
+                },
+            }
+        )[-1]
+        assert measured["type"] == "result"
+        record = measured["payload"]["record"]
+        assert record["valid"] is True
+        assert record["q_C"] > 0
+        assert record["sigma_q_C"] > 0
+
+    inverted = _send_worker(
+        {
+            "id": "invert",
+            "op": "normal.runInversion",
+            "payload": {"session_root": str(session_root), "config_overrides": overrides},
+        }
+    )[-1]
+    assert inverted["type"] == "result"
+    assert inverted["payload"]["session"]["eligible_for_inversion"] is True
+    assert inverted["payload"]["inversion"]["valid_q_count"] == 3

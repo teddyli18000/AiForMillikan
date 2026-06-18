@@ -24,6 +24,14 @@ from millikan_ai.downstream import run_downstream_analysis
 from millikan_ai.pipeline import validate_run
 from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 from millikan_ai.video.reader import inspect_video
+from millikan_ai.normal.session import (
+    export_session as normal_export_session,
+    initialize_session as normal_initialize_session,
+    prepare_video as normal_prepare_video,
+    run_inversion as normal_run_inversion,
+    save_measurement as normal_save_measurement,
+    update_record_selection as normal_update_record_selection,
+)
 
 
 Json = dict[str, Any]
@@ -170,8 +178,68 @@ def _op_video_inspect(payload: Json, _request_id: str) -> Json:
     return {"metadata": meta.to_dict()}
 
 
+def _resolve_default_config() -> str:
+    candidates = [
+        Path.cwd() / "configs" / "default.yaml",
+        Path(sys.executable).resolve().parent / "configs" / "default.yaml",
+        Path(sys.executable).resolve().parent.parent / "configs" / "default.yaml",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return "configs/default.yaml"
+
+
+def _normal_config_overrides(payload: Json) -> dict[str, Any] | None:
+    value = _value(payload, "config_overrides", None)
+    return value if isinstance(value, dict) else None
+
+
+def _op_normal_initialize(payload: Json, _request_id: str) -> Json:
+    return normal_initialize_session(
+        session_root=_value(payload, "session_root", None),
+        run_root=_value(payload, "run_root", None),
+        config_overrides=_normal_config_overrides(payload),
+    )
+
+
+def _op_normal_prepare_video(payload: Json, _request_id: str) -> Json:
+    return normal_prepare_video(
+        video_path=str(_value(payload, "video_path")),
+        session_root=_value(payload, "session_root", None),
+        run_root=_value(payload, "run_root", None),
+        config_overrides=_normal_config_overrides(payload),
+    )
+
+
+def _op_normal_save_measurement(payload: Json, _request_id: str) -> Json:
+    return normal_save_measurement(payload, config_overrides=_normal_config_overrides(payload))
+
+
+def _op_normal_select_record(payload: Json, _request_id: str) -> Json:
+    return normal_update_record_selection(
+        session_root=_value(payload, "session_root", None),
+        record_id=str(_value(payload, "record_id")),
+        kept=bool(_value(payload, "kept", _value(payload, "selected", True))),
+    )["session"]
+
+
+def _op_normal_run_inversion(payload: Json, _request_id: str) -> Json:
+    return normal_run_inversion(
+        session_root=_value(payload, "session_root", None),
+        config_overrides=_normal_config_overrides(payload),
+    )
+
+
+def _op_normal_export(payload: Json, _request_id: str) -> Json:
+    return normal_export_session(
+        session_root=_value(payload, "session_root", None),
+        export_root=str(_value(payload, "export_root")),
+    )
+
+
 def _op_platform_detect_boundaries(payload: Json, _request_id: str) -> Json:
-    config_path = _value(payload, "config_path", None) or "configs/default.yaml"
+    config_path = _value(payload, "config_path", None) or _resolve_default_config()
     config = load_config(config_path)
     suggestions, samples, diagnostics = detect_voltage_platform_changes(
         _value(payload, "video_path"),
@@ -189,7 +257,7 @@ def _op_analysis_run(payload: Json, request_id: str) -> Json:
     result = analyze_video(
         AnalysisRequest(
             video_path=_value(payload, "video_path"),
-            config_path=_value(payload, "config_path", None) or "configs/default.yaml",
+            config_path=_value(payload, "config_path", None) or _resolve_default_config(),
             run_dir=_value(payload, "run_dir", None),
             manual_platforms=_manual_platforms(_value(payload, "manual_platforms", None)),
             progress_callback=_progress_emitter(request_id),
@@ -207,7 +275,7 @@ def _op_analysis_run(payload: Json, request_id: str) -> Json:
 def _op_analysis_run_auto(payload: Json, request_id: str) -> Json:
     config_path = prepare_auto_platform_config(
         _value(payload, "video_path"),
-        _value(payload, "config_path", None) or "configs/default.yaml",
+        _value(payload, "config_path", None) or _resolve_default_config(),
         int(_value(payload, "expected_platform_count")),
         _value(payload, "platform_values", []) or [],
     )
@@ -233,7 +301,7 @@ def _op_analysis_load_run(payload: Json, _request_id: str) -> Json:
 
 
 def _op_analysis_validate(payload: Json, _request_id: str) -> Json:
-    errors = validate_run(_value(payload, "run_dir"), _value(payload, "config_path", None) or "configs/default.yaml")
+    errors = validate_run(_value(payload, "run_dir"), _value(payload, "config_path", None) or _resolve_default_config())
     return {"valid": not errors, "errors": errors}
 
 
@@ -242,7 +310,7 @@ def _frame_from_records(records: list[Json]) -> pd.DataFrame:
 
 
 def _op_downstream_run(payload: Json, _request_id: str) -> Json:
-    config = load_config(_value(payload, "config_path", None) or "configs/default.yaml")
+    config = load_config(_value(payload, "config_path", None) or _resolve_default_config())
     config_overrides = _value(payload, "config_overrides", None)
     if isinstance(config_overrides, dict):
         _merge_dict(config, config_overrides)
@@ -353,6 +421,12 @@ def _fallback_name(key: str) -> str:
 OPS: dict[str, Callable[[Json, str], Json]] = {
     "video.inspect": _op_video_inspect,
     "platform.detectBoundaries": _op_platform_detect_boundaries,
+    "normal.initialize": _op_normal_initialize,
+    "normal.prepareVideo": _op_normal_prepare_video,
+    "normal.saveMeasurement": _op_normal_save_measurement,
+    "normal.updateRecordSelection": _op_normal_select_record,
+    "normal.runInversion": _op_normal_run_inversion,
+    "normal.exportSession": _op_normal_export,
     "analysis.run": _op_analysis_run,
     "analysis.runAuto": _op_analysis_run_auto,
     "analysis.loadRun": _op_analysis_load_run,

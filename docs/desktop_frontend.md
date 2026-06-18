@@ -7,6 +7,23 @@ checks, elementary-charge inversion, uncertainty, charts, tables, and math
 derivation. Backend files are still written under `runs/`, but reports are
 displayed natively and exported only when the user chooses a destination.
 
+## Product Modes
+
+The desktop app has two intentionally separated modes.
+
+- `Normal` is the main recommended workflow for the physics-themed experiment.
+  It is a human-in-the-loop balance-voltage + `0 V` falling measurement route:
+  users import or drag in a video, confirm the automatically suggested `0 V`
+  start/end times in seconds, enter the balance voltage, select one droplet,
+  review tracking and grid-crossing events, save q records, and run blind
+  elementary-charge inversion after at least three kept records.
+- `Experimental` is the existing automatic multi-drop / multi-platform route.
+  It remains available as an experimental half-finished workflow and should not
+  share mutable state or backend business logic with Normal.
+
+The startup page may reuse the visual idea of visible initialization progress
+and mode selection. The button text must use `Normal` and `Experimental`.
+
 ## Development
 
 Install Node dependencies locally inside the app folder:
@@ -82,3 +99,21 @@ The UI must keep voltage OCR disabled on mainline. Automatic platform detection
 only suggests frame boundaries; voltage values are user-supplied. The final
 scientific success badge must use `fundamental_spacing_identified`, not the
 legacy bounded-fit `valid` field.
+
+## Normal Development Notes
+
+Normal-specific worker operations should use a `normal.*` prefix and talk to a
+Normal backend module rather than the Experimental `analysis.*` flow. The
+renderer should expose only seconds for user time editing, with coarse `±1 s`
+and fine `±0.1 s` controls. Frame indices may still be stored in artifacts for
+reproducibility.
+
+Normal drag-and-drop is required, not a cosmetic target. Dropping a local video
+must populate the real file path, inspect fps/frame count/resolution/duration,
+and show the video in the preview area where later droplet selection happens.
+
+Physical constants default from config. Balance voltage is required for each
+measurement; plate distance, measurement distance, viscosity/temperature,
+pressure, oil density, and Cunningham correction parameters belong in a
+collapsed advanced panel. Advanced overrides apply only to the current Normal
+measurement record unless the user explicitly saves them elsewhere.

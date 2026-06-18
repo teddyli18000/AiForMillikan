@@ -2,20 +2,35 @@
 
 ## Project Context
 
-This project analyzes Millikan oil drop experiment videos. The current backend is a Python package with a CLI MVP that should remain suitable for later PySide6/Qt desktop integration.
+This project analyzes Millikan oil drop experiment videos. The current desktop direction is an Electron + React frontend talking to a project-local Python worker. The product direction is split into two explicit modes:
+
+- `Normal`: the mainline workflow. It is a human-in-the-loop balance-voltage + `0 V` falling measurement mode. The app assists with video inspection, `0 V` interval suggestions, grid detection, single-drop local tracking, crossing review, q calculation, session records, and blind elementary-charge inversion.
+- `Experimental`: the existing automatic multi-drop / multi-platform backend and UI path. It is kept as an experimental half-finished route and must not drive Normal design decisions.
+
+For the physics-themed experiment, the AI value proposition is intelligent assistance and blind inversion with inspectable evidence, not an unreviewed fully automatic answer.
 
 ## Module Boundaries
 
 - `src/millikan_ai/video/`: OpenCV video metadata, frame sampling, and diagnostic frames.
-- `src/millikan_ai/api.py`: public backend API for CLI and future PySide6/Qt frontend integration.
+- `src/millikan_ai/api.py`: public backend API for CLI and the existing Experimental/current backend integration.
 - `src/millikan_ai/calibration/`: screen/ROI/grid calibration and physical scale estimation.
 - `src/millikan_ai/tracking/`: Trackpy-based local single-drop tracking, static/grid-calibration mask handling, adaptive multi-drop seed scheduling, segment cutoffs, deduplication, and overlays. Older Kalman/LK fusion helpers may remain as tested utilities but are not the main tracking backend.
 - `src/millikan_ai/quality/`: deterministic runtime quality adapter; training remains under `training_quality_filter/`.
 - `src/millikan_ai/segments/`: voltage platform segmentation and terminal velocity fitting.
 - `src/millikan_ai/physics/`: physics-based single-drop charge inversion.
 - `src/millikan_ai/elementary/`: non-ML elementary charge estimation from computed drop results.
+- `src/millikan_ai/normal/`: future Normal-mode backend. This module owns the balance-voltage + `0 V` falling workflow, copied/reimplemented single-drop local tracking, Normal-only q records, Normal session persistence, crossing-review artifacts, and Normal-only weighted integer residual inversion.
 - `src/millikan_ai/downstream.py`: standalone scientific downstream API for already accepted trajectories, voltage platforms, calibration scale, and physical config. It must not require a video path, tracker, candidate generation, or overlays.
 - `training_quality_filter/`: future ML/unsupervised trajectory quality filtering subsystem. Do not implement ML filtering in the main backend.
+
+## Normal / Experimental Separation
+
+- Normal and Experimental must stay separated in UI state, worker operations, backend modules, session/output contracts, and tests.
+- Normal must not import Experimental business logic from `millikan_ai.api`, `pipeline`, `tracking`, `segments`, `physics`, `elementary`, or `downstream` when that logic encodes the multi-drop / multi-platform route. If Normal needs similar behavior, reimplement or copy the minimum algorithm into `millikan_ai.normal` with Normal names and Normal tests.
+- Shared low-level, side-effect-free utilities may be used only when they are not Experimental business workflow code, such as basic video metadata reading, JSON helpers, or simple physical constants. When in doubt, duplicate the small code path inside `millikan_ai.normal`.
+- Worker operation names must make the separation visible. Use `normal.*` for Normal and keep existing `analysis.*`, `platform.*`, and `downstream.*` operations for Experimental/current backend behavior.
+- Frontend routes/components must make the separation visible. The startup screen can choose `Normal` or `Experimental`; after selection, the workflows should not share mutable state or silently hand off results to each other.
+- v3 Normal branches are failed worktrees. They may be consulted only for visual inspiration and failure evidence, not used as an implementation blueprint.
 
 ## Raw Data
 
@@ -37,6 +52,15 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 ## Current Implementation Rules
 
 - All thresholds and physical constants should come from `configs/default.yaml`.
+- Before implementing a Normal/Experimental contract change, update `AGENTS.md`, `docs/frontend_backend_interface.md`, and the relevant design docs first. Code should then implement the documented contract rather than inventing a new one mid-edit.
+- Normal UI uses seconds for all user-facing time controls. Frame indices may be stored internally and in artifacts, but users adjust `0V_start_s` and `0V_end_s` with coarse `±1 s` and fine `±0.1 s` controls.
+- Normal video import must support both file dialog selection and drag-and-drop. After import, the UI must display fps, frame count, resolution, and duration.
+- Normal measures one user-selected droplet at a time. It must copy/reimplement the teammate local Trackpy single-drop algorithm from `C:\Users\Teddy\Desktop\追踪`; do not directly import that external project.
+- Normal automatically detects horizontal grid lines and treats the region from the second line to the penultimate line as the effective measurement region.
+- Normal crossing review must create clickable crossing events when tracking passes through or is interrupted near grid lines. The UI should show a local magnified clip of roughly one second before and after the event, clipped to available video bounds.
+- Normal sessions may accumulate q records across multiple videos. At least three user-kept valid q records are required before Normal blind inversion.
+- In Normal, balance voltage is required. Other physical parameters should default from config and be editable in a collapsed advanced panel; overrides apply only to the current measurement record unless the user explicitly changes saved defaults.
+- Normal must use its own weighted integer residual grid-search inversion over q records with uncertainties. Do not call the Experimental elementary estimator as a shortcut.
 - Current `develop`/`main` does not run voltage OCR. It may auto-detect voltage-platform boundaries from visual display changes, but voltage values remain user/API supplied. OCR experiment code is preserved on `feature/ocr-current-archive`; do not re-enable OCR on mainline without an explicit new plan.
 - Auto platform detection uses the user-provided expected platform count as a validation constraint. Rejected suggestions, short platforms, or count mismatches must fall back to manual boundary input rather than silently entering q calculation.
 - If ROI detection or tracking confidence is low, write explicit flags and allow manual/config-driven correction.

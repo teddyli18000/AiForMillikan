@@ -11,6 +11,12 @@ const api = {
   validateRun: (payload: unknown) => ipcRenderer.invoke("analysis:validate", payload),
   runDownstream: (payload: unknown) => ipcRenderer.invoke("downstream:run", payload),
   exportReport: (payload: unknown) => ipcRenderer.invoke("report:export", payload),
+  normalInitialize: (payload: unknown) => ipcRenderer.invoke("normal:initialize", payload),
+  normalPrepareVideo: (payload: unknown) => ipcRenderer.invoke("normal:prepareVideo", payload),
+  normalSaveMeasurement: (payload: unknown) => ipcRenderer.invoke("normal:saveMeasurement", payload),
+  normalSelectRecord: (payload: unknown) => ipcRenderer.invoke("normal:updateRecordSelection", payload),
+  normalRunInversion: (payload: unknown) => ipcRenderer.invoke("normal:runInversion", payload),
+  normalExportSession: (payload: unknown) => ipcRenderer.invoke("normal:exportSession", payload),
   openPath: (targetPath: string) => ipcRenderer.invoke("shell:openPath", targetPath),
   onAnalysisProgress: (callback: (progress: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: unknown) => callback(progress);

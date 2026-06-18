@@ -1199,6 +1199,325 @@ td {
   font-size: 13px;
 }
 
+.mode-picker {
+  width: min(760px, 100%);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: -34px auto 0;
+}
+
+.mode-card {
+  min-height: 118px;
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 18px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+}
+
+.mode-card--primary {
+  border-color: rgba(22, 119, 255, 0.34);
+  background: rgba(233, 244, 255, 0.86);
+}
+
+.mode-card__icon {
+  grid-row: 1 / 3;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--accent);
+  background: #ffffff;
+  border: 1px solid var(--line);
+}
+
+.mode-card strong {
+  font-size: 18px;
+}
+
+.mode-card small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.normal-workspace {
+  color: var(--text);
+}
+
+.normal-topbar {
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(18px);
+}
+
+.normal-topbar__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.normal-grid {
+  display: grid;
+  grid-template-columns: minmax(520px, 1.4fr) minmax(340px, 0.8fr);
+  grid-template-areas:
+    "import controls"
+    "records inversion";
+  gap: 16px;
+}
+
+.panel {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(18px);
+}
+
+.normal-import {
+  grid-area: import;
+  padding: 18px;
+}
+
+.normal-controls {
+  grid-area: controls;
+  padding: 18px;
+}
+
+.normal-records {
+  grid-area: records;
+  padding: 18px;
+}
+
+.normal-inversion {
+  grid-area: inversion;
+  padding: 18px;
+}
+
+.section-heading {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 14px;
+}
+
+.section-heading span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.section-heading strong {
+  font-size: 18px;
+}
+
+.normal-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.normal-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.normal-meta span,
+.grid-summary span,
+.inversion-summary span,
+.record-detail span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.normal-meta span {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.normal-video-wrap {
+  position: relative;
+  min-height: 360px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #101823;
+}
+
+.normal-video-wrap video {
+  width: 100%;
+  max-height: 520px;
+  display: block;
+  object-fit: contain;
+  cursor: crosshair;
+}
+
+.normal-video-placeholder,
+.normal-drop-hint {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.target-readout {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: rgba(8, 16, 28, 0.74);
+  backdrop-filter: blur(10px);
+  font-size: 12px;
+}
+
+.boundary-editor,
+.grid-summary,
+.record-detail,
+.inversion-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.boundary-row,
+.normal-field {
+  display: grid;
+  gap: 7px;
+}
+
+.boundary-row label,
+.normal-field span,
+.advanced-grid span,
+.grid-summary strong,
+.crossing-list strong {
+  color: #344154;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.stepper {
+  display: grid;
+  grid-template-columns: auto auto minmax(76px, 1fr) auto auto;
+  gap: 6px;
+}
+
+.stepper button,
+.crossing-list button,
+.record-row {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #263241;
+  background: rgba(255, 255, 255, 0.74);
+  cursor: pointer;
+}
+
+.stepper input {
+  height: 34px;
+  border-radius: 8px;
+}
+
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.advanced-grid label {
+  display: grid;
+  gap: 5px;
+}
+
+.advanced-grid input {
+  height: 36px;
+  border-radius: 8px;
+}
+
+.grid-summary {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.records-table {
+  display: grid;
+  gap: 7px;
+}
+
+.record-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 86px 28px minmax(94px, 1fr) minmax(94px, 1fr) 52px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.record-row.active {
+  border-color: rgba(22, 119, 255, 0.44);
+  background: rgba(231, 241, 255, 0.86);
+}
+
+.record-detail {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.record-detail > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.record-detail strong,
+.inversion-summary strong {
+  font-size: 19px;
+}
+
+.crossing-list {
+  display: grid;
+  gap: 7px;
+}
+
+.crossing-list button {
+  text-align: left;
+  padding: 0 10px;
+}
+
 @media (max-width: 1240px) {
   .topbar {
     grid-template-columns: auto 1fr;
@@ -1228,6 +1547,15 @@ td {
 
   .workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .normal-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "import"
+      "controls"
+      "records"
+      "inversion";
   }
 
   .status-rail,
@@ -1266,6 +1594,18 @@ td {
   }
 
   .topbar__actions {
+    flex-wrap: wrap;
+  }
+
+  .normal-topbar,
+  .mode-picker,
+  .normal-meta,
+  .advanced-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .normal-topbar__actions {
+    justify-content: flex-start;
     flex-wrap: wrap;
   }
 
