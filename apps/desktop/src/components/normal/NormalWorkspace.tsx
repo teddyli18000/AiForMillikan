@@ -203,6 +203,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setSelectionTime(Number(result.boundary.selection_time_s ?? result.boundary.zero_v_start_s ?? 0));
       setGrid(result.grid);
       setStage("boundary");
+      setProgress(null);
       setMessage("已生成 0V 起止建议。请结合视频预览确认边界。");
     } catch (error) {
       setMessage(`开始处理失败：${error instanceof Error ? error.message : String(error)}`);
@@ -258,6 +259,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setSession(response.session);
       setSelectedRecordId(response.record.record_id);
       setStage(response.record.status === "pending_crossing_review" ? "review" : "results");
+      setProgress(null);
       setMessage(response.record.status === "pending_crossing_review" ? "追踪完成。请逐一复核 crossing 身份。" : "追踪和 q 计算完成。请确认是否保留。");
     } catch (error) {
       setMessage(`追踪失败：${error instanceof Error ? error.message : String(error)}`);
@@ -344,6 +346,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setSession(response.session);
       setInversion(response.inversion);
       setStage("results");
+      setProgress(null);
       setMessage(response.inversion.status === "insufficient_eligible_records" ? "有效保留记录不足 3 条，暂不能反演。" : "盲反演完成。");
     } catch (error) {
       setMessage(`盲反演失败：${error instanceof Error ? error.message : String(error)}`);

@@ -44,6 +44,17 @@ def _make_normal_synthetic_video(path: Path) -> None:
     writer.release()
 
 
+def _make_crossing_normal_video(path: Path) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+    for idx in range(120):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        for y in [30, 70, 110, 150, 190]:
+            cv2.line(frame, (24, y), (296, y), (190, 190, 190), 1)
+        cv2.circle(frame, (92, int(52 + idx * 0.5)), 5, (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+
 def _make_blue_grid_video(path: Path) -> None:
     writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
     for _idx in range(20):
@@ -282,3 +293,113 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
     assert inverted["payload"]["inversion"]["valid_q_count"] == 3
     assert "quantized_favored" not in inverted["payload"]["inversion"].get("comparison", {})
     assert inverted["payload"]["inversion"]["candidates"]
+
+
+def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Path):
+    video = tmp_path / "crossing_synthetic.mp4"
+    _make_crossing_normal_video(video)
+    session_root = tmp_path / "normal_crossing_session"
+    overrides = {
+        "session": {"session_root": str(session_root), "run_root": str(tmp_path / "normal_crossing_runs")},
+        "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 1},
+        "tracking": {"minmass": 20, "memory_frames": 4, "grid_occlusion_radius_px": 1},
+        "fit": {"min_points": 8, "min_duration_s": 0.4, "min_displacement_px": 2.0, "min_r2": 0.2},
+    }
+
+    prepared = _send_worker(
+        {
+            "id": "prepare-crossing-block",
+            "op": "normal.prepareVideo",
+            "payload": {"video_path": str(video), "config_overrides": overrides},
+        }
+    )[-1]
+    assert prepared["type"] == "result"
+    assert prepared["payload"]["grid"]["valid"] is True
+
+    confirmed = _send_worker(
+        {
+            "id": "confirm-crossing-block",
+            "op": "normal.confirmBoundary",
+            "payload": {
+                "session_root": str(session_root),
+                "boundary": {"zero_v_start_s": 0.0, "zero_v_end_s": 3.8, "source": "test_manual"},
+            },
+        }
+    )[-1]
+    assert confirmed["type"] == "result"
+
+    selected = _send_worker(
+        {
+            "id": "select-crossing-block",
+            "op": "normal.selectTarget",
+            "payload": {
+                "session_root": str(session_root),
+                "balance_voltage_V": 239.0,
+                "balance_confirmed": True,
+                "target": {
+                    "target_frame": 0,
+                    "target_time_s": 0.0,
+                    "source_center": {"x": 92.0, "y": 52.0},
+                    "source_video_box": {"x": 78.0, "y": 38.0, "width": 28.0, "height": 28.0},
+                },
+                "parameter_overrides": overrides,
+            },
+        }
+    )[-1]
+    assert selected["type"] == "result"
+
+    measured = _send_worker(
+        {
+            "id": "measure-crossing-block",
+            "op": "normal.saveMeasurement",
+            "payload": {"session_root": str(session_root), "config_overrides": overrides},
+        }
+    )[-1]
+    assert measured["type"] == "result"
+    record = measured["payload"]["record"]
+    assert record["crossings"], "synthetic crossing video should require human review"
+
+    crossing = record["crossings"][0]
+    review = _send_worker(
+        {
+            "id": "prepare-crossing-block-review",
+            "op": "normal.prepareCrossingReview",
+            "payload": {"session_root": str(session_root), "record_id": record["record_id"], "event_id": crossing["event_id"]},
+        }
+    )[-1]
+    assert review["type"] == "result"
+    assert Path(review["payload"]["event"]["review_clip_path"]).exists()
+
+    rejected = _send_worker(
+        {
+            "id": "reject-crossing-block",
+            "op": "normal.reviewCrossing",
+            "payload": {
+                "session_root": str(session_root),
+                "record_id": record["record_id"],
+                "event_id": crossing["event_id"],
+                "result": "different_drop",
+            },
+        }
+    )[-1]
+    assert rejected["type"] == "result"
+    assert rejected["payload"]["record"]["status"] == "rejected_crossing_identity"
+
+    blocked_accept = _send_worker(
+        {
+            "id": "accept-rejected-crossing",
+            "op": "normal.updateRecordSelection",
+            "payload": {"session_root": str(session_root), "record_id": record["record_id"], "kept": True},
+        }
+    )[-1]
+    assert blocked_accept["type"] == "error"
+
+    inverted = _send_worker(
+        {
+            "id": "invert-rejected-crossing",
+            "op": "normal.runInversion",
+            "payload": {"session_root": str(session_root), "config_overrides": overrides},
+        }
+    )[-1]
+    assert inverted["type"] == "result"
+    assert inverted["payload"]["inversion"]["status"] == "insufficient_eligible_records"

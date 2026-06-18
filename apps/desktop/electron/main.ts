@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { WorkerClient } from "./workerClient";
@@ -7,11 +7,19 @@ let mainWindow: BrowserWindow | null = null;
 const worker = new WorkerClient();
 
 function createWindow(): void {
+  const display = screen.getPrimaryDisplay();
+  const workArea = display.workAreaSize;
+  const scaleFactor = Math.max(1, display.scaleFactor || 1);
+  const safeWidth = Math.floor(workArea.width / scaleFactor) - 48;
+  const safeHeight = Math.floor(workArea.height / scaleFactor) - 48;
+  const width = Math.min(1480, Math.max(640, safeWidth));
+  const height = Math.min(940, Math.max(520, safeHeight));
   mainWindow = new BrowserWindow({
-    width: 1480,
-    height: 940,
-    minWidth: 1180,
-    minHeight: 760,
+    width,
+    height,
+    minWidth: Math.min(980, width),
+    minHeight: Math.min(700, height),
+    center: true,
     title: "Millikan AI",
     backgroundColor: "#f7f9fc",
     titleBarStyle: "hiddenInset",
@@ -23,6 +31,7 @@ function createWindow(): void {
       sandbox: false
     }
   });
+  mainWindow.center();
 
   const devUrl = process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5173";
   if (app.isPackaged) {
