@@ -1,12 +1,17 @@
 import { motion } from "framer-motion";
-import { ChevronRight } from "lucide-react";
+import { AlertTriangle, Beaker, CheckCircle2, ChevronRight, RefreshCw } from "lucide-react";
+import type { AppInitialization } from "../types";
 
 type SplashScreenProps = {
-  onEnter: () => void;
+  initialization: AppInitialization | null;
+  error: string | null;
+  onRetry: () => void;
+  onEnter: (mode: "normal" | "experimental") => void;
 };
 
-export function SplashScreen({ onEnter }: SplashScreenProps) {
+export function SplashScreen({ initialization, error, onRetry, onEnter }: SplashScreenProps) {
   const particles = Array.from({ length: 18 }, (_, index) => index);
+  const ready = initialization?.ok === true;
   return (
     <section className="splash" aria-label="Millikan AI opening">
       <div className="splash__field" aria-hidden="true">
@@ -49,10 +54,40 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
       >
         <h1>Millikan AI</h1>
         <p>从实验视频盲反演元电荷</p>
-        <button className="hero-action" onClick={onEnter}>
-          <span>进入分析工作台</span>
-          <ChevronRight size={20} />
-        </button>
+        <div className="startup-checks" aria-label="初始化检查">
+          {(initialization?.checks ?? [
+            { id: "renderer_ready", label: "renderer ready", ok: true },
+            { id: "preload_api_ready", label: "preload API ready", ok: false },
+            { id: "packaged_worker_health", label: "packaged worker health", ok: false },
+            { id: "config_readable", label: "配置资源可读", ok: false },
+            { id: "normal_session_readable", label: "普通模式 session 可读", ok: false },
+          ]).map((check) => (
+            <div key={check.id} className={check.ok ? "startup-check ok" : "startup-check pending"}>
+              {check.ok ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+              <span>{check.label}</span>
+            </div>
+          ))}
+        </div>
+        {error && (
+          <div className="startup-error">
+            <span>{error}</span>
+            <button className="ghost-button" onClick={onRetry}><RefreshCw size={15} /> 重试</button>
+          </div>
+        )}
+        <div className="mode-cards">
+          <button className="mode-card primary" disabled={!ready} onClick={() => onEnter("normal")}>
+            <CheckCircle2 size={22} />
+            <strong>普通模式</strong>
+            <span>平衡电压到 0V 下落，逐颗油滴测量 q。</span>
+            <ChevronRight size={18} />
+          </button>
+          <button className="mode-card" disabled={!ready} onClick={() => onEnter("experimental")}>
+            <Beaker size={22} />
+            <strong>Experimental</strong>
+            <span>多滴、多平台自动分析；身份关联需人工复核。</span>
+            <ChevronRight size={18} />
+          </button>
+        </div>
         <div className="shimmer-line" aria-hidden="true" />
       </motion.div>
     </section>

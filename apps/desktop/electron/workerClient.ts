@@ -112,21 +112,23 @@ export class WorkerClient {
 function resolveWorkerLaunch(): { command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } {
   if (app.isPackaged) {
     const executable = path.join(process.resourcesPath, "worker", "millikan-desktop-worker.exe");
+    const configPath = path.join(process.resourcesPath, "configs", "default.yaml");
     return {
       command: executable,
       args: [],
       cwd: path.dirname(executable),
-      env: process.env
+      env: { ...process.env, MILLIKAN_CONFIG_PATH: configPath, PYTHONPATH: "" }
     };
   }
   const projectRoot = findProjectRoot();
   const python = process.env.MILLIKAN_PYTHON || findPython(projectRoot);
   const pythonPath = [path.join(projectRoot, "src"), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter);
+  const configPath = path.join(projectRoot, "configs", "default.yaml");
   return {
     command: python,
     args: ["-m", "millikan_ai.desktop_worker"],
     cwd: projectRoot,
-    env: { ...process.env, PYTHONPATH: pythonPath }
+    env: { ...process.env, PYTHONPATH: pythonPath, MILLIKAN_CONFIG_PATH: configPath }
   };
 }
 

@@ -50,6 +50,20 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../../configs",
+        "to": "configs",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "src/assets/formulas",
+        "to": "formulas",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {

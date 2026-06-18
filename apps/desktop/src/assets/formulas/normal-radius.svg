@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="150" viewBox="0 0 980 150" role="img" aria-label="Cunningham corrected oil drop radius positive root">
+  <rect width="980" height="150" rx="18" fill="#ffffff"/>
+  <text x="34" y="88" font-family="Cambria Math, Georgia, serif" font-size="34" fill="#101823">a = ( sqrt((b/p)^2 + 18 eta v_g / (rho g)) - b/p ) / 2</text>
+</svg>

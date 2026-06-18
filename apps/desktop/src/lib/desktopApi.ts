@@ -13,6 +13,17 @@ function createDemoApi(): DesktopApi {
   let progressListeners: Array<(progress: ProgressEvent) => void> = [];
   const emit = (progress: ProgressEvent) => progressListeners.forEach((listener) => listener(progress));
   return {
+    initializeApp: async () => ({
+      ok: true,
+      checks: [
+        { id: "renderer_ready", label: "renderer ready", ok: true },
+        { id: "preload_api_ready", label: "preload API ready", ok: true },
+        { id: "packaged_worker_health", label: "packaged worker health", ok: true },
+        { id: "config_readable", label: "配置资源可读", ok: true },
+        { id: "normal_session_readable", label: "普通模式 session 可读", ok: true }
+      ],
+    }),
+    runtimePaths: async () => ({}),
     openVideoDialog: async () => "raw_data/2.mp4",
     openRunDialog: async () => "runs/demo_millikan",
     inspectVideo: async () => ({ metadata: demoMetadata }),
@@ -45,6 +56,36 @@ function createDemoApi(): DesktopApi {
     loadRun: async () => ({ artifacts: demoArtifacts }),
     validateRun: async () => ({ valid: true, errors: [] }),
     runDownstream: async () => ({ artifacts: demoArtifacts }),
+    normalInitialize: async () => ({
+      session: { records: [], counts: { total: 0, valid: 0, selected_valid: 0 }, eligible_for_inversion: false }
+    }),
+    normalPrepareVideo: async () => ({
+      metadata: demoMetadata,
+      video_url: "raw_data/2.mp4",
+      boundary: {
+        samples: [],
+        operations: [{ start_frame: 30, end_frame: 40 }],
+        suggestion: {
+          selection_frame: 12,
+          selection_time_s: 0.4,
+          fall_start_frame: 52,
+          fall_start_time_s: 1.73,
+          fall_end_frame: 180,
+          fall_end_time_s: 6,
+          end_source: "test_mock"
+        }
+      },
+      grid: { valid: true, grid_lines_y: [40, 80, 120, 160], second_line_y: 80, penultimate_line_y: 120, scale_y_m_per_px: 0.0015 / 40 },
+      session: { records: [], counts: { total: 0, valid: 0, selected_valid: 0 }, eligible_for_inversion: false }
+    }),
+    normalSaveMeasurement: async () => ({
+      record: { record_id: "test_record", status: "diagnostic", selected: false, recovery_suggestions: ["重新框选更清晰的油滴。"] },
+      session: { records: [{ record_id: "test_record", status: "diagnostic", selected: false }], counts: { total: 1, valid: 0, selected_valid: 0 }, eligible_for_inversion: false }
+    }),
+    normalSelectRecord: async () => ({ session: { records: [], counts: { total: 0, valid: 0, selected_valid: 0 }, eligible_for_inversion: false } }),
+    normalRunInversion: async () => ({ inversion: {}, session: { records: [], counts: { total: 0, valid: 0, selected_valid: 0 }, eligible_for_inversion: false } }),
+    normalCreateQaFixture: async () => ({ session: { records: [], counts: { total: 3, valid: 3, selected_valid: 3 }, eligible_for_inversion: true, qa_fixture: true } }),
+    normalExportSession: async () => ({ canceled: false }),
     exportReport: async () => ({ canceled: false, destination: "demo-export" }),
     openPath: async () => undefined,
     onAnalysisProgress: (callback) => {
@@ -54,6 +95,10 @@ function createDemoApi(): DesktopApi {
       };
     }
   };
+}
+
+if (!window.millikan && import.meta.env.MODE !== "test") {
+  throw new Error("Millikan preload API is unavailable. Production builds do not use demo data fallback.");
 }
 
 export const desktopApi: DesktopApi = window.millikan ?? createDemoApi();

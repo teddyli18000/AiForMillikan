@@ -24,6 +24,92 @@ export type ProgressEvent = {
   label: string;
 };
 
+export type StartupCheck = {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail?: string;
+};
+
+export type AppInitialization = {
+  ok: boolean;
+  checks: StartupCheck[];
+  runtime?: Record<string, string>;
+  worker?: unknown;
+};
+
+export type NormalBoundarySuggestion = {
+  selection_frame: number;
+  selection_time_s: number;
+  fall_start_frame: number;
+  fall_start_time_s: number;
+  fall_end_frame: number;
+  fall_end_time_s: number;
+  end_source: string;
+  flags?: string[];
+};
+
+export type NormalGrid = {
+  valid: boolean;
+  grid_lines_y?: number[];
+  second_line_y?: number;
+  penultimate_line_y?: number;
+  scale_y_m_per_px?: number;
+  warnings?: string[];
+};
+
+export type NormalTarget = {
+  display_box: { x: number; y: number; width: number; height: number };
+  source_video_box: { x: number; y: number; width: number; height: number };
+  source_center: { x: number; y: number };
+  target_frame: number;
+  video_natural_width: number;
+  video_natural_height: number;
+};
+
+export type NormalRecord = {
+  record_id: string;
+  created_at?: string;
+  video_path?: string;
+  balance_voltage_V?: number;
+  target?: Partial<NormalTarget>;
+  boundary?: Partial<NormalBoundarySuggestion>;
+  grid?: NormalGrid;
+  tracking_stats?: Record<string, number>;
+  crossing_events?: Array<Record<string, unknown>>;
+  fit?: Record<string, unknown>;
+  q?: Record<string, unknown>;
+  status: "valid" | "diagnostic";
+  selected?: boolean;
+  qa_fixture?: boolean;
+  recovery_suggestions?: string[];
+};
+
+export type NormalSession = {
+  schema_version?: number;
+  session_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  records: NormalRecord[];
+  counts: { total: number; valid: number; selected_valid: number };
+  eligible_for_inversion: boolean;
+  qa_fixture?: boolean;
+  inversion?: Record<string, unknown>;
+  active_video?: Record<string, unknown> | null;
+};
+
+export type NormalPrepareVideoResponse = {
+  metadata: VideoMetadata;
+  video_url: string;
+  boundary: {
+    samples: Array<Record<string, unknown>>;
+    operations: Array<Record<string, unknown>>;
+    suggestion: NormalBoundarySuggestion;
+  };
+  grid: NormalGrid;
+  session: NormalSession;
+};
+
 export type StatusMap = {
   video_readable?: boolean;
   valid_for_q?: boolean;
@@ -176,6 +262,8 @@ export type AnalysisResponse = {
 };
 
 export type DesktopApi = {
+  initializeApp: () => Promise<AppInitialization>;
+  runtimePaths: () => Promise<Record<string, string>>;
   openVideoDialog: () => Promise<string | null>;
   openRunDialog: () => Promise<string | null>;
   inspectVideo: (payload: { video_path: string }) => Promise<{ metadata: VideoMetadata }>;
@@ -200,6 +288,13 @@ export type DesktopApi = {
   loadRun: (payload: { run_dir: string }) => Promise<{ artifacts: RunArtifacts }>;
   validateRun: (payload: { run_dir: string; config_path?: string }) => Promise<{ valid: boolean; errors: string[] }>;
   runDownstream: (payload: unknown) => Promise<unknown>;
+  normalInitialize: (payload?: unknown) => Promise<{ session: NormalSession; config?: Record<string, unknown> }>;
+  normalPrepareVideo: (payload: { video_path: string }) => Promise<NormalPrepareVideoResponse>;
+  normalSaveMeasurement: (payload: unknown) => Promise<{ record: NormalRecord; session: NormalSession }>;
+  normalSelectRecord: (payload: { record_id: string; selected: boolean }) => Promise<{ session: NormalSession }>;
+  normalRunInversion: (payload?: unknown) => Promise<{ inversion: Record<string, unknown>; session: NormalSession }>;
+  normalCreateQaFixture: (payload?: unknown) => Promise<{ session: NormalSession }>;
+  normalExportSession: (payload?: unknown) => Promise<unknown>;
   exportReport: (payload: { run_dir: string; include_pdf?: boolean; mode?: "folder" | "zip" }) => Promise<unknown>;
   openPath: (targetPath: string) => Promise<unknown>;
   onAnalysisProgress: (callback: (progress: ProgressEvent) => void) => () => void;
