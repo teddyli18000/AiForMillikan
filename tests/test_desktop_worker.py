@@ -118,31 +118,62 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
         "fit": {"min_points": 8, "min_duration_s": 0.4, "min_displacement_px": 2.0, "min_r2": 0.2},
     }
 
-    prepared = _send_worker(
+    inspected = _send_worker(
+        {
+            "id": "inspect-normal",
+            "op": "normal.inspectVideo",
+            "payload": {"video_path": str(video)},
+        }
+    )[-1]
+    assert inspected["type"] == "result"
+    assert inspected["payload"]["metadata"]["readable"] is True
+
+    prepared_messages = _send_worker(
         {
             "id": "prepare",
             "op": "normal.prepareVideo",
             "payload": {"video_path": str(video), "config_overrides": overrides},
         }
-    )[-1]
+    )
+    assert any(message["type"] == "progress" and message["payload"]["operation"] == "prepare_video" for message in prepared_messages)
+    prepared = prepared_messages[-1]
     assert prepared["type"] == "result"
     payload = prepared["payload"]
     assert payload["metadata"]["readable"] is True
     assert payload["grid"]["valid"] is True
     assert payload["session"]["counts"]["total"] == 0
+    assert "config" in payload
 
     for index in range(3):
-        measured = _send_worker(
+        prepared = _send_worker(
             {
-                "id": f"measure-{index}",
-                "op": "normal.saveMeasurement",
+                "id": f"prepare-{index}",
+                "op": "normal.prepareVideo",
+                "payload": {"video_path": str(video), "session_root": str(session_root), "config_overrides": overrides},
+            }
+        )[-1]
+        payload = prepared["payload"]
+        confirmed = _send_worker(
+            {
+                "id": f"confirm-{index}",
+                "op": "normal.confirmBoundary",
                 "payload": {
                     "session_root": str(session_root),
-                    "video_path": str(video),
-                    "config_overrides": overrides,
                     "boundary": {"zero_v_start_s": 0.1, "zero_v_end_s": 2.8, "source": "test_manual"},
-                    "grid": payload["grid"],
+                },
+            }
+        )[-1]
+        assert confirmed["type"] == "result"
+        assert confirmed["payload"]["active_video"]["state"] == "boundary_confirmed"
+
+        selected = _send_worker(
+            {
+                "id": f"select-{index}",
+                "op": "normal.selectTarget",
+                "payload": {
+                    "session_root": str(session_root),
                     "balance_voltage_V": 239.0,
+                    "balance_confirmed": True,
                     "target": {
                         "target_frame": 3,
                         "target_time_s": 0.1,
@@ -153,11 +184,66 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
                 },
             }
         )[-1]
+        assert selected["type"] == "result"
+        assert selected["payload"]["active_video"]["state"] == "target_selected"
+
+        measured = _send_worker(
+            {
+                "id": f"measure-{index}",
+                "op": "normal.saveMeasurement",
+                "payload": {
+                    "session_root": str(session_root),
+                    "config_overrides": overrides,
+                },
+            }
+        )[-1]
         assert measured["type"] == "result"
         record = measured["payload"]["record"]
-        assert record["valid"] is True
+        assert record["valid"] is False
+        assert record["q_valid"] is True
         assert record["q_C"] > 0
         assert record["sigma_q_C"] > 0
+        assert record["kept"] is False
+
+        blocked = _send_worker(
+            {
+                "id": f"blocked-accept-{index}",
+                "op": "normal.updateRecordSelection",
+                "payload": {"session_root": str(session_root), "record_id": record["record_id"], "kept": True},
+            }
+        )[-1]
+        if record["crossings"]:
+            assert blocked["type"] == "error"
+            for crossing in record["crossings"]:
+                review = _send_worker(
+                    {
+                        "id": f"prepare-crossing-{index}-{crossing['event_id']}",
+                        "op": "normal.prepareCrossingReview",
+                        "payload": {"session_root": str(session_root), "record_id": record["record_id"], "event_id": crossing["event_id"]},
+                    }
+                )[-1]
+                assert review["type"] == "result"
+                assert Path(review["payload"]["event"]["review_clip_path"]).exists()
+                reviewed = _send_worker(
+                    {
+                        "id": f"review-crossing-{index}-{crossing['event_id']}",
+                        "op": "normal.reviewCrossing",
+                        "payload": {"session_root": str(session_root), "record_id": record["record_id"], "event_id": crossing["event_id"], "result": "same_drop"},
+                    }
+                )[-1]
+                assert reviewed["type"] == "result"
+
+        accepted = _send_worker(
+            {
+                "id": f"accept-{index}",
+                "op": "normal.updateRecordSelection",
+                "payload": {"session_root": str(session_root), "record_id": record["record_id"], "kept": True},
+            }
+        )[-1]
+        assert accepted["type"] == "result"
+        accepted_record = [row for row in accepted["payload"]["records"] if row["record_id"] == record["record_id"]][0]
+        assert accepted_record["status"] == "accepted"
+        assert accepted_record["kept"] is True
 
     inverted = _send_worker(
         {
@@ -169,3 +255,5 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
     assert inverted["type"] == "result"
     assert inverted["payload"]["session"]["eligible_for_inversion"] is True
     assert inverted["payload"]["inversion"]["valid_q_count"] == 3
+    assert "quantized_favored" not in inverted["payload"]["inversion"].get("comparison", {})
+    assert inverted["payload"]["inversion"]["candidates"]

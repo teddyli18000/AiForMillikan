@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
 
 
-def calibrate_grid(video_path: str | Path, cfg: dict[str, Any], start_frame: int = 0, end_frame: int | None = None) -> dict[str, Any]:
-    samples = _sample_frames(video_path, int(cfg["grid"].get("sample_frames", 40)), int(cfg["grid"].get("sample_stride", 3)), start_frame, end_frame)
+ProgressCallback = Callable[[str, str, int | None, int | None, str | None], None]
+
+
+def calibrate_grid(video_path: str | Path, cfg: dict[str, Any], start_frame: int = 0, end_frame: int | None = None, progress_callback: ProgressCallback | None = None) -> dict[str, Any]:
+    samples = _sample_frames(video_path, int(cfg["grid"].get("sample_frames", 40)), int(cfg["grid"].get("sample_stride", 3)), start_frame, end_frame, progress_callback)
     background = np.median(np.stack(samples, axis=0), axis=0).astype(np.uint8)
     gray = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
     lines_y = detect_horizontal_lines(gray, cfg["grid"])
@@ -69,7 +72,7 @@ def build_grid_mask(gray: np.ndarray, lines_y: list[int], dilate_px: int = 5) ->
     return mask
 
 
-def _sample_frames(video_path: str | Path, count: int, stride: int, start_frame: int, end_frame: int | None) -> list:
+def _sample_frames(video_path: str | Path, count: int, stride: int, start_frame: int, end_frame: int | None, progress_callback: ProgressCallback | None = None) -> list:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"cannot open video: {video_path}")
@@ -77,6 +80,8 @@ def _sample_frames(video_path: str | Path, count: int, stride: int, start_frame:
     start = max(0, int(start_frame))
     end = min(frame_count - 1, int(end_frame) if end_frame is not None else frame_count - 1)
     frames = []
+    total_candidates = len(range(start, end + 1, max(1, stride)))
+    total = max(1, min(count, total_candidates))
     for frame_idx in range(start, end + 1, max(1, stride)):
         if len(frames) >= count:
             break
@@ -84,6 +89,8 @@ def _sample_frames(video_path: str | Path, count: int, stride: int, start_frame:
         ok, frame = cap.read()
         if ok:
             frames.append(frame)
+            if progress_callback is not None:
+                progress_callback("sample_grid_frames", "正在采样网格画面", len(frames), total, "frames")
     cap.release()
     if not frames:
         raise RuntimeError("no grid sample frames")

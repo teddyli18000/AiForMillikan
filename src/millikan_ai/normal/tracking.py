@@ -4,7 +4,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -26,18 +26,23 @@ class TrackRequest:
     config: dict[str, Any]
 
 
-def run_tracking(request: TrackRequest) -> dict[str, Any]:
+ProgressCallback = Callable[[str, str, int | None, int | None, str | None], None]
+
+
+def run_tracking(request: TrackRequest, progress_callback: ProgressCallback | None = None) -> dict[str, Any]:
     run_dir = Path(request.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
-    start = max(0, min(int(request.target_frame), int(request.zero_v_start_frame)))
+    start = max(0, int(request.target_frame))
     end = max(start, int(request.zero_v_end_frame))
-    frames, fps = _read_frames(request.video_path, start, end)
+    frames, fps = _read_frames(request.video_path, start, end, progress_callback)
     grid_mask = None
     if request.grid.get("grid_lines_y"):
         gray0 = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
         grid_mask = build_grid_mask(gray0, [int(y) for y in request.grid.get("grid_lines_y", [])], int(request.config["grid"].get("mask_dilate_px", 5)))
     local_initial = np.array(request.source_center, dtype=float)
-    track = track_single_drop_frames(frames, local_initial, start, request.config["tracking"], grid_mask)
+    track = track_single_drop_frames(frames, local_initial, start, request.config["tracking"], grid_mask, progress_callback)
+    if not track.empty:
+        track["time_s"] = track["source_frame"].astype(float) / float(fps)
     track = _mark_fit_window(track, request.zero_v_start_frame, request.zero_v_end_frame, request.grid)
     crossings = crossing_events(track, request.grid, fps)
     track_csv = run_dir / "track.csv"
@@ -61,7 +66,7 @@ def run_tracking(request: TrackRequest) -> dict[str, Any]:
     }
 
 
-def track_single_drop_frames(frames: list, initial_position: np.ndarray, source_start_frame: int, cfg: dict[str, Any], grid_mask=None) -> pd.DataFrame:
+def track_single_drop_frames(frames: list, initial_position: np.ndarray, source_start_frame: int, cfg: dict[str, Any], grid_mask=None, progress_callback: ProgressCallback | None = None) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     search_center = initial_position.astype(float)
     last_detected = initial_position.astype(float)
@@ -73,6 +78,8 @@ def track_single_drop_frames(frames: list, initial_position: np.ndarray, source_
         source_frame = int(source_start_frame) + int(frame_id)
         if frame_id == 0:
             rows.append(_row(frame_id, source_frame, initial_position, initial_position, "tracking", 0, False, math.nan, "manual_target"))
+            if progress_callback is not None:
+                progress_callback("track_frames", "正在逐帧追踪油滴", frame_id + 1, len(frames), "frames")
             continue
         predicted = search_center + velocity
         near_grid = is_position_near_grid(predicted, grid_mask, int(cfg.get("grid_occlusion_radius_px", 2)))
@@ -84,6 +91,8 @@ def track_single_drop_frames(frames: list, initial_position: np.ndarray, source_
             missed += 1
             search_center = predicted.copy()
             rows.append(_row(frame_id, source_frame, np.array([math.nan, math.nan]), predicted, "missing", missed, near_grid, math.nan, "grid" if near_grid else "not_found"))
+            if progress_callback is not None:
+                progress_callback("track_frames", "正在逐帧追踪油滴", frame_id + 1, len(frames), "frames")
             if missed > int(cfg.get("memory_frames", 8)):
                 break
             continue
@@ -96,6 +105,8 @@ def track_single_drop_frames(frames: list, initial_position: np.ndarray, source_
         last_detected = current.copy()
         last_detected_frame = frame_id
         missed = 0
+        if progress_callback is not None:
+            progress_callback("track_frames", "正在逐帧追踪油滴", frame_id + 1, len(frames), "frames")
     return pd.DataFrame(rows)
 
 
@@ -251,6 +262,63 @@ def make_overlay_video(video_path: str, track: pd.DataFrame, out_path: Path, sta
     writer.release()
 
 
+def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: Path, crop_size: int = 96, scale: int = 3) -> dict[str, Any]:
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"cannot open video: {video_path}")
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    start_frame = max(0, int(round(float(event.get("review_start_time_s", 0.0)) * fps)))
+    end_frame = min(max(0, frame_count - 1), int(round(float(event.get("review_end_time_s", 0.0)) * fps)))
+    if end_frame < start_frame:
+        end_frame = start_frame
+    center_x = float(event.get("center_x_px", 0.0))
+    center_y = float(event.get("center_y_px", 0.0))
+    half = max(16, int(crop_size // 2))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    ok, first = cap.read()
+    if not ok:
+        cap.release()
+        raise RuntimeError("cannot read crossing review first frame")
+    height, width = first.shape[:2]
+    x0 = max(0, min(width - 1, int(round(center_x - half))))
+    y0 = max(0, min(height - 1, int(round(center_y - half))))
+    x1 = min(width, max(x0 + 1, int(round(center_x + half))))
+    y1 = min(height, max(y0 + 1, int(round(center_y + half))))
+    if x1 - x0 < crop_size:
+        x0 = max(0, min(x0, width - crop_size))
+        x1 = min(width, x0 + crop_size)
+    if y1 - y0 < crop_size:
+        y0 = max(0, min(y0, height - crop_size))
+        y1 = min(height, y0 + crop_size)
+    out_size = (max(1, (x1 - x0) * scale), max(1, (y1 - y0) * scale))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, out_size)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    for frame_idx in range(start_frame, end_frame + 1):
+        ok, frame = cap.read()
+        if not ok:
+            break
+        crop = frame[y0:y1, x0:x1].copy()
+        local_x = int(round(center_x - x0))
+        local_y = int(round(center_y - y0))
+        cv2.circle(crop, (local_x, local_y), 8, (0, 220, 255), 2)
+        cv2.line(crop, (0, local_y), (crop.shape[1] - 1, local_y), (0, 220, 255), 1)
+        cv2.line(crop, (local_x, 0), (local_x, crop.shape[0] - 1), (0, 220, 255), 1)
+        writer.write(cv2.resize(crop, out_size, interpolation=cv2.INTER_NEAREST))
+    cap.release()
+    writer.release()
+    return {
+        "clip_path": str(out_path),
+        "start_frame": start_frame,
+        "end_frame": end_frame,
+        "start_time_s": start_frame / fps if fps > 0 else 0.0,
+        "end_time_s": end_frame / fps if fps > 0 else 0.0,
+        "source_video_box": {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0},
+        "scale": scale,
+    }
+
+
 def _mark_fit_window(track: pd.DataFrame, zero_start: int, zero_end: int, grid: dict[str, Any]) -> pd.DataFrame:
     out = track.copy()
     penultimate = grid.get("penultimate_line_y")
@@ -266,18 +334,21 @@ def _mark_fit_window(track: pd.DataFrame, zero_start: int, zero_end: int, grid: 
     return out
 
 
-def _read_frames(video_path: str, start: int, end: int) -> tuple[list, float]:
+def _read_frames(video_path: str, start: int, end: int, progress_callback: ProgressCallback | None = None) -> tuple[list, float]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"cannot open video: {video_path}")
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     cap.set(cv2.CAP_PROP_POS_FRAMES, start)
     frames = []
+    total = max(1, end - start + 1)
     for _frame_idx in range(start, end + 1):
         ok, frame = cap.read()
         if not ok:
             break
         frames.append(frame)
+        if progress_callback is not None:
+            progress_callback("read_tracking_frames", "正在读取追踪帧", len(frames), total, "frames")
     cap.release()
     if not frames:
         raise RuntimeError("no tracking frames")

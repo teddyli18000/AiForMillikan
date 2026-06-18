@@ -31,6 +31,8 @@ For the physics-themed experiment, the AI value proposition is intelligent assis
 - Worker operation names must make the separation visible. Use `normal.*` for Normal and keep existing `analysis.*`, `platform.*`, and `downstream.*` operations for Experimental/current backend behavior.
 - Frontend routes/components must make the separation visible. The startup screen can choose `Normal` or `Experimental`; after selection, the workflows should not share mutable state or silently hand off results to each other.
 - v3 Normal branches are failed worktrees. They may be consulted only for visual inspiration and failure evidence, not used as an implementation blueprint.
+- Normal state transitions are part of the contract: `video_imported -> video_prepared -> boundary_confirmed -> target_selected -> tracking -> pending_crossing_review -> pending_user_confirmation -> accepted`. Exceptional states are `diagnostic`, `rejected_crossing_identity`, and `rejected_by_user`. Worker ops must enforce predecessor states, not rely only on disabled frontend buttons.
+- `normal.inspectVideo` must stay pure: return metadata and a playable URL only. It must not create or mutate a session and must not run `0 V`, grid, tracking, or q calculation. `normal.prepareVideo` starts the expensive preparation after the user clicks start and emits Normal-only progress events.
 
 ## Raw Data
 
@@ -61,6 +63,7 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 - Normal sessions may accumulate q records across multiple videos. At least three user-kept valid q records are required before Normal blind inversion.
 - In Normal, balance voltage is required. Other physical parameters should default from config and be editable in a collapsed advanced panel; overrides apply only to the current measurement record unless the user explicitly changes saved defaults.
 - Normal must use its own weighted integer residual grid-search inversion over q records with uncertainties. Do not call the Experimental elementary estimator as a shortcut.
+- Normal inversion must include fixed-integer weighted re-estimation of `e`, assignment-stability iteration, sorted candidate solutions, boundary/convergence flags, and residual details. Without a fitted continuous baseline, do not output `quantized_favored`, `continuous_favored`, or any model-win claim.
 - Current `develop`/`main` does not run voltage OCR. It may auto-detect voltage-platform boundaries from visual display changes, but voltage values remain user/API supplied. OCR experiment code is preserved on `feature/ocr-current-archive`; do not re-enable OCR on mainline without an explicit new plan.
 - Auto platform detection uses the user-provided expected platform count as a validation constraint. Rejected suggestions, short platforms, or count mismatches must fall back to manual boundary input rather than silently entering q calculation.
 - If ROI detection or tracking confidence is low, write explicit flags and allow manual/config-driven correction.

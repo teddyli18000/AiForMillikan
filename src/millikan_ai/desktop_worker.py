@@ -25,11 +25,16 @@ from millikan_ai.pipeline import validate_run
 from millikan_ai.segments.voltage_change import detect_voltage_platform_changes
 from millikan_ai.video.reader import inspect_video
 from millikan_ai.normal.session import (
+    confirm_boundary as normal_confirm_boundary,
     export_session as normal_export_session,
     initialize_session as normal_initialize_session,
+    inspect_video_only as normal_inspect_video,
     prepare_video as normal_prepare_video,
+    prepare_crossing_review as normal_prepare_crossing_review,
+    review_crossing as normal_review_crossing,
     run_inversion as normal_run_inversion,
     save_measurement as normal_save_measurement,
+    select_target as normal_select_target,
     update_record_selection as normal_update_record_selection,
 )
 
@@ -203,17 +208,42 @@ def _op_normal_initialize(payload: Json, _request_id: str) -> Json:
     )
 
 
+def _op_normal_inspect_video(payload: Json, _request_id: str) -> Json:
+    return normal_inspect_video(str(_value(payload, "video_path")))
+
+
 def _op_normal_prepare_video(payload: Json, _request_id: str) -> Json:
     return normal_prepare_video(
         video_path=str(_value(payload, "video_path")),
         session_root=_value(payload, "session_root", None),
         run_root=_value(payload, "run_root", None),
         config_overrides=_normal_config_overrides(payload),
+        progress_callback=_normal_progress_emitter(_request_id, "prepare_video"),
     )
 
 
+def _op_normal_confirm_boundary(payload: Json, _request_id: str) -> Json:
+    return normal_confirm_boundary(payload)
+
+
+def _op_normal_select_target(payload: Json, _request_id: str) -> Json:
+    return normal_select_target(payload, config_overrides=_normal_config_overrides(payload))
+
+
 def _op_normal_save_measurement(payload: Json, _request_id: str) -> Json:
-    return normal_save_measurement(payload, config_overrides=_normal_config_overrides(payload))
+    return normal_save_measurement(
+        payload,
+        config_overrides=_normal_config_overrides(payload),
+        progress_callback=_normal_progress_emitter(_request_id, "save_measurement"),
+    )
+
+
+def _op_normal_prepare_crossing_review(payload: Json, _request_id: str) -> Json:
+    return normal_prepare_crossing_review(payload)
+
+
+def _op_normal_review_crossing(payload: Json, _request_id: str) -> Json:
+    return normal_review_crossing(payload)
 
 
 def _op_normal_select_record(payload: Json, _request_id: str) -> Json:
@@ -228,6 +258,7 @@ def _op_normal_run_inversion(payload: Json, _request_id: str) -> Json:
     return normal_run_inversion(
         session_root=_value(payload, "session_root", None),
         config_overrides=_normal_config_overrides(payload),
+        progress_callback=_normal_progress_emitter(_request_id, "run_inversion"),
     )
 
 
@@ -236,6 +267,35 @@ def _op_normal_export(payload: Json, _request_id: str) -> Json:
         session_root=_value(payload, "session_root", None),
         export_root=str(_value(payload, "export_root")),
     )
+
+
+def _normal_progress_emitter(request_id: str, operation: str) -> Callable[[Json], None]:
+    def emit(payload: Json) -> None:
+        current = payload.get("current")
+        total = payload.get("total")
+        indeterminate = bool(payload.get("indeterminate", current is None or total in {None, 0}))
+        fraction = None
+        if not indeterminate and current is not None and total:
+            fraction = max(0.0, min(1.0, float(current) / float(total)))
+        _write_line(
+            {
+                "id": request_id,
+                "type": "progress",
+                "payload": {
+                    "request_id": request_id,
+                    "operation": operation,
+                    "stage": payload.get("stage") or payload.get("phase") or "unknown",
+                    "label": str(payload.get("label") or payload.get("stage") or "处理中"),
+                    "current": current,
+                    "total": total,
+                    "unit": payload.get("unit"),
+                    "fraction": fraction,
+                    "indeterminate": indeterminate,
+                },
+            }
+        )
+
+    return emit
 
 
 def _op_platform_detect_boundaries(payload: Json, _request_id: str) -> Json:
@@ -422,8 +482,13 @@ OPS: dict[str, Callable[[Json, str], Json]] = {
     "video.inspect": _op_video_inspect,
     "platform.detectBoundaries": _op_platform_detect_boundaries,
     "normal.initialize": _op_normal_initialize,
+    "normal.inspectVideo": _op_normal_inspect_video,
     "normal.prepareVideo": _op_normal_prepare_video,
+    "normal.confirmBoundary": _op_normal_confirm_boundary,
+    "normal.selectTarget": _op_normal_select_target,
     "normal.saveMeasurement": _op_normal_save_measurement,
+    "normal.prepareCrossingReview": _op_normal_prepare_crossing_review,
+    "normal.reviewCrossing": _op_normal_review_crossing,
     "normal.updateRecordSelection": _op_normal_select_record,
     "normal.runInversion": _op_normal_run_inversion,
     "normal.exportSession": _op_normal_export,

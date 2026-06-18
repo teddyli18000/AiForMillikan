@@ -2,6 +2,7 @@ import { ChangeEvent, DragEvent } from "react";
 import { FileVideo, Plus, Search, SlidersHorizontal, Trash2, UploadCloud } from "lucide-react";
 import type { ManualPlatform, VideoMetadata } from "../types";
 import { fmtNumber } from "../lib/format";
+import { desktopApi } from "../lib/desktopApi";
 
 type SetupViewProps = {
   videoPath: string;
@@ -36,12 +37,15 @@ export function SetupView({
   onDetectBoundaries,
   onRun
 }: SetupViewProps) {
-  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+  const onDrop = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const file = event.dataTransfer.files.item(0) as (File & { path?: string }) | null;
-    if (file?.path) {
-      onVideoPath(file.path);
-      onInspect(file.path);
+    if (file) {
+      const path = (await desktopApi.getDroppedFilePath(file)) || file.path || "";
+      if (path) {
+        onVideoPath(path);
+        onInspect(path);
+      }
     }
   };
 

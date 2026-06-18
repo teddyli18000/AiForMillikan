@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -17,11 +17,14 @@ class VoltageChangeSample:
     score: float
 
 
-def suggest_zero_v_window(video_path: str | Path, cfg: dict[str, Any]) -> dict[str, Any]:
+ProgressCallback = Callable[[str, str, int | None, int | None, str | None], None]
+
+
+def suggest_zero_v_window(video_path: str | Path, cfg: dict[str, Any], progress_callback: ProgressCallback | None = None) -> dict[str, Any]:
     meta = inspect_video(video_path)
     fps = float(meta.get("fps") or 30.0)
     frame_count = int(meta.get("frame_count") or 0)
-    samples = sample_visual_changes(video_path, cfg)
+    samples = sample_visual_changes(video_path, cfg, progress_callback)
     operations = merge_operations(samples, cfg)
     flags: list[str] = []
     if operations:
@@ -56,7 +59,7 @@ def suggest_zero_v_window(video_path: str | Path, cfg: dict[str, Any]) -> dict[s
     }
 
 
-def sample_visual_changes(video_path: str | Path, cfg: dict[str, Any]) -> list[VoltageChangeSample]:
+def sample_visual_changes(video_path: str | Path, cfg: dict[str, Any], progress_callback: ProgressCallback | None = None) -> list[VoltageChangeSample]:
     vcfg = cfg["voltage"]
     stride = max(1, int(vcfg.get("sample_stride_frames", 5)))
     cap = cv2.VideoCapture(str(video_path))
@@ -66,7 +69,9 @@ def sample_visual_changes(video_path: str | Path, cfg: dict[str, Any]) -> list[V
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     previous = None
     samples: list[VoltageChangeSample] = []
-    for frame_idx in range(0, frame_count, stride):
+    sample_frames = list(range(0, frame_count, stride))
+    total = len(sample_frames)
+    for index, frame_idx in enumerate(sample_frames, start=1):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ok, frame = cap.read()
         if not ok:
@@ -75,6 +80,8 @@ def sample_visual_changes(video_path: str | Path, cfg: dict[str, Any]) -> list[V
         score = 0.0 if previous is None else float(np.mean(np.abs(desc - previous)) / 255.0)
         samples.append(VoltageChangeSample(frame=frame_idx, time_s=frame_idx / fps, score=score))
         previous = desc
+        if progress_callback is not None:
+            progress_callback("sample_voltage_region", "正在采样电压显示区域", index, total, "frames")
     cap.release()
     return samples
 

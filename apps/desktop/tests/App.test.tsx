@@ -11,7 +11,13 @@ describe("Millikan desktop app", () => {
 
     expect(await screen.findByRole("button", { name: /选择视频/ })).toBeInTheDocument();
     expect(screen.getAllByText("平衡电压 + 0V 下落逐滴测量").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /保存本滴 q 记录/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /开始处理/ })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: /选择视频/ }));
+    expect(await screen.findByText("1280 x 720")).toBeInTheDocument();
+    expect(screen.getByText("30.00")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /开始处理/ }));
+    expect(await screen.findByRole("button", { name: /确认边界/ })).toBeInTheDocument();
+    expect(screen.getAllByText("0V 边界确认").length).toBeGreaterThan(0);
   });
 
   it("keeps the Experimental demo analysis path available", async () => {

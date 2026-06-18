@@ -25,16 +25,31 @@ Normal-mode operations use a separate `normal.*` namespace and must not call the
 Experimental `analysis.*` flow as a shortcut. Current Normal operations are:
 
 - `normal.initialize`: create or load a Normal session and return saved records.
-- `normal.prepareVideo`: inspect a video, return metadata, create a playable
-  file URL, suggest `0V_start_s` and `0V_end_s`, and return grid diagnostics.
-- `normal.saveMeasurement`: validate per-measurement balance voltage and
-  optional advanced physical-parameter overrides, run the Normal-only local
-  Trackpy single-drop tracker for one user-selected droplet, fit the `0 V`
-  falling velocity, compute `q_i ± sigma_q_i`, and persist the reviewed q
-  record with its artifacts.
-- `normal.updateRecordSelection`: mark a valid q record as kept or excluded.
+- `normal.inspectVideo`: inspect a video and return metadata plus a playable
+  file URL. It must not create or modify a session, detect `0 V`, detect grid
+  lines, track, or calculate q.
+- `normal.prepareVideo`: after the user clicks start, suggest `0V_start_s` and
+  `0V_end_s`, detect grid lines, update the active video to `video_prepared`,
+  and emit Normal-only progress events.
+- `normal.confirmBoundary`: persist the user-confirmed second-based `0 V`
+  window and advance the active video to `boundary_confirmed`.
+- `normal.selectTarget`: persist balance-voltage confirmation, sparse
+  per-record parameter overrides, and the user rectangle selection; advance to
+  `target_selected`.
+- `normal.saveMeasurement`: from `target_selected`, run the Normal-only local
+  Trackpy single-drop tracker from the actual selected frame, fit the `0 V`
+  falling velocity, compute `q_i ± sigma_q_i`, and create a record in
+  `pending_crossing_review`, `pending_user_confirmation`, or `diagnostic`.
+- `normal.prepareCrossingReview`: generate and cache one local magnified
+  crossing clip on demand.
+- `normal.reviewCrossing`: save `same_drop` or `different_drop`. Unreviewed
+  crossings block acceptance; `different_drop` moves the record to
+  `rejected_crossing_identity`.
+- `normal.updateRecordSelection`: user-confirm or exclude a q record.
+  `kept=true` is allowed only from `pending_user_confirmation`; it moves the
+  record to `accepted`.
 - `normal.runInversion`: run the Normal-only weighted integer residual grid
-  search over kept q records.
+  search over accepted q records.
 - `normal.exportSession`: export the Normal session report, q table, inversion
   JSON, and review artifacts.
 
@@ -81,9 +96,36 @@ Session-level fields:
 ```
 
 `eligible_for_inversion` is true only when at least three kept records have
-finite positive `q_C` and finite positive `sigma_q_C`.
+`status=accepted`, finite positive `q_C`, finite positive `sigma_q_C`, and no
+unreviewed or rejected crossing identity.
+
+Normal active-video and record states follow this state machine:
+
+```text
+video_imported
+→ video_prepared
+→ boundary_confirmed
+→ target_selected
+→ tracking
+→ pending_crossing_review
+→ pending_user_confirmation
+→ accepted
+```
+
+Exceptional states are:
+
+```text
+diagnostic
+rejected_crossing_identity
+rejected_by_user
+```
+
+Worker operations must check predecessor state. The frontend may disable
+buttons for usability, but the worker remains the authority.
 
 ### Normal Video Preparation
+
+`normal.inspectVideo` returns only video metadata and a playable file URL.
 
 `normal.prepareVideo` returns:
 
@@ -94,6 +136,25 @@ finite positive `q_C` and finite positive `sigma_q_C`.
 - effective measurement region from the second line to the penultimate line
 - `scale_y_m_per_px`
 - warnings/flags when voltage-operation or grid detection confidence is low
+
+Normal progress events are separate from Experimental progress:
+
+```json
+{
+  "request_id": "req_...",
+  "operation": "prepare_video",
+  "stage": "sample_voltage_region",
+  "label": "正在采样电压显示区域",
+  "current": 36,
+  "total": 120,
+  "unit": "frames",
+  "fraction": 0.3,
+  "indeterminate": false
+}
+```
+
+`fraction` is present only when it is derived from real `current / total`.
+Unquantified stages must set `indeterminate=true`.
 
 All user-facing time controls in Normal use seconds. The UI should offer coarse
 `±1 s` and fine `±0.1 s` nudges for both `0V_start_s` and `0V_end_s`. The UI may
@@ -131,8 +192,8 @@ Each saved Normal record represents one user-reviewed droplet measurement:
     "radius_m": 8.0e-7,
     "flags": []
   },
-  "status": "valid",
-  "kept": true
+  "status": "pending_user_confirmation",
+  "kept": false
 }
 ```
 
@@ -173,6 +234,18 @@ the track is missing around a grid line, the backend should create a clickable
 The UI should play a local magnified clip of roughly one second before and
 after the crossing. If the video is too short or the crossing is near the
 beginning/end, clip the review window to valid video bounds instead of failing.
+The clip is generated only when the user opens that crossing review.
+
+Review results are limited to:
+
+```text
+same_drop
+different_drop
+```
+
+All crossings must be reviewed as `same_drop` before a q record can become
+`accepted`. Any `different_drop` result permanently blocks that record from
+inversion unless the user reselects and retracks.
 
 ### Normal Physical Parameters
 
@@ -194,19 +267,23 @@ default" action is added.
 
 ### Normal Inversion And Visualization
 
-After at least three kept valid q records exist, `normal.runInversion` runs the
+After at least three accepted q records exist, `normal.runInversion` runs the
 Normal-only weighted integer residual grid search. It uses each record's
-`q_C` and `sigma_q_C`, assigns integer multiples, reports weighted residuals,
+`q_C` and `sigma_q_C`, applies `sigma_eff_i^2 = sigma_q_i^2 + sigma_floor^2`,
+assigns integer multiples, re-estimates `e` with fixed integer assignments,
+iterates until the assignment vector stabilizes or reaches the iteration cap,
+deduplicates identical assignment vectors, reports sorted candidate solutions,
 and exposes chart data showing:
 
 - observed q values with uncertainty
 - nearest `n * e_hat` levels
 - residuals normalized by `sigma_q_C`
-- a quantized-model view against a continuous-model view
+- quantized alignment diagnostics
 
-Normal inversion is a teaching and evidence tool. It should report whether the
-current dataset supports a stable quantized interpretation, but it must not
-claim proof from a small or unstable sample.
+Normal inversion is a teaching and evidence tool. With exactly three records it
+must be labeled exploratory. Until a real continuous baseline is defined and
+fitted, Normal must not output `quantized_favored`, `continuous_favored`, or any
+model-win claim. The UI may show residual and alignment plots only.
 
 The underlying backend entry point remains the Python API:
 

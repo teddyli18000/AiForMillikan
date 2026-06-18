@@ -81,10 +81,27 @@ function registerIpc(): void {
   ipcMain.handle("analysis:validate", (_event, payload) => worker.request("analysis.validate", payload));
   ipcMain.handle("downstream:run", (_event, payload) => worker.request("downstream.run", payload));
   ipcMain.handle("normal:initialize", (_event, payload) => worker.request("normal.initialize", payload || {}));
-  ipcMain.handle("normal:prepareVideo", (_event, payload) => worker.request("normal.prepareVideo", payload));
-  ipcMain.handle("normal:saveMeasurement", (_event, payload) => worker.request("normal.saveMeasurement", payload));
+  ipcMain.handle("normal:inspectVideo", (_event, payload) => worker.request("normal.inspectVideo", payload));
+  ipcMain.handle("normal:prepareVideo", (event, payload) =>
+    worker.request("normal.prepareVideo", payload, (progress) => {
+      event.sender.send("normal:progress", progress);
+    })
+  );
+  ipcMain.handle("normal:confirmBoundary", (_event, payload) => worker.request("normal.confirmBoundary", payload));
+  ipcMain.handle("normal:selectTarget", (_event, payload) => worker.request("normal.selectTarget", payload));
+  ipcMain.handle("normal:saveMeasurement", (event, payload) =>
+    worker.request("normal.saveMeasurement", payload, (progress) => {
+      event.sender.send("normal:progress", progress);
+    })
+  );
+  ipcMain.handle("normal:prepareCrossingReview", (_event, payload) => worker.request("normal.prepareCrossingReview", payload));
+  ipcMain.handle("normal:reviewCrossing", (_event, payload) => worker.request("normal.reviewCrossing", payload));
   ipcMain.handle("normal:updateRecordSelection", (_event, payload) => worker.request("normal.updateRecordSelection", payload));
-  ipcMain.handle("normal:runInversion", (_event, payload) => worker.request("normal.runInversion", payload || {}));
+  ipcMain.handle("normal:runInversion", (event, payload) =>
+    worker.request("normal.runInversion", payload || {}, (progress) => {
+      event.sender.send("normal:progress", progress);
+    })
+  );
 
   ipcMain.handle("analysis:run", (event, payload) =>
     worker.request("analysis.run", payload, (progress) => {

@@ -90,6 +90,30 @@ def compute_q(fit: dict[str, Any], balance_voltage_V: float, cfg: dict[str, Any]
     rel_fit = _fit_relative_uncertainty(fit)
     rel_floor = float(pcfg.get("relative_uncertainty_floor", 0.05))
     sigma = abs(charge) * max(rel_floor, rel_fit)
+    uncertainty_budget = {
+        "included": [
+            {
+                "component": "velocity_fit_random",
+                "relative": float(rel_fit),
+                "source": "linear fit residuals from the confirmed 0V falling track",
+            },
+            {
+                "component": "configured_relative_floor",
+                "relative": float(rel_floor),
+                "source": "normal physics.relative_uncertainty_floor",
+            },
+        ],
+        "not_included": [
+            "balance_voltage_uncertainty",
+            "measurement_distance_uncertainty",
+            "plate_distance_uncertainty",
+            "viscosity_uncertainty",
+            "pressure_uncertainty",
+            "oil_density_uncertainty",
+            "cunningham_b_uncertainty",
+        ],
+        "note": "Normal v1 reports q uncertainty from implemented fit residual terms and the configured floor only; undefined instrument uncertainties are explicit non-included terms.",
+    }
     valid = all(math.isfinite(value) and value > 0 for value in [radius, abs(charge), sigma])
     return {
         "valid": bool(valid),
@@ -98,6 +122,7 @@ def compute_q(fit: dict[str, Any], balance_voltage_V: float, cfg: dict[str, Any]
         "charge_abs_C": float(abs(charge)),
         "sigma_q_C": float(sigma),
         "sigma_q_random_C": float(sigma),
+        "uncertainty_budget": uncertainty_budget,
         "radius_m": float(radius),
         "eta_eff_Pa_s": float(eta_eff),
         "velocity_m_s": float(velocity),

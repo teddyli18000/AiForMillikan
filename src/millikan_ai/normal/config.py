@@ -61,6 +61,9 @@ DEFAULT_NORMAL_CONFIG: dict[str, Any] = {
         "e_max_C": 1.90e-19,
         "grid_points": 900,
         "max_integer": 80,
+        "max_iterations": 8,
+        "candidate_count": 8,
+        "sigma_floor_C": 0.0,
         "max_weighted_rms": 2.5,
     },
 }

@@ -24,6 +24,18 @@ export type ProgressEvent = {
   label: string;
 };
 
+export type NormalProgressEvent = {
+  request_id: string;
+  operation: string;
+  stage: string;
+  label: string;
+  current?: number | null;
+  total?: number | null;
+  unit?: string | null;
+  fraction?: number | null;
+  indeterminate: boolean;
+};
+
 export type StatusMap = {
   video_readable?: boolean;
   valid_for_q?: boolean;
@@ -180,7 +192,12 @@ export type AppMode = "normal" | "experimental";
 export type NormalBoundary = {
   zero_v_start_s: number;
   zero_v_end_s: number;
+  zero_v_start_frame?: number;
+  zero_v_end_frame?: number;
+  selection_time_s?: number;
+  selection_frame?: number;
   source?: string;
+  flags?: string[];
 };
 
 export type NormalGrid = {
@@ -197,9 +214,14 @@ export type NormalCrossingEvent = {
   event_id: string;
   grid_line_y_px?: number;
   frame_idx?: number;
+  start_time_s?: number;
+  end_time_s?: number;
   time_s?: number;
   review_start_time_s?: number;
   review_end_time_s?: number;
+  review_result?: "same_drop" | "different_drop";
+  review_clip_url?: string;
+  review_clip_path?: string;
   source_video_box?: { x: number; y: number; width: number; height: number };
   [key: string]: unknown;
 };
@@ -209,6 +231,8 @@ export type NormalRecord = {
   video_path?: string;
   kept: boolean;
   valid: boolean;
+  q_valid?: boolean;
+  status?: string;
   q_C?: number | null;
   sigma_q_C?: number | null;
   radius_m?: number | null;
@@ -223,6 +247,7 @@ export type NormalRecord = {
 export type NormalSession = {
   session_root: string;
   records: NormalRecord[];
+  active_video?: Record<string, unknown> | null;
   counts?: {
     total?: number;
     valid?: number;
@@ -231,6 +256,20 @@ export type NormalSession = {
   };
   inversion?: NormalInversionResult | null;
   [key: string]: unknown;
+};
+
+export type NormalInitializeResponse = {
+  session: NormalSession;
+  session_root: string;
+  run_root: string;
+  session_file?: string;
+  config: Record<string, any>;
+};
+
+export type NormalInspectVideoResponse = {
+  video_path: string;
+  video_url: string;
+  metadata: VideoMetadata;
 };
 
 export type NormalPrepareVideoResponse = {
@@ -242,7 +281,15 @@ export type NormalPrepareVideoResponse = {
     confidence?: number;
     diagnostics?: Record<string, unknown>;
   };
+  boundary_diagnostics?: Record<string, unknown>;
   grid: NormalGrid;
+  session: NormalSession;
+  config: Record<string, any>;
+};
+
+export type NormalStateResponse = {
+  session_root: string;
+  active_video?: Record<string, unknown>;
   session: NormalSession;
 };
 
@@ -272,6 +319,13 @@ export type NormalInversionResponse = {
   session: NormalSession;
 };
 
+export type NormalCrossingReviewResponse = {
+  session_root: string;
+  record: NormalRecord;
+  event?: NormalCrossingEvent;
+  session: NormalSession;
+};
+
 export type DesktopApi = {
   openVideoDialog: () => Promise<string | null>;
   openRunDialog: () => Promise<string | null>;
@@ -298,17 +352,24 @@ export type DesktopApi = {
   validateRun: (payload: { run_dir: string; config_path?: string }) => Promise<{ valid: boolean; errors: string[] }>;
   runDownstream: (payload: unknown) => Promise<unknown>;
   exportReport: (payload: { run_dir: string; include_pdf?: boolean; mode?: "folder" | "zip" }) => Promise<unknown>;
-  normalInitialize: (payload?: { session_root?: string; run_root?: string; config_overrides?: Record<string, unknown> }) => Promise<NormalSession>;
+  getDroppedFilePath: (file: File) => Promise<string>;
+  normalInitialize: (payload?: { session_root?: string; run_root?: string; config_overrides?: Record<string, unknown> }) => Promise<NormalInitializeResponse>;
+  normalInspectVideo: (payload: { video_path: string }) => Promise<NormalInspectVideoResponse>;
   normalPrepareVideo: (payload: {
     video_path: string;
     session_root?: string;
     run_root?: string;
     config_overrides?: Record<string, unknown>;
   }) => Promise<NormalPrepareVideoResponse>;
+  normalConfirmBoundary: (payload: { session_root?: string; boundary: NormalBoundary }) => Promise<NormalStateResponse>;
+  normalSelectTarget: (payload: Record<string, unknown>) => Promise<NormalStateResponse>;
   normalSaveMeasurement: (payload: Record<string, unknown>) => Promise<NormalMeasurementResponse>;
+  normalPrepareCrossingReview: (payload: { session_root?: string; record_id: string; event_id: string }) => Promise<NormalCrossingReviewResponse>;
+  normalReviewCrossing: (payload: { session_root?: string; record_id: string; event_id: string; result: "same_drop" | "different_drop" }) => Promise<NormalCrossingReviewResponse>;
   normalSelectRecord: (payload: { session_root?: string; record_id: string; kept: boolean }) => Promise<NormalSession>;
   normalRunInversion: (payload?: { session_root?: string; config_overrides?: Record<string, unknown> }) => Promise<NormalInversionResponse>;
   normalExportSession: (payload?: { session_root?: string }) => Promise<unknown>;
   openPath: (targetPath: string) => Promise<unknown>;
   onAnalysisProgress: (callback: (progress: ProgressEvent) => void) => () => void;
+  onNormalProgress: (callback: (progress: NormalProgressEvent) => void) => () => void;
 };
