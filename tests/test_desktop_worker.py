@@ -8,6 +8,8 @@ import cv2
 import numpy as np
 
 from millikan_ai.config import load_config, save_config
+from millikan_ai.normal.config import normal_config
+from millikan_ai.normal.grid import calibrate_grid
 
 
 def _fast_config() -> dict:
@@ -42,6 +44,16 @@ def _make_normal_synthetic_video(path: Path) -> None:
     writer.release()
 
 
+def _make_blue_grid_video(path: Path) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+    for _idx in range(20):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        for y in [30, 60, 90, 120, 150, 180, 210]:
+            cv2.line(frame, (24, y), (296, y), (255, 150, 90), 2)
+        writer.write(frame)
+    writer.release()
+
+
 def _send_worker(message: dict) -> list[dict]:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(Path.cwd() / "src") + os.pathsep + env.get("PYTHONPATH", "")
@@ -66,6 +78,19 @@ def test_desktop_worker_inspects_video(tmp_path: Path):
     assert messages[-1]["type"] == "result"
     assert messages[-1]["payload"]["metadata"]["readable"] is True
     assert messages[-1]["payload"]["metadata"]["frame_count"] == 120
+
+
+def test_normal_grid_detects_blue_screen_lines(tmp_path: Path):
+    video = tmp_path / "blue_grid.mp4"
+    _make_blue_grid_video(video)
+    cfg = normal_config({"grid": {"measurement_distance_m": 0.0015, "min_horizontal_coverage": 0.55}})
+
+    grid = calibrate_grid(str(video), cfg)
+
+    assert grid["valid"] is True
+    assert len(grid["grid_lines_y"]) >= 7
+    assert grid["second_line_y"] == 60
+    assert grid["penultimate_line_y"] == 180
 
 
 def test_desktop_worker_runs_analysis_and_loads_artifacts(tmp_path: Path):

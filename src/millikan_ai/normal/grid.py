@@ -15,6 +15,8 @@ def calibrate_grid(video_path: str | Path, cfg: dict[str, Any], start_frame: int
     background = np.median(np.stack(samples, axis=0), axis=0).astype(np.uint8)
     gray = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
     lines_y = detect_horizontal_lines(gray, cfg["grid"])
+    if len(lines_y) < 4:
+        lines_y = detect_blue_horizontal_lines(background, cfg["grid"])
     warnings: list[str] = []
     if len(lines_y) < 4:
         warnings.append("grid_lines_insufficient")
@@ -58,6 +60,24 @@ def detect_horizontal_lines(gray: np.ndarray, cfg: dict[str, Any]) -> list[int]:
     if projection.max(initial=0) <= 0:
         return []
     threshold = max(5, int(projection.max() * 0.35))
+    ys = np.where(projection >= threshold)[0].tolist()
+    return _merge_positions(ys, int(cfg.get("line_merge_px", 5)))
+
+
+def detect_blue_horizontal_lines(frame_bgr: np.ndarray, cfg: dict[str, Any]) -> list[int]:
+    blue, green, red = cv2.split(frame_bgr)
+    blue_i = blue.astype(np.int16)
+    green_i = green.astype(np.int16)
+    red_i = red.astype(np.int16)
+    mask = ((blue_i > red_i + 15) & (blue_i > green_i + 5) & (blue > 70)).astype(np.uint8) * 255
+    width = frame_bgr.shape[1]
+    kernel_len = max(20, int(width * float(cfg.get("min_horizontal_coverage", 0.42))))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_len, 1))
+    horiz = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    projection = np.count_nonzero(horiz, axis=1)
+    if projection.max(initial=0) <= 0:
+        return []
+    threshold = max(5, int(width * float(cfg.get("min_horizontal_coverage", 0.42)) * 0.55))
     ys = np.where(projection >= threshold)[0].tolist()
     return _merge_positions(ys, int(cfg.get("line_merge_px", 5)))
 
