@@ -223,7 +223,7 @@ def _op_normal_prepare_video(payload: Json, _request_id: str) -> Json:
 
 
 def _op_normal_confirm_boundary(payload: Json, _request_id: str) -> Json:
-    return normal_confirm_boundary(payload)
+    return normal_confirm_boundary(payload, config_overrides=_normal_config_overrides(payload))
 
 
 def _op_normal_select_target(payload: Json, _request_id: str) -> Json:

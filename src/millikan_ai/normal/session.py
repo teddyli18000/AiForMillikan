@@ -35,17 +35,19 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 
 def initialize_session(session_root: str | None = None, run_root: str | None = None, config_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = normal_config(config_overrides)
-    root = Path(session_root or cfg["session"]["session_root"])
+    session_id = f"normal_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    root = Path(session_root) if session_root else Path(cfg["session"]["session_root"]) / session_id
     run = Path(run_root or cfg["session"]["run_root"])
     root.mkdir(parents=True, exist_ok=True)
     run.mkdir(parents=True, exist_ok=True)
     path = root / "normal_session.json"
-    if path.exists():
+    if session_root and path.exists():
         session = _read_json(path)
     else:
         session = {
             "schema_version": 1,
-            "session_id": f"normal_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
+            "session_id": session_id,
+            "transient": True,
             "created_at": _now(),
             "updated_at": _now(),
             "records": [],
@@ -125,13 +127,15 @@ def prepare_video(
     }
 
 
-def confirm_boundary(payload: dict[str, Any]) -> dict[str, Any]:
-    init = initialize_session(payload.get("session_root"), payload.get("run_root"))
+def confirm_boundary(payload: dict[str, Any], config_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = normal_config(config_overrides)
+    init = initialize_session(payload.get("session_root"), payload.get("run_root"), config_overrides)
     session_path = Path(init["session_file"])
     session = _read_json(session_path)
     active = _require_active_state(session, {"video_prepared"})
     metadata = active["metadata"]
     boundary = _normalize_boundary(payload["boundary"], metadata)
+    boundary["selection_window"] = _selection_window(boundary, metadata, cfg)
     active["boundary"] = boundary
     active["state"] = "boundary_confirmed"
     active["boundary_confirmed_at"] = _now()
@@ -153,10 +157,13 @@ def select_target(payload: dict[str, Any], config_overrides: dict[str, Any] | No
     target = _normalize_target(payload["target"], active["metadata"])
     boundary = active["boundary"]
     target_frame = int(target["target_frame"])
-    if target_frame > int(boundary["zero_v_end_frame"]):
-        raise RuntimeError("target frame must be before the confirmed 0V end")
+    window = boundary.get("selection_window") or _selection_window(boundary, active["metadata"], normal_config(config_overrides))
+    if not (int(window["start_frame"]) <= target_frame <= int(window["end_frame"])):
+        raise RuntimeError("target frame must be inside the selection window near 0V start")
     overrides = payload.get("parameter_overrides") or {}
+    target["selection_window"] = window
     active["target"] = target
+    active["retry_of_record_id"] = payload.get("retry_of_record_id")
     active["balance_voltage_V"] = voltage
     active["balance_confirmed"] = True
     active["parameter_overrides"] = overrides if isinstance(overrides, dict) else {}
@@ -189,7 +196,7 @@ def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] |
 
     _emit(progress_callback, "validate_measurement_inputs", "校验测量输入", indeterminate=True)
     if not grid.get("valid"):
-        record = _diagnostic_record(record_id, video_path, boundary, target, grid, ["grid_calibration_invalid"], record_dir)
+        record = _diagnostic_record(record_id, video_path, boundary, target, grid, ["grid_calibration_invalid"], record_dir, active, effective_cfg)
     else:
         tracking = run_tracking(
             TrackRequest(
@@ -219,6 +226,7 @@ def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] |
         record = {
             "schema_version": 1,
             "record_id": record_id,
+            "retry_of_record_id": active.get("retry_of_record_id"),
             "created_at": _now(),
             "video_path": video_path,
             "video_sha256_16": file_sha256(video_path)[:16] if Path(video_path).exists() else "",
@@ -288,8 +296,10 @@ def review_crossing(payload: dict[str, Any]) -> dict[str, Any]:
     if result == "different_drop":
         record["status"] = "rejected_crossing_identity"
         record["kept"] = False
+        _restore_active_for_adjustment(session, record)
     elif record.get("status") == "pending_crossing_review" and _all_crossings_reviewed_same(record):
         record["status"] = "pending_user_confirmation"
+        _set_active_state(session, "pending_user_confirmation", record.get("record_id"))
     session["updated_at"] = _now()
     _write_json(session_path, session)
     _write_json(Path(record["record_dir"]) / "record_manifest.json", record)
@@ -308,11 +318,13 @@ def update_record_selection(session_root: str | None, record_id: str, kept: bool
             record["status"] = "accepted"
             record["kept"] = True
             record["accepted_at"] = _now()
+            _set_active_state(session, "accepted", record.get("record_id"))
         else:
             raise RuntimeError(f"record cannot be accepted from status={record.get('status')}")
     else:
         record["status"] = "rejected_by_user"
         record["kept"] = False
+        _restore_active_for_adjustment(session, record)
     session["updated_at"] = _now()
     _write_json(session_path, session)
     _write_json(Path(record["record_dir"]) / "record_manifest.json", record)
@@ -380,6 +392,26 @@ def _normalize_boundary(boundary: dict[str, Any], metadata: dict[str, Any]) -> d
     }
 
 
+def _selection_window(boundary: dict[str, Any], metadata: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+    fps = float(metadata.get("fps") or 30.0)
+    frame_count = int(metadata.get("frame_count") or 1)
+    zero_start = int(boundary["zero_v_start_frame"])
+    zero_end = int(boundary["zero_v_end_frame"])
+    scfg = cfg.get("selection", {})
+    before = float(scfg.get("before_zero_v_start_s", 1.0))
+    after = float(scfg.get("after_zero_v_start_s", 0.5))
+    start_frame = max(0, int(round(zero_start - before * fps)))
+    end_frame = min(frame_count - 1, zero_end, int(round(zero_start + after * fps)))
+    end_frame = max(start_frame, end_frame)
+    return {
+        "start_s": start_frame / fps,
+        "end_s": end_frame / fps,
+        "start_frame": start_frame,
+        "end_frame": end_frame,
+        "source": "normal_v1_default",
+    }
+
+
 def _normalize_target(target: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
     fps = float(metadata.get("fps") or 30.0)
     frame_count = int(metadata.get("frame_count") or 1)
@@ -402,15 +434,32 @@ def _normalize_target(target: dict[str, Any], metadata: dict[str, Any]) -> dict[
     }
 
 
-def _diagnostic_record(record_id: str, video_path: str, boundary: dict[str, Any], target: dict[str, Any], grid: dict[str, Any], flags: list[str], record_dir: Path) -> dict[str, Any]:
+def _diagnostic_record(
+    record_id: str,
+    video_path: str,
+    boundary: dict[str, Any],
+    target: dict[str, Any],
+    grid: dict[str, Any],
+    flags: list[str],
+    record_dir: Path,
+    active: dict[str, Any],
+    effective_cfg: dict[str, Any],
+) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "record_id": record_id,
+        "retry_of_record_id": active.get("retry_of_record_id"),
         "created_at": _now(),
         "video_path": video_path,
+        "video_sha256_16": file_sha256(video_path)[:16] if Path(video_path).exists() else "",
+        "metadata": active.get("metadata"),
+        "balance_voltage_V": active.get("balance_voltage_V"),
+        "balance_confirmed": active.get("balance_confirmed"),
         "time_window": boundary,
         "target": target,
         "grid": grid,
+        "parameter_overrides": active.get("parameter_overrides") or {},
+        "effective_parameters": {"physics": effective_cfg["physics"], "grid": effective_cfg["grid"]},
         "crossing_events": [],
         "fit": {"valid": False, "flags": flags},
         "q": {"valid": False, "diagnostic_only": True, "flags": flags},
@@ -419,6 +468,36 @@ def _diagnostic_record(record_id: str, video_path: str, boundary: dict[str, Any]
         "record_dir": str(record_dir),
         "recovery_suggestions": ["请先修正网格识别或有效测量区。"],
     }
+
+
+def _restore_active_for_adjustment(session: dict[str, Any], record: dict[str, Any]) -> None:
+    metadata = record.get("metadata") or {}
+    session["active_video"] = {
+        "state": "boundary_confirmed",
+        "path": record.get("video_path"),
+        "metadata": metadata,
+        "video_url": file_url(record["video_path"]) if record.get("video_path") else "",
+        "boundary_suggestion": record.get("time_window"),
+        "boundary": record.get("time_window"),
+        "grid": record.get("grid"),
+        "adjustment_source_record_id": record.get("record_id"),
+        "adjustment": {
+            "record_id": record.get("record_id"),
+            "target": record.get("target"),
+            "balance_voltage_V": record.get("balance_voltage_V"),
+            "balance_confirmed": record.get("balance_confirmed"),
+            "parameter_overrides": record.get("parameter_overrides") or {},
+        },
+        "restored_for_adjustment_at": _now(),
+    }
+
+
+def _set_active_state(session: dict[str, Any], state: str, record_id: Any = None) -> None:
+    active = session.get("active_video")
+    if isinstance(active, dict):
+        active["state"] = state
+        if record_id:
+            active["last_record_id"] = record_id
 
 
 def _tracking_stats(track: list[dict[str, Any]]) -> dict[str, int]:

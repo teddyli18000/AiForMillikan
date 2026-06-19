@@ -196,6 +196,13 @@ export type NormalBoundary = {
   zero_v_end_frame?: number;
   selection_time_s?: number;
   selection_frame?: number;
+  selection_window?: {
+    start_s: number;
+    end_s: number;
+    start_frame?: number;
+    end_frame?: number;
+    source?: string;
+  };
   source?: string;
   flags?: string[];
 };
@@ -250,6 +257,7 @@ export type NormalSession = {
   active_video?: Record<string, unknown> | null;
   counts?: {
     total?: number;
+    q_ready?: number;
     valid?: number;
     kept_valid?: number;
     selected_valid?: number;

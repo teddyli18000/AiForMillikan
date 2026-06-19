@@ -146,9 +146,9 @@ def test_desktop_worker_runs_analysis_and_loads_artifacts(tmp_path: Path):
 def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path):
     video = tmp_path / "normal_synthetic.mp4"
     _make_normal_synthetic_video(video)
-    session_root = tmp_path / "normal_session"
+    session_base = tmp_path / "normal_session"
     overrides = {
-        "session": {"session_root": str(session_root), "run_root": str(tmp_path / "normal_runs")},
+        "session": {"session_root": str(session_base), "run_root": str(tmp_path / "normal_runs")},
         "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 3},
         "tracking": {"minmass": 20, "memory_frames": 4, "grid_occlusion_radius_px": 1},
         "fit": {"min_points": 8, "min_duration_s": 0.4, "min_displacement_px": 2.0, "min_r2": 0.2},
@@ -179,6 +179,13 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
     assert payload["grid"]["valid"] is True
     assert payload["session"]["counts"]["total"] == 0
     assert "config" in payload
+    session_root = Path(payload["session_root"])
+    assert session_root.parent == session_base
+
+    fresh = _send_worker({"id": "fresh-normal", "op": "normal.initialize", "payload": {"config_overrides": overrides}})[-1]
+    assert fresh["type"] == "result"
+    assert fresh["payload"]["session"]["session_id"] != payload["session"]["session_id"]
+    assert fresh["payload"]["session"]["counts"]["total"] == 0
 
     for index in range(3):
         prepared = _send_worker(
@@ -201,6 +208,28 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
         )[-1]
         assert confirmed["type"] == "result"
         assert confirmed["payload"]["active_video"]["state"] == "boundary_confirmed"
+        assert confirmed["payload"]["active_video"]["boundary"]["selection_window"]["end_s"] <= 0.6
+
+        if index == 0:
+            out_of_range = _send_worker(
+                {
+                    "id": "select-out-of-range",
+                    "op": "normal.selectTarget",
+                    "payload": {
+                        "session_root": str(session_root),
+                        "balance_voltage_V": 239.0,
+                        "balance_confirmed": True,
+                        "target": {
+                            "target_frame": 90,
+                            "target_time_s": 3.0,
+                            "source_center": {"x": 92.0, "y": 83.0},
+                            "source_video_box": {"x": 78.0, "y": 69.0, "width": 28.0, "height": 28.0},
+                        },
+                        "parameter_overrides": overrides,
+                    },
+                }
+            )[-1]
+            assert out_of_range["type"] == "error"
 
         selected = _send_worker(
             {
@@ -298,9 +327,9 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
 def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Path):
     video = tmp_path / "crossing_synthetic.mp4"
     _make_crossing_normal_video(video)
-    session_root = tmp_path / "normal_crossing_session"
+    session_base = tmp_path / "normal_crossing_session"
     overrides = {
-        "session": {"session_root": str(session_root), "run_root": str(tmp_path / "normal_crossing_runs")},
+        "session": {"session_root": str(session_base), "run_root": str(tmp_path / "normal_crossing_runs")},
         "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 1},
         "tracking": {"minmass": 20, "memory_frames": 4, "grid_occlusion_radius_px": 1},
         "fit": {"min_points": 8, "min_duration_s": 0.4, "min_displacement_px": 2.0, "min_r2": 0.2},
@@ -315,6 +344,7 @@ def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Pat
     )[-1]
     assert prepared["type"] == "result"
     assert prepared["payload"]["grid"]["valid"] is True
+    session_root = Path(prepared["payload"]["session_root"])
 
     confirmed = _send_worker(
         {
@@ -384,6 +414,8 @@ def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Pat
     )[-1]
     assert rejected["type"] == "result"
     assert rejected["payload"]["record"]["status"] == "rejected_crossing_identity"
+    assert rejected["payload"]["session"]["active_video"]["state"] == "boundary_confirmed"
+    assert rejected["payload"]["session"]["active_video"]["adjustment"]["record_id"] == record["record_id"]
 
     blocked_accept = _send_worker(
         {

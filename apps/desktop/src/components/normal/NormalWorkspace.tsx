@@ -72,6 +72,21 @@ function clampBoundary(boundary: NormalBoundary, metadata: VideoMetadata | null)
   return { ...boundary, zero_v_start_s: Number(start.toFixed(3)), zero_v_end_s: Number(end.toFixed(3)), source: "manual_ui" };
 }
 
+function selectionWindowFromBoundary(boundary: NormalBoundary, metadata: VideoMetadata | null) {
+  const duration = metadata?.duration_s && Number.isFinite(metadata.duration_s) ? metadata.duration_s : Number.POSITIVE_INFINITY;
+  const configured = boundary.selection_window;
+  const start = configured?.start_s ?? Math.max(0, Number(boundary.zero_v_start_s || 0) - 1);
+  const end = configured?.end_s ?? Math.min(Number(boundary.zero_v_end_s || duration), Number(boundary.zero_v_start_s || 0) + 0.5);
+  const safeStart = Math.max(0, Math.min(start, duration));
+  const safeEnd = Math.max(safeStart, Math.min(end, duration, Number(boundary.zero_v_end_s || duration)));
+  return { start_s: Number(safeStart.toFixed(3)), end_s: Number(safeEnd.toFixed(3)), source: configured?.source ?? "normal_v1_default" };
+}
+
+function clampSelectionTime(time: number, boundary: NormalBoundary, metadata: VideoMetadata | null) {
+  const window = selectionWindowFromBoundary(boundary, metadata);
+  return Number(Math.max(window.start_s, Math.min(window.end_s, time)).toFixed(3));
+}
+
 export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -93,6 +108,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [parameterOverrides, setParameterOverrides] = useState<Record<string, string>>({});
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [adjustingRecordId, setAdjustingRecordId] = useState<string | null>(null);
   const [reviewEvent, setReviewEvent] = useState<NormalCrossingEvent | null>(null);
   const [inversion, setInversion] = useState<NormalInversionResult | null>(null);
   const [progress, setProgress] = useState<NormalProgressEvent | null>(null);
@@ -129,6 +145,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const gridLineCount = (grid?.grid_lines_y as unknown[] | undefined)?.length ?? (grid?.line_y_px as unknown[] | undefined)?.length ?? 0;
   const effectiveTopPx = Number(grid?.effective_top_px ?? grid?.second_line_y ?? Number.NaN);
   const effectiveBottomPx = Number(grid?.effective_bottom_px ?? grid?.penultimate_line_y ?? Number.NaN);
+  const selectionWindow = selectionWindowFromBoundary(boundary, metadata);
 
   const inspectVideo = async (path: string) => {
     if (!path) {
@@ -145,6 +162,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setBoundary({ zero_v_start_s: 0, zero_v_end_s: Math.min(1, result.metadata.duration_s || 1), source: "manual_ui" });
       setGrid(null);
       setSelectionBox(null);
+      setAdjustingRecordId(null);
       setReviewEvent(null);
       setStage("import");
       setMessage("视频预览已就绪。点击开始处理后才会检测 0V 和网格。");
@@ -191,7 +209,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setVideoUrl(result.video_url || videoUrl);
       setBoundary(clampBoundary(result.boundary, result.metadata));
       setBoundaryDiagnostics(result.boundary_diagnostics ?? null);
-      setSelectionTime(Number(result.boundary.selection_time_s ?? result.boundary.zero_v_start_s ?? 0));
+      setSelectionTime(clampSelectionTime(Number(result.boundary.selection_time_s ?? result.boundary.zero_v_start_s ?? 0), result.boundary, result.metadata));
       setGrid(result.grid);
       setStage("boundary");
       setProgress(null);
@@ -208,8 +226,11 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     try {
       const result = await desktopApi.normalConfirmBoundary({ session_root: session?.session_root, boundary });
       setSession(result.session);
-      setSelectionTime(Math.max(0, Number(boundary.selection_time_s ?? boundary.zero_v_start_s ?? 0)));
-      jumpTo(Number(boundary.selection_time_s ?? boundary.zero_v_start_s ?? 0));
+      const confirmedBoundary = (result.active_video?.boundary as NormalBoundary | undefined) ?? boundary;
+      setBoundary(confirmedBoundary);
+      const nextSelectionTime = clampSelectionTime(Number(confirmedBoundary.selection_time_s ?? confirmedBoundary.zero_v_start_s ?? 0), confirmedBoundary, metadata);
+      setSelectionTime(nextSelectionTime);
+      jumpTo(nextSelectionTime);
       setStage("target");
       setMessage("0V 边界已确认。请在 0V 起点附近框选目标油滴。");
     } catch (error) {
@@ -229,7 +250,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setMessage("请填写正的平衡电压，并明确确认该油滴在该电压下处于平衡状态。");
       return;
     }
-    const targetFrame = Math.max(0, Math.min(metadata.frame_count - 1, Math.round(selectionTime * (metadata.fps || 1))));
+    const safeSelectionTime = clampSelectionTime(selectionTime, boundary, metadata);
+    const targetFrame = Math.max(0, Math.min(metadata.frame_count - 1, Math.round(safeSelectionTime * (metadata.fps || 1))));
     const target = {
       target_frame: targetFrame,
       target_time_s: targetFrame / (metadata.fps || 1),
@@ -241,6 +263,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     try {
       await desktopApi.normalSelectTarget({
         session_root: session?.session_root,
+        retry_of_record_id: adjustingRecordId ?? undefined,
         target,
         balance_voltage_V: voltage,
         balance_confirmed: true,
@@ -249,6 +272,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       const response = await desktopApi.normalSaveMeasurement({ session_root: session?.session_root });
       setSession(response.session);
       setSelectedRecordId(response.record.record_id);
+      setAdjustingRecordId(null);
       setStage(response.record.status === "pending_crossing_review" ? "review" : "results");
       setProgress(null);
       setMessage(response.record.status === "pending_crossing_review" ? "追踪完成。请逐一复核 crossing 身份。" : "追踪和 q 计算完成。请确认是否保留。");
@@ -321,7 +345,12 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
         kept
       });
       setSession(nextSession);
-      setMessage(kept ? "本滴 q 已由用户确认保留。" : "本滴 q 已排除。");
+      if (!kept) {
+        restoreRecordForAdjustment(selectedRecord);
+        setMessage("已进入返回调整：已恢复该记录的时间、框选、电压和参数，可微调后重新追踪。");
+      } else {
+        setMessage("本滴 q 已由用户确认保留。");
+      }
     } catch (error) {
       setMessage(`更新记录失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -382,9 +411,34 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   };
 
   const adjustSelectionTime = (delta: number) => {
-    const next = Math.max(0, Math.min(duration || metadata?.duration_s || 0, Number((selectionTime + delta).toFixed(3))));
+    const next = clampSelectionTime(Number((selectionTime + delta).toFixed(3)), boundary, metadata);
     setSelectionTime(next);
     jumpTo(next);
+  };
+
+  const restoreRecordForAdjustment = (record: NormalRecord) => {
+    const recordBoundary = record.time_window as NormalBoundary | undefined;
+    const target = record.target as { target_time_s?: number; source_video_box?: VideoBox } | undefined;
+    const overrides = record.parameter_overrides as Record<string, unknown> | undefined;
+    if (recordBoundary) {
+      setBoundary(recordBoundary);
+    }
+    setSelectionTime(clampSelectionTime(Number(target?.target_time_s ?? recordBoundary?.zero_v_start_s ?? boundary.zero_v_start_s), recordBoundary ?? boundary, metadata));
+    setSelectionBox(target?.source_video_box ?? null);
+    setBalanceVoltage(record.balance_voltage_V ? String(record.balance_voltage_V) : "");
+    setBalanceConfirmed(Boolean(record.balance_confirmed ?? record.balance_voltage_V));
+    setParameterOverrides(
+      Object.fromEntries(
+        Object.entries(overrides ?? {}).flatMap(([group, value]) =>
+          value && typeof value === "object" && !Array.isArray(value)
+            ? Object.entries(value as Record<string, unknown>).map(([key, nested]) => [key, String(nested)])
+            : [[group, String(value)]]
+        )
+      )
+    );
+    setAdjustingRecordId(record.record_id);
+    setStage("target");
+    jumpTo(clampSelectionTime(Number(target?.target_time_s ?? recordBoundary?.zero_v_start_s ?? boundary.zero_v_start_s), recordBoundary ?? boundary, metadata));
   };
 
   const getVideoGeometry = () => {
@@ -609,6 +663,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
           {stage === "target" ? (
             <TargetPanel
               selectionTime={selectionTime}
+              selectionWindow={selectionWindow}
               selectionBox={selectionBox}
               balanceVoltage={balanceVoltage}
               balanceConfirmed={balanceConfirmed}
@@ -616,7 +671,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               parameterKeys={[...physicsKeys, ...gridKeys]}
               configValue={configValue}
               overrides={parameterOverrides}
-              onSelectionTime={setSelectionTime}
+              onSelectionTime={(time) => setSelectionTime(clampSelectionTime(time, boundary, metadata))}
               onAdjustSelection={adjustSelectionTime}
               onJump={jumpTo}
               onVoltage={setBalanceVoltage}
@@ -786,6 +841,7 @@ function BoundaryPanel(props: {
 
 function TargetPanel(props: {
   selectionTime: number;
+  selectionWindow: { start_s: number; end_s: number; source?: string };
   selectionBox: VideoBox | null;
   balanceVoltage: string;
   balanceConfirmed: boolean;
@@ -811,15 +867,19 @@ function TargetPanel(props: {
       </div>
       <div className="normal-boundary-editor">
         <label>selection time (s)</label>
+        <small>允许范围：{formatFixed(props.selectionWindow.start_s, 2)} - {formatFixed(props.selectionWindow.end_s, 2)} s</small>
         <div className="normal-step-row compact">
           <button onClick={() => props.onAdjustSelection(-1)}>-1s</button>
           <button onClick={() => props.onAdjustSelection(-0.1)}>-0.1s</button>
           <input
             type="number"
             step="0.1"
+            min={props.selectionWindow.start_s}
+            max={props.selectionWindow.end_s}
             value={props.selectionTime}
             onChange={(event) => {
-              const value = Number(event.target.value);
+              const raw = Number(event.target.value);
+              const value = Math.max(props.selectionWindow.start_s, Math.min(props.selectionWindow.end_s, raw));
               props.onSelectionTime(value);
               props.onJump(value);
             }}

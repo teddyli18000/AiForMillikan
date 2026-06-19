@@ -19,6 +19,10 @@ DEFAULT_NORMAL_CONFIG: dict[str, Any] = {
         "stable_after_s": 0.25,
         "operation_gap_s": 0.8,
     },
+    "selection": {
+        "before_zero_v_start_s": 1.0,
+        "after_zero_v_start_s": 0.5,
+    },
     "grid": {
         "sample_frames": 40,
         "sample_stride": 3,

@@ -15,8 +15,10 @@ The desktop app has two intentionally separated modes.
   It is a human-in-the-loop balance-voltage + `0 V` falling measurement route:
   users import or drag in a video, confirm the automatically suggested `0 V`
   start/end times in seconds, enter the balance voltage, select one droplet,
-  review tracking and grid-crossing events, save q records, and run blind
-  elementary-charge inversion after at least three kept records.
+  review tracking and grid-crossing events, save q records in the current
+  launch, and run blind elementary-charge inversion after at least three kept
+  records. Every app start begins a fresh Normal measurement session; previous
+  records are not auto-loaded.
 - `Experimental` is the existing automatic multi-drop / multi-platform route.
   It remains available as an experimental half-finished workflow and should not
   share mutable state or backend business logic with Normal.
@@ -117,3 +119,15 @@ measurement; plate distance, measurement distance, viscosity/temperature,
 pressure, oil density, and Cunningham correction parameters belong in a
 collapsed advanced panel. Advanced overrides apply only to the current Normal
 measurement record unless the user explicitly saves them elsewhere.
+
+Normal "return/adjust" must be a real adjustment workflow. Rejected,
+diagnostic, and crossing-rejected records stay visible in the current session
+with their boundary, target rectangle, selection time, voltage, parameter
+overrides, q, fit, and crossing evidence. Selecting one for adjustment should
+restore those inputs, let the user micro-adjust them, and create a new linked
+record on retracking instead of mutating the old record.
+
+Target selection time is constrained near the confirmed `0V_start_s`. The
+renderer should display the allowed second-based range and clamp its controls to
+that range. The worker must reject out-of-range `target_time_s` or
+`target_frame` even if a frontend bug sends it.

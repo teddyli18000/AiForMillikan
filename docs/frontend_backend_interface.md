@@ -24,7 +24,10 @@ Supported worker operations:
 Normal-mode operations use a separate `normal.*` namespace and must not call the
 Experimental `analysis.*` flow as a shortcut. Current Normal operations are:
 
-- `normal.initialize`: create or load a Normal session and return saved records.
+- `normal.initialize`: create a fresh transient Normal session for this app
+  launch and return backend defaults. It must not auto-load records from a
+  previous launch unless an explicit `session_root` is provided by an in-flight
+  operation from the same session.
 - `normal.inspectVideo`: inspect a video and return metadata plus a playable
   file URL. It must not create or modify a session, detect `0 V`, detect grid
   lines, track, or calculate q.
@@ -72,9 +75,11 @@ ambiguous in real videos.
 
 ### Normal Session
 
-A Normal session may contain q records from multiple videos. This is intentional
-because the experiment needs several independent droplets, and a single short
-video may not contain enough usable measurements.
+A Normal session is transient and starts fresh on every application launch.
+Within one launch it may contain q records from multiple videos, because the
+experiment needs several independent droplets and a single short video may not
+contain enough usable measurements. Long-term persistence is not implicit:
+records are durable only when the user explicitly exports the session.
 
 Session-level fields:
 
@@ -84,6 +89,7 @@ Session-level fields:
   "session_id": "normal_...",
   "created_at": "...",
   "updated_at": "...",
+  "transient": true,
   "records": [],
   "counts": {
     "total": 0,
@@ -99,7 +105,17 @@ Session-level fields:
 `status=accepted`, finite positive `q_C`, finite positive `sigma_q_C`, and no
 unreviewed or rejected crossing identity.
 
-Normal active-video and record states follow this state machine:
+Normal state is split but must stay consistent:
+
+- frontend `video_imported` is local UI state after a pure
+  `normal.inspectVideo`; the backend session is not mutated by inspect.
+- backend `active_video.state` owns video-level states through tracking setup:
+  `video_prepared`, `boundary_confirmed`, `target_selected`, `tracking`.
+- record `status` owns post-tracking outcomes: `pending_crossing_review`,
+  `pending_user_confirmation`, `accepted`, `diagnostic`,
+  `rejected_crossing_identity`, `rejected_by_user`.
+
+The combined user-visible state machine is:
 
 ```text
 video_imported
@@ -122,6 +138,13 @@ rejected_by_user
 
 Worker operations must check predecessor state. The frontend may disable
 buttons for usability, but the worker remains the authority.
+
+Rejected or diagnostic records remain in the transient session for adjustment
+and evidence. They are never eligible for inversion. When the user chooses
+"return/adjust", the UI restores the record's previous boundary, selection
+time, target rectangle, balance voltage, and parameter overrides. Retrying
+creates a new record linked to the previous record with `retry_of_record_id`;
+the old record remains immutable evidence.
 
 ### Normal Video Preparation
 
@@ -160,6 +183,22 @@ All user-facing time controls in Normal use seconds. The UI should offer coarse
 `±1 s` and fine `±0.1 s` nudges for both `0V_start_s` and `0V_end_s`. The UI may
 display frame numbers as secondary provenance, not as the primary editing unit.
 
+After boundary confirmation, target selection is limited to a small window near
+the confirmed `0V_start_s`:
+
+```json
+{
+  "selection_window": {
+    "start_s": "max(0, 0V_start_s - 1.0)",
+    "end_s": "min(0V_end_s, 0V_start_s + 0.5)",
+    "source": "normal_v1_default"
+  }
+}
+```
+
+The frontend must clamp `selection_time_s` to this range and show the range to
+the user. The backend must reject target frames outside the same range.
+
 ### Normal Measurement Record
 
 Each saved Normal record represents one user-reviewed droplet measurement:
@@ -178,6 +217,7 @@ Each saved Normal record represents one user-reviewed droplet measurement:
   },
   "target": {
     "target_time_s": 1.5,
+    "selection_window": {"start_s": 0.8, "end_s": 2.3},
     "source_center": {"x": 430.0, "y": 220.0},
     "source_video_box": {"x": 424.0, "y": 214.0, "width": 12.0, "height": 12.0}
   },
@@ -200,6 +240,8 @@ Each saved Normal record represents one user-reviewed droplet measurement:
 The record must keep enough provenance to reproduce the q calculation: the
 video identity, selected droplet position, edited `0 V` window, grid scale,
 physical constants or overrides, track rows, velocity fit, and q uncertainty.
+It should also keep `retry_of_record_id` when it was created from a previous
+rejected/diagnostic record's adjustment path.
 
 ### Normal Tracking And Crossing Review
 

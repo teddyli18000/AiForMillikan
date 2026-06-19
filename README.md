@@ -10,9 +10,11 @@ The recommended desktop workflow is `Normal`.
 `Normal` is a human-in-the-loop balance-voltage + `0 V` falling measurement
 mode for the physics-themed experiment. The app assists with video import,
 metadata inspection, `0 V` interval suggestions, grid detection, local
-single-drop Trackpy tracking, grid-crossing review, q calculation, session
-records, and blind elementary-charge inversion after at least three kept valid
-q records. Normal may accumulate records across multiple videos.
+single-drop Trackpy tracking, grid-crossing review, q calculation, transient
+per-launch session records, and blind elementary-charge inversion after at
+least three kept valid q records. Normal may accumulate records across multiple
+videos during one launch, but each app start creates a fresh measurement
+session. Long-term retention is explicit export only.
 
 `Experimental` is the existing automatic multi-drop / multi-platform route. It
 remains useful for experiments and diagnostics, but it is not the main product
