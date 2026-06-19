@@ -12,24 +12,14 @@ import type {
   VideoMetadata
 } from "../../types";
 import { desktopApi } from "../../lib/desktopApi";
+import { clientPointToVideoPoint, getContainedVideoMetrics, videoBoxToOverlayStyle } from "./videoGeometry";
+import type { VideoBox, VideoPoint } from "./videoGeometry";
 
 type NormalWorkspaceProps = {
   onBack: () => void;
 };
 
 type StageId = "import" | "boundary" | "target" | "review" | "results";
-
-type VideoBox = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-type VideoPoint = {
-  x: number;
-  y: number;
-};
 
 const stages: Array<{ id: StageId; title: string; detail: string }> = [
   { id: "import", title: "导入与预览", detail: "inspect 只读元数据" },
@@ -84,6 +74,7 @@ function clampBoundary(boundary: NormalBoundary, metadata: VideoMetadata | null)
 
 export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const reviewVideoRef = useRef<HTMLVideoElement | null>(null);
   const [stage, setStage] = useState<StageId>("import");
   const [session, setSession] = useState<NormalSession | null>(null);
@@ -396,38 +387,32 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     jumpTo(next);
   };
 
-  const clientToVideoPoint = (event: MouseEvent<HTMLDivElement>): VideoPoint | null => {
+  const getVideoGeometry = () => {
     const video = videoRef.current;
-    if (!video || !metadata) return null;
-    const rect = video.getBoundingClientRect();
-    const sourceWidth = video.videoWidth || metadata.width || rect.width;
-    const sourceHeight = video.videoHeight || metadata.height || rect.height;
-    const scale = Math.min(rect.width / sourceWidth, rect.height / sourceHeight);
-    const displayWidth = sourceWidth * scale;
-    const displayHeight = sourceHeight * scale;
-    const offsetX = (rect.width - displayWidth) / 2;
-    const offsetY = (rect.height - displayHeight) / 2;
-    const x = (event.clientX - rect.left - offsetX) / scale;
-    const y = (event.clientY - rect.top - offsetY) / scale;
-    if (x < 0 || y < 0 || x > sourceWidth || y > sourceHeight) {
-      return null;
-    }
-    return { x, y };
+    const overlay = overlayRef.current;
+    if (!video || !overlay || !metadata) return null;
+    const videoRect = video.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    return {
+      overlayRect,
+      metrics: getContainedVideoMetrics({
+        videoRect,
+        overlayRect,
+        sourceWidth: video.videoWidth || metadata.width || videoRect.width,
+        sourceHeight: video.videoHeight || metadata.height || videoRect.height
+      })
+    };
+  };
+
+  const clientToVideoPoint = (event: MouseEvent<HTMLDivElement>, options: { clamp?: boolean } = {}): VideoPoint | null => {
+    const geometry = getVideoGeometry();
+    if (!geometry) return null;
+    return clientPointToVideoPoint(event.clientX, event.clientY, geometry.overlayRect, geometry.metrics, options);
   };
 
   const videoBoxStyle = (box: VideoBox) => {
-    const video = videoRef.current;
-    if (!video || !metadata) return {};
-    const rect = video.getBoundingClientRect();
-    const sourceWidth = video.videoWidth || metadata.width || rect.width;
-    const sourceHeight = video.videoHeight || metadata.height || rect.height;
-    const scale = Math.min(rect.width / sourceWidth, rect.height / sourceHeight);
-    return {
-      left: `${(rect.width - sourceWidth * scale) / 2 + box.x * scale}px`,
-      top: `${(rect.height - sourceHeight * scale) / 2 + box.y * scale}px`,
-      width: `${box.width * scale}px`,
-      height: `${box.height * scale}px`
-    };
+    const geometry = getVideoGeometry();
+    return geometry ? videoBoxToOverlayStyle(box, geometry.metrics) : {};
   };
 
   const onSelectionDown = (event: MouseEvent<HTMLDivElement>) => {
@@ -440,7 +425,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
 
   const onSelectionMove = (event: MouseEvent<HTMLDivElement>) => {
     if (!dragStart || stage !== "target") return;
-    const point = clientToVideoPoint(event);
+    const point = clientToVideoPoint(event, { clamp: true });
     if (!point) return;
     setSelectionBox({
       x: Math.min(dragStart.x, point.x),
@@ -548,7 +533,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
                 />
-                <div className="normal-video-overlay" onMouseDown={onSelectionDown} onMouseMove={onSelectionMove} onMouseUp={endSelection} onMouseLeave={endSelection}>
+                <div ref={overlayRef} className="normal-video-overlay" onMouseDown={onSelectionDown} onMouseMove={onSelectionMove} onMouseUp={endSelection} onMouseLeave={endSelection}>
                   {boundary.zero_v_start_s <= (duration || 0) ? <span className="time-marker start" style={{ left: `${((boundary.zero_v_start_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
                   {boundary.zero_v_end_s <= (duration || 0) ? <span className="time-marker end" style={{ left: `${((boundary.zero_v_end_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
                   {selectionBox ? <span className="selection-box" style={videoBoxStyle(selectionBox)} /> : null}
