@@ -131,3 +131,13 @@ Target selection time is constrained near the confirmed `0V_start_s`. The
 renderer should display the allowed second-based range and clamp its controls to
 that range. The worker must reject out-of-range `target_time_s` or
 `target_frame` even if a frontend bug sends it.
+
+The target-selection preview must be the main video player paused at the current
+`selection_time_s`. The side panel may show controls and coordinates, but it
+must not replace the video-frame preview with a detached screenshot. In Stage 3,
+the selection-time input, `±1 s` / `±0.1 s` buttons, scrubber, visible frame,
+and submitted backend `target_frame` must refer to the same frame.
+
+Returning from target/review/results to `0V` must show the user's previous
+confirmed boundary for that measurement. It must not restore the original
+automatic suggestion after the user has already confirmed a different boundary.

@@ -215,6 +215,20 @@ the user. The backend must reject target frames outside the same range.
 Tracking must start from the actual selected frame, never from an earlier
 `0V_start_s` frame with coordinates taken from a later selection frame.
 
+The main video player is the selection-frame preview. When the UI enters target
+selection, it must pause the main video and seek to `selection_time_s`, which
+defaults to the backend-confirmed `zero_v_start_s`. The `selection_time_s`
+input, `±1 s` / `±0.1 s` nudges, scrubber, displayed video frame, and submitted
+`target_frame` must stay synchronized. A separate screenshot preview is not a
+replacement for this contract.
+
+If the user modifies `0V_start_s` or `0V_end_s`, any stale
+`selection_window` or frame index fields carried by an older boundary object
+must be discarded before confirmation. `normal.confirmBoundary` is a
+second-based user-confirmation API: if a client accidentally sends both seconds
+and stale frame indices, seconds are authoritative. The worker recomputes frame
+indices and the selection window from the normalized, user-confirmed boundary.
+
 Normal stages are reversible. The UI must expose explicit previous-stage
 actions instead of relying only on a sidebar. Returning to a stage restores the
 last user-confirmed state for that stage. If the user changes an upstream
@@ -228,6 +242,11 @@ dependency, downstream state is invalidated as follows:
   confirmation
 - accepted historical records are immutable evidence unless the user explicitly
   excludes them; retrying creates a new `retry_of_record_id`
+
+Return/adjust restoration must use the relevant record or in-progress
+measurement snapshot. `active_video.adjustment` may override record fields only
+when its `record_id` matches the record being adjusted; otherwise the frontend
+must ignore it to avoid restoring an unrelated or initial boundary.
 
 ### Normal Measurement Record
 

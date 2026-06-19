@@ -129,7 +129,31 @@ function createDemoApi(): DesktopApi {
       }
     };
     },
-    normalConfirmBoundary: async () => ({ session_root: "runs/normal_demo/session", active_video: { state: "boundary_confirmed" }, session: demoNormalSession() }),
+    normalConfirmBoundary: async (payload) => {
+      const fps = demoMetadata.fps || 30;
+      const frameCount = demoMetadata.frame_count || 1;
+      const startFrame = Math.max(0, Math.min(frameCount - 1, Math.round(Number(payload.boundary.zero_v_start_s || 0) * fps)));
+      const endFrame = Math.max(startFrame, Math.min(frameCount - 1, Math.round(Number(payload.boundary.zero_v_end_s || 0) * fps)));
+      const boundary = {
+        zero_v_start_s: startFrame / fps,
+        zero_v_end_s: endFrame / fps,
+        zero_v_start_frame: startFrame,
+        zero_v_end_frame: endFrame,
+        source: payload.boundary.source ?? "manual_ui",
+        selection_window: {
+          start_s: Math.max(0, startFrame - Math.round(0.5 * fps)) / fps,
+          end_s: Math.min(frameCount - 1, startFrame + Math.round(0.5 * fps)) / fps,
+          start_frame: Math.max(0, startFrame - Math.round(0.5 * fps)),
+          end_frame: Math.min(frameCount - 1, startFrame + Math.round(0.5 * fps)),
+          source: "normal_v1_default"
+        }
+      };
+      return {
+        session_root: "runs/normal_demo/session",
+        active_video: { state: "boundary_confirmed", boundary },
+        session: demoNormalSession()
+      };
+    },
     normalSelectTarget: async () => ({ session_root: "runs/normal_demo/session", active_video: { state: "target_selected" }, session: demoNormalSession() }),
     normalSaveMeasurement: async () => {
       emitNormal({

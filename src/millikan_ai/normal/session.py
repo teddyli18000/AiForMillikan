@@ -378,8 +378,14 @@ def render_report(session: dict[str, Any]) -> str:
 def _normalize_boundary(boundary: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
     fps = float(metadata.get("fps") or 30.0)
     frame_count = int(metadata.get("frame_count") or 1)
-    start_frame = int(boundary["zero_v_start_frame"]) if "zero_v_start_frame" in boundary else int(round(float(boundary["zero_v_start_s"]) * fps))
-    end_frame = int(boundary["zero_v_end_frame"]) if "zero_v_end_frame" in boundary else int(round(float(boundary["zero_v_end_s"]) * fps))
+    if "zero_v_start_s" in boundary:
+        start_frame = int(round(float(boundary["zero_v_start_s"]) * fps))
+    else:
+        start_frame = int(boundary["zero_v_start_frame"])
+    if "zero_v_end_s" in boundary:
+        end_frame = int(round(float(boundary["zero_v_end_s"]) * fps))
+    else:
+        end_frame = int(boundary["zero_v_end_frame"])
     start_frame = max(0, min(frame_count - 1, start_frame))
     end_frame = max(start_frame, min(frame_count - 1, end_frame))
     return {

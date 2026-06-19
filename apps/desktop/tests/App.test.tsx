@@ -22,6 +22,11 @@ describe("Millikan desktop app", () => {
     await userEvent.click(screen.getByRole("button", { name: /开始处理/ }));
     expect(await screen.findByRole("button", { name: /确认边界/ })).toBeInTheDocument();
     expect(screen.getAllByText("0V 边界确认").length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: /确认边界/ }));
+    expect(await screen.findByText("selection time (s)")).toBeInTheDocument();
+    expect(screen.getAllByText("框选目标油滴").length).toBeGreaterThan(0);
+    expect(screen.getByText("允许范围：0.30 - 1.30 s")).toBeInTheDocument();
+    expect(document.querySelector(".normal-selection-preview")).toBeNull();
   });
 
   it("keeps the Experimental demo analysis path available", async () => {

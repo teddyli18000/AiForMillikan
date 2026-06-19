@@ -66,11 +66,19 @@ const statusLabel = (status?: string) => {
   return labels[status || ""] || status || "未开始";
 };
 
-function clampBoundary(boundary: NormalBoundary, metadata: VideoMetadata | null): NormalBoundary {
+function clampBoundary(boundary: NormalBoundary, metadata: VideoMetadata | null, options: { preserveSelectionWindow?: boolean } = {}): NormalBoundary {
   const duration = metadata?.duration_s && Number.isFinite(metadata.duration_s) ? metadata.duration_s : Number.POSITIVE_INFINITY;
   const start = Math.max(0, Math.min(Number(boundary.zero_v_start_s || 0), duration));
   const end = Math.max(start, Math.min(Number(boundary.zero_v_end_s || 0), duration));
-  return { ...boundary, zero_v_start_s: Number(start.toFixed(3)), zero_v_end_s: Number(end.toFixed(3)), source: "manual_ui" };
+  const next: NormalBoundary = { ...boundary, zero_v_start_s: Number(start.toFixed(3)), zero_v_end_s: Number(end.toFixed(3)), source: "manual_ui" };
+  if (!options.preserveSelectionWindow) {
+    delete next.selection_window;
+    delete next.selection_time_s;
+    delete next.selection_frame;
+    delete next.zero_v_start_frame;
+    delete next.zero_v_end_frame;
+  }
+  return next;
 }
 
 function selectionWindowFromBoundary(boundary: NormalBoundary, metadata: VideoMetadata | null) {
@@ -140,6 +148,10 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const selectedRecord = useMemo(
     () => session?.records.find((record) => record.record_id === selectedRecordId) ?? session?.records[session.records.length - 1] ?? null,
     [selectedRecordId, session?.records]
+  );
+  const adjustmentRecord = useMemo(
+    () => (adjustingRecordId ? session?.records.find((record) => record.record_id === adjustingRecordId) ?? null : null),
+    [adjustingRecordId, session?.records]
   );
   const crossings = selectedRecord?.crossings ?? [];
   const allCrossingsReviewedSame = crossings.every((event) => event.review_result === "same_drop");
@@ -240,17 +252,16 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setSession(result.session);
       const confirmedBoundary = (result.active_video?.boundary as NormalBoundary | undefined) ?? boundary;
       setBoundary(confirmedBoundary);
-      const selectionBase = boundaryDirty ? Number(confirmedBoundary.zero_v_start_s ?? 0) : Number(selectionTime || confirmedBoundary.zero_v_start_s || 0);
-      const nextSelectionTime = clampSelectionTime(selectionBase, confirmedBoundary, metadata);
+      const nextSelectionTime = clampSelectionTime(Number(confirmedBoundary.zero_v_start_s ?? 0), confirmedBoundary, metadata);
       setSelectionTime(nextSelectionTime);
-      if (boundaryDirty) {
+      if (boundaryDirty || Math.abs(nextSelectionTime - selectionTime) > 0.001) {
         setSelectionBox(null);
         setSelectedRecordId(null);
         setReviewEvent(null);
         setInversion(null);
       }
       setBoundaryDirty(false);
-      jumpTo(nextSelectionTime);
+      seekVideoTo(nextSelectionTime, metadata, true);
       setStage("target");
       setMessage("0V 边界已确认。请在 0V 起点附近框选目标油滴。");
     } catch (error) {
@@ -271,6 +282,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       return;
     }
     const safeSelectionTime = clampSelectionTime(selectionTime, boundary, metadata);
+    setSelectionFrameTime(safeSelectionTime, { clearDownstream: false });
     const targetFrame = Math.max(0, Math.min(metadata.frame_count - 1, Math.round(safeSelectionTime * (metadata.fps || 1))));
     const target = {
       target_frame: targetFrame,
@@ -404,18 +416,56 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     }
   };
 
-  const jumpTo = (time: number, metadataOverride?: VideoMetadata | null) => {
+  const seekVideoTo = (time: number, metadataOverride?: VideoMetadata | null, pause = false) => {
     const safeDuration = metadataOverride?.duration_s || duration || metadata?.duration_s || Number.POSITIVE_INFINITY;
     const safeTime = Math.max(0, Math.min(safeDuration, time));
     if (videoRef.current) {
+      if (pause) {
+        videoRef.current.pause();
+      }
       videoRef.current.currentTime = safeTime;
     }
     setCurrentTime(safeTime);
   };
 
+  const jumpTo = (time: number, metadataOverride?: VideoMetadata | null) => {
+    seekVideoTo(time, metadataOverride, stage === "target");
+  };
+
+  const clearMeasurementDraft = () => {
+    setSelectedRecordId(null);
+    setReviewEvent(null);
+    setInversion(null);
+  };
+
+  const setSelectionFrameTime = (
+    time: number,
+    options: { boundaryOverride?: NormalBoundary; metadataOverride?: VideoMetadata | null; clearDownstream?: boolean } = {}
+  ) => {
+    const next = clampSelectionTime(time, options.boundaryOverride ?? boundary, options.metadataOverride ?? metadata);
+    setSelectionTime(next);
+    if (options.clearDownstream !== false) {
+      clearMeasurementDraft();
+    }
+    seekVideoTo(next, options.metadataOverride ?? metadata, true);
+  };
+
+  const playerJumpTo = (time: number) => {
+    if (stage === "target") {
+      setSelectionFrameTime(time);
+    } else {
+      jumpTo(time);
+    }
+  };
+
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
+    if (stage === "target") {
+      setSelectionFrameTime(video.currentTime || selectionTime, { clearDownstream: false });
+      setMessage("选滴阶段已锁定当前 selection frame；请用 ±1s、±0.1s 或进度条微调。");
+      return;
+    }
     if (video.paused) {
       void video.play();
     } else {
@@ -433,26 +483,23 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   };
 
   const adjustSelectionTime = (delta: number) => {
-    const next = clampSelectionTime(Number((selectionTime + delta).toFixed(3)), boundary, metadata);
-    setSelectionTime(next);
-    setSelectedRecordId(null);
-    setReviewEvent(null);
-    setInversion(null);
-    jumpTo(next);
+    setSelectionFrameTime(Number((selectionTime + delta).toFixed(3)));
   };
 
-  const restoreRecordForAdjustment = (record: NormalRecord, restoredSession?: NormalSession | null) => {
+  const restoreRecordContext = (record: NormalRecord, restoredSession: NormalSession | null | undefined, destination: StageId, markRetry: boolean) => {
     const active = (restoredSession?.active_video ?? session?.active_video ?? null) as Record<string, any> | null;
-    const adjustment = (active?.adjustment as Record<string, any> | undefined) ?? {};
+    const rawAdjustment = (active?.adjustment as Record<string, any> | undefined) ?? {};
+    const adjustment = String(rawAdjustment.record_id ?? "") === String(record.record_id) ? rawAdjustment : {};
     const recordBoundary = record.time_window as NormalBoundary | undefined;
     const activeBoundary = active?.boundary as NormalBoundary | undefined;
-    const nextBoundary = activeBoundary ?? recordBoundary ?? boundary;
-    const nextMetadata = (active?.metadata as VideoMetadata | undefined) ?? (record.metadata as VideoMetadata | undefined) ?? metadata;
-    const nextGrid = (active?.grid as NormalGrid | undefined) ?? (record.grid as NormalGrid | undefined) ?? grid;
+    const activeMatchesRecord = String(active?.adjustment_source_record_id ?? adjustment.record_id ?? "") === String(record.record_id);
+    const nextBoundary = (activeMatchesRecord ? activeBoundary : undefined) ?? recordBoundary ?? boundary;
+    const nextMetadata = (activeMatchesRecord ? (active?.metadata as VideoMetadata | undefined) : undefined) ?? (record.metadata as VideoMetadata | undefined) ?? metadata;
+    const nextGrid = (activeMatchesRecord ? (active?.grid as NormalGrid | undefined) : undefined) ?? (record.grid as NormalGrid | undefined) ?? grid;
     const target = (adjustment.target ?? record.target) as { target_time_s?: number; source_video_box?: VideoBox } | undefined;
     const overrides = (adjustment.parameter_overrides ?? record.parameter_overrides) as Record<string, unknown> | undefined;
-    const nextVideoPath = typeof active?.path === "string" ? active.path : record.video_path ?? videoPath;
-    const nextVideoUrl = typeof active?.video_url === "string" ? active.video_url : videoUrl;
+    const nextVideoPath = activeMatchesRecord && typeof active?.path === "string" ? active.path : record.video_path ?? videoPath;
+    const nextVideoUrl = activeMatchesRecord && typeof active?.video_url === "string" ? active.video_url : videoUrl;
 
     if (nextMetadata) {
       setMetadata(nextMetadata);
@@ -486,10 +533,14 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
         )
       )
     );
-    setAdjustingRecordId(String(adjustment.record_id ?? record.record_id));
+    setAdjustingRecordId(markRetry ? String(adjustment.record_id ?? record.record_id) : null);
     setReviewEvent(null);
-    setStage("boundary");
-    jumpTo(restoredSelectionTime, nextMetadata ?? metadata);
+    setStage(destination);
+    seekVideoTo(destination === "boundary" ? Number(nextBoundary.zero_v_start_s ?? restoredSelectionTime) : restoredSelectionTime, nextMetadata ?? metadata, destination === "target");
+  };
+
+  const restoreRecordForAdjustment = (record: NormalRecord, restoredSession?: NormalSession | null) => {
+    restoreRecordContext(record, restoredSession, "boundary", true);
   };
 
   const getVideoGeometry = () => {
@@ -590,22 +641,30 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     setInversion(null);
   };
 
-  const backToBoundary = () => {
+  const backToBoundary = (record?: NormalRecord | null) => {
+    if (record) {
+      restoreRecordContext(record, session, "boundary", true);
+      setMessage("已恢复该记录原本的视频、0V 边界、框选、电压和参数，可在此基础上微调 0V。");
+      return;
+    }
     setStage("boundary");
     setReviewEvent(null);
     setMessage("已返回 0V 边界确认。会在上次确认基础上微调；确认修改后需重新框选并追踪。");
     jumpTo(boundary.zero_v_start_s);
   };
 
-  const backToTarget = () => {
+  const backToTarget = (record?: NormalRecord | null) => {
+    if (record) {
+      restoreRecordContext(record, session, "target", true);
+      setMessage("已恢复该记录原本的框选时间、矩形框、电压和参数；修改后会重新追踪。");
+      return;
+    }
     setStage("target");
-    setSelectedRecordId(null);
-    setReviewEvent(null);
-    setInversion(null);
+    clearMeasurementDraft();
     const next = clampSelectionTime(selectionTime || boundary.zero_v_start_s, boundary, metadata);
     setSelectionTime(next);
     setMessage("已返回框选目标。保留已确认边界和参数；修改框选后会重新追踪。");
-    jumpTo(next);
+    seekVideoTo(next, metadata, true);
   };
 
   return (
@@ -663,11 +722,25 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
                     setDuration(event.currentTarget.duration || metadata?.duration_s || 0);
                     setCurrentTime(event.currentTarget.currentTime || 0);
                   }}
-                  onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                  onTimeUpdate={(event) => {
+                    const time = event.currentTarget.currentTime || 0;
+                    if (stage === "target") {
+                      const safe = clampSelectionTime(time, boundary, metadata);
+                      if (Math.abs(safe - time) > 0.01) {
+                        event.currentTarget.currentTime = safe;
+                      }
+                      event.currentTarget.pause();
+                      setSelectionTime(safe);
+                      setCurrentTime(safe);
+                    } else {
+                      setCurrentTime(time);
+                    }
+                  }}
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
                 />
                 {showingTrackOverlay ? <div className="normal-overlay-badge">backend overlay: target / missing / trajectory</div> : null}
+                {stage === "target" ? <div className="normal-overlay-badge normal-overlay-badge--selection">selection frame {formatFixed(selectionTime, 2)} s</div> : null}
                 <div ref={overlayRef} className="normal-video-overlay" onMouseDown={onSelectionDown} onMouseMove={onSelectionMove} onMouseUp={endSelection} onMouseLeave={endSelection}>
                   {boundary.zero_v_start_s <= (duration || 0) ? <span className="time-marker start" style={{ left: `${((boundary.zero_v_start_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
                   {boundary.zero_v_end_s <= (duration || 0) ? <span className="time-marker end" style={{ left: `${((boundary.zero_v_end_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
@@ -682,34 +755,34 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
             )}
           </div>
           <div className="normal-player">
-            <button className="icon-button step-button step-button--coarse" onClick={() => jumpTo(currentTime - 1)} disabled={!mainVideoUrl} aria-label="后退 1 秒" title="后退 1 秒">
+            <button className="icon-button step-button step-button--coarse" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) - 1)} disabled={!mainVideoUrl} aria-label="后退 1 秒" title="后退 1 秒">
               <StepBack size={16} />
               <span className="step-badge">1s</span>
             </button>
-            <button className="icon-button step-button step-button--fine" onClick={() => jumpTo(currentTime - 0.1)} disabled={!mainVideoUrl} aria-label="后退 0.1 秒" title="后退 0.1 秒">
+            <button className="icon-button step-button step-button--fine" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) - 0.1)} disabled={!mainVideoUrl} aria-label="后退 0.1 秒" title="后退 0.1 秒">
               <ChevronsLeft size={16} />
               <span className="step-badge">0.1</span>
             </button>
             <button className="icon-button" onClick={togglePlay} disabled={!mainVideoUrl} aria-label={isPlaying ? "暂停" : "播放"}>
               {isPlaying ? <Pause size={16} /> : <Play size={16} />}
             </button>
-            <button className="icon-button step-button step-button--fine" onClick={() => jumpTo(currentTime + 0.1)} disabled={!mainVideoUrl} aria-label="前进 0.1 秒" title="前进 0.1 秒">
+            <button className="icon-button step-button step-button--fine" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) + 0.1)} disabled={!mainVideoUrl} aria-label="前进 0.1 秒" title="前进 0.1 秒">
               <ChevronsRight size={16} />
               <span className="step-badge">0.1</span>
             </button>
-            <button className="icon-button step-button step-button--coarse" onClick={() => jumpTo(currentTime + 1)} disabled={!mainVideoUrl} aria-label="前进 1 秒" title="前进 1 秒">
+            <button className="icon-button step-button step-button--coarse" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) + 1)} disabled={!mainVideoUrl} aria-label="前进 1 秒" title="前进 1 秒">
               <StepForward size={16} />
               <span className="step-badge">1s</span>
             </button>
             <input
               className="normal-scrubber"
               type="range"
-              min={0}
-              max={duration || metadata?.duration_s || 0}
+              min={stage === "target" ? selectionWindow.start_s : 0}
+              max={stage === "target" ? selectionWindow.end_s : duration || metadata?.duration_s || 0}
               step={0.01}
-              value={currentTime}
+              value={stage === "target" ? selectionTime : currentTime}
               disabled={!mainVideoUrl}
-              onChange={(event) => jumpTo(Number(event.target.value))}
+              onChange={(event) => playerJumpTo(Number(event.target.value))}
               aria-label="视频进度"
             />
             <span>{formatFixed(currentTime, 2)} / {formatFixed(duration || metadata?.duration_s, 2)} s</span>
@@ -752,14 +825,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               parameterKeys={[...physicsKeys, ...gridKeys]}
               configValue={configValue}
               overrides={parameterOverrides}
-              onSelectionTime={(time) => {
-                setSelectionTime(clampSelectionTime(time, boundary, metadata));
-                setSelectedRecordId(null);
-                setReviewEvent(null);
-                setInversion(null);
-              }}
+              onSelectionTime={(time) => setSelectionFrameTime(time)}
               onAdjustSelection={adjustSelectionTime}
-              onJump={jumpTo}
               onVoltage={setBalanceVoltage}
               onBalanceConfirmed={setBalanceConfirmed}
               onAdvancedOpen={setAdvancedOpen}
@@ -770,7 +837,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
                 setInversion(null);
               }}
               onTrack={selectTargetAndTrack}
-              onBackBoundary={backToBoundary}
+              onBackBoundary={() => backToBoundary(adjustmentRecord)}
               busy={busy}
             />
           ) : null}
@@ -782,8 +849,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               onPrepareReview={prepareCrossingReview}
               onReview={submitCrossingReview}
               onContinue={() => setStage("results")}
-              onBackTarget={backToTarget}
-              onBackBoundary={backToBoundary}
+              onBackTarget={() => backToTarget(selectedRecord)}
+              onBackBoundary={() => backToBoundary(selectedRecord)}
               busy={busy}
             />
           ) : null}
@@ -798,8 +865,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               onAccept={() => acceptRecord(true)}
               onReject={() => acceptRecord(false)}
               onRunInversion={runInversion}
-              onBackReview={() => (selectedRecord?.status === "pending_crossing_review" ? setStage("review") : backToTarget())}
-              onBackBoundary={backToBoundary}
+              onBackReview={() => (selectedRecord?.status === "pending_crossing_review" ? restoreRecordContext(selectedRecord, session, "review", false) : backToTarget(selectedRecord))}
+              onBackBoundary={() => backToBoundary(selectedRecord)}
               busy={busy}
             />
           ) : null}
@@ -948,7 +1015,6 @@ function TargetPanel(props: {
   busy: boolean;
   onSelectionTime: (time: number) => void;
   onAdjustSelection: (delta: number) => void;
-  onJump: (time: number) => void;
   onVoltage: (value: string) => void;
   onBalanceConfirmed: (value: boolean) => void;
   onAdvancedOpen: (value: boolean) => void;
@@ -982,7 +1048,6 @@ function TargetPanel(props: {
               const raw = Number(event.target.value);
               const value = Math.max(props.selectionWindow.start_s, Math.min(props.selectionWindow.end_s, raw));
               props.onSelectionTime(value);
-              props.onJump(value);
             }}
           />
           <button onClick={() => props.onAdjustSelection(0.1)}>+0.1s</button>

@@ -1718,6 +1718,12 @@ td {
   pointer-events: none;
 }
 
+.normal-overlay-badge--selection {
+  top: auto;
+  bottom: 12px;
+  color: #c8f3ff;
+}
+
 .time-marker {
   position: absolute;
   top: 0;

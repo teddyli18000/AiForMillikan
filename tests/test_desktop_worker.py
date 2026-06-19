@@ -385,6 +385,94 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
     assert inverted["payload"]["inversion"]["candidates"]
 
 
+def test_normal_confirm_boundary_seconds_override_stale_frames_and_window(tmp_path: Path):
+    video = tmp_path / "normal_boundary_restore.mp4"
+    _make_normal_synthetic_video(video)
+    session_base = tmp_path / "normal_boundary_session"
+    overrides = {
+        "session": {"session_root": str(session_base), "run_root": str(tmp_path / "normal_boundary_runs")},
+        "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 3},
+    }
+
+    prepared = _send_worker(
+        {
+            "id": "prepare-boundary-restore",
+            "op": "normal.prepareVideo",
+            "payload": {"video_path": str(video), "config_overrides": overrides},
+        }
+    )[-1]
+    assert prepared["type"] == "result"
+    session_root = prepared["payload"]["session_root"]
+    fps = prepared["payload"]["metadata"]["fps"]
+
+    confirmed = _send_worker(
+        {
+            "id": "confirm-stale-frame-boundary",
+            "op": "normal.confirmBoundary",
+            "payload": {
+                "session_root": str(session_root),
+                "boundary": {
+                    "zero_v_start_s": 2.0,
+                    "zero_v_end_s": 3.0,
+                    "zero_v_start_frame": 0,
+                    "zero_v_end_frame": 15,
+                    "selection_window": {"start_s": 0.0, "end_s": 0.5, "start_frame": 0, "end_frame": 15},
+                    "source": "test_user_adjusted_seconds",
+                },
+            },
+        }
+    )[-1]
+    assert confirmed["type"] == "result"
+    boundary = confirmed["payload"]["active_video"]["boundary"]
+    assert boundary["zero_v_start_frame"] == round(2.0 * fps)
+    assert boundary["zero_v_end_frame"] == round(3.0 * fps)
+    assert boundary["zero_v_start_s"] == boundary["zero_v_start_frame"] / fps
+    assert boundary["selection_window"]["start_s"] == (round(2.0 * fps) - round(0.5 * fps)) / fps
+    assert boundary["selection_window"]["end_s"] == (round(2.0 * fps) + round(0.5 * fps)) / fps
+    assert boundary["selection_window"]["start_s"] > 1.4
+
+    out_of_range = _send_worker(
+        {
+            "id": "select-before-confirmed-window",
+            "op": "normal.selectTarget",
+            "payload": {
+                "session_root": str(session_root),
+                "balance_voltage_V": 239.0,
+                "balance_confirmed": True,
+                "target": {
+                    "target_frame": 3,
+                    "target_time_s": 0.1,
+                    "source_center": {"x": 92.0, "y": 83.0},
+                    "source_video_box": {"x": 78.0, "y": 69.0, "width": 28.0, "height": 28.0},
+                },
+                "parameter_overrides": overrides,
+            },
+        }
+    )[-1]
+    assert out_of_range["type"] == "error"
+
+    selected = _send_worker(
+        {
+            "id": "select-confirmed-window-frame",
+            "op": "normal.selectTarget",
+            "payload": {
+                "session_root": str(session_root),
+                "balance_voltage_V": 239.0,
+                "balance_confirmed": True,
+                "target": {
+                    "target_frame": round(2.0 * fps),
+                    "target_time_s": 2.0,
+                    "source_center": {"x": 92.0, "y": 83.0},
+                    "source_video_box": {"x": 78.0, "y": 69.0, "width": 28.0, "height": 28.0},
+                },
+                "parameter_overrides": overrides,
+            },
+        }
+    )[-1]
+    assert selected["type"] == "result"
+    assert selected["payload"]["active_video"]["target"]["target_frame"] == round(2.0 * fps)
+
+
 def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Path):
     video = tmp_path / "crossing_synthetic.mp4"
     _make_crossing_normal_video(video)
@@ -479,6 +567,7 @@ def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Pat
     assert rejected["payload"]["session"]["active_video"]["state"] == "boundary_confirmed"
     assert rejected["payload"]["session"]["active_video"]["path"] == str(video)
     assert rejected["payload"]["session"]["active_video"]["metadata"]["readable"] is True
+    assert rejected["payload"]["session"]["active_video"]["boundary"] == record["time_window"]
     assert rejected["payload"]["session"]["active_video"]["adjustment"]["record_id"] == record["record_id"]
 
     reconfirmed = _send_worker(
