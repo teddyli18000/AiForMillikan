@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, MouseEvent, RefObject } from "react";
-import { ArrowLeft, Check, Download, FileVideo, FolderOpen, Pause, Play, RotateCcw, Save, Scissors, StepBack, StepForward, Target, Video } from "lucide-react";
+import { ArrowLeft, Check, ChevronsLeft, ChevronsRight, Download, FileVideo, FolderOpen, Pause, Play, RotateCcw, Save, Scissors, StepBack, StepForward, Target, Video } from "lucide-react";
 import type {
   NormalBoundary,
   NormalCrossingEvent,
@@ -562,14 +562,24 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
             )}
           </div>
           <div className="normal-player">
-            <button className="icon-button" onClick={() => jumpTo(currentTime - 5)} disabled={!videoUrl} aria-label="后退 5 秒">
+            <button className="icon-button step-button step-button--coarse" onClick={() => jumpTo(currentTime - 1)} disabled={!videoUrl} aria-label="后退 1 秒" title="后退 1 秒">
               <StepBack size={16} />
+              <span className="step-badge">1s</span>
+            </button>
+            <button className="icon-button step-button step-button--fine" onClick={() => jumpTo(currentTime - 0.1)} disabled={!videoUrl} aria-label="后退 0.1 秒" title="后退 0.1 秒">
+              <ChevronsLeft size={16} />
+              <span className="step-badge">0.1</span>
             </button>
             <button className="icon-button" onClick={togglePlay} disabled={!videoUrl} aria-label={isPlaying ? "暂停" : "播放"}>
               {isPlaying ? <Pause size={16} /> : <Play size={16} />}
             </button>
-            <button className="icon-button" onClick={() => jumpTo(currentTime + 5)} disabled={!videoUrl} aria-label="前进 5 秒">
+            <button className="icon-button step-button step-button--fine" onClick={() => jumpTo(currentTime + 0.1)} disabled={!videoUrl} aria-label="前进 0.1 秒" title="前进 0.1 秒">
+              <ChevronsRight size={16} />
+              <span className="step-badge">0.1</span>
+            </button>
+            <button className="icon-button step-button step-button--coarse" onClick={() => jumpTo(currentTime + 1)} disabled={!videoUrl} aria-label="前进 1 秒" title="前进 1 秒">
               <StepForward size={16} />
+              <span className="step-badge">1s</span>
             </button>
             <input
               className="normal-scrubber"

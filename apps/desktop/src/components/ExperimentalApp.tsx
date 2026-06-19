@@ -10,13 +10,17 @@ import { TopBar } from "./TopBar";
 
 type View = "setup" | "analysis" | "results";
 
+type ExperimentalAppProps = {
+  onBack: () => void;
+};
+
 const initialPlatforms: ManualPlatform[] = [
   { platform_id: "P001", start_frame: 0, end_frame: 156, voltage_V: 0, source: "manual_ui" },
   { platform_id: "P002", start_frame: 166, end_frame: 344, voltage_V: 239, source: "manual_ui" },
   { platform_id: "P003", start_frame: 355, end_frame: 542, voltage_V: 362, source: "manual_ui" }
 ];
 
-export function ExperimentalApp() {
+export function ExperimentalApp({ onBack }: ExperimentalAppProps) {
   const [view, setView] = useState<View>("setup");
   const [videoPath, setVideoPath] = useState("");
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
@@ -175,7 +179,7 @@ export function ExperimentalApp() {
 
   return (
     <div className="desktop-frame">
-      <TopBar view={view} onViewChange={setView} onLoadRun={openRun} onExport={exportReport} hasRun={Boolean(artifacts?.run_dir)} />
+      <TopBar view={view} onViewChange={setView} onLoadRun={openRun} onExport={exportReport} hasRun={Boolean(artifacts?.run_dir)} onBack={onBack} />
       <AnimatePresence mode="wait">
         {view === "setup" ? (
           <motion.div key="setup" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>

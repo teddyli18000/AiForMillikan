@@ -1,4 +1,4 @@
-import { FolderOpen, Play, RotateCcw, Save } from "lucide-react";
+import { ArrowLeft, FolderOpen, Play, RotateCcw, Save } from "lucide-react";
 
 type TopBarProps = {
   view: "setup" | "analysis" | "results";
@@ -6,11 +6,15 @@ type TopBarProps = {
   onLoadRun: () => void;
   onExport: () => void;
   hasRun: boolean;
+  onBack: () => void;
 };
 
-export function TopBar({ view, onViewChange, onLoadRun, onExport, hasRun }: TopBarProps) {
+export function TopBar({ view, onViewChange, onLoadRun, onExport, hasRun, onBack }: TopBarProps) {
   return (
     <header className="topbar">
+      <button className="icon-button" onClick={onBack} aria-label="返回模式选择" title="返回模式选择">
+        <ArrowLeft size={18} />
+      </button>
       <div className="window-dots" aria-hidden="true">
         <span />
         <span />

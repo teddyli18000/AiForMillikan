@@ -23,6 +23,7 @@ const api = {
   normalSelectRecord: (payload: unknown) => ipcRenderer.invoke("normal:updateRecordSelection", payload),
   normalRunInversion: (payload: unknown) => ipcRenderer.invoke("normal:runInversion", payload),
   normalExportSession: (payload: unknown) => ipcRenderer.invoke("normal:exportSession", payload),
+  setModeFullscreen: (enabled: boolean) => ipcRenderer.invoke("window:setModeFullscreen", enabled),
   openPath: (targetPath: string) => ipcRenderer.invoke("shell:openPath", targetPath),
   onAnalysisProgress: (callback: (progress: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: unknown) => callback(progress);

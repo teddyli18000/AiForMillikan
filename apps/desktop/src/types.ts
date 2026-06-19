@@ -369,6 +369,7 @@ export type DesktopApi = {
   normalSelectRecord: (payload: { session_root?: string; record_id: string; kept: boolean }) => Promise<NormalSession>;
   normalRunInversion: (payload?: { session_root?: string; config_overrides?: Record<string, unknown> }) => Promise<NormalInversionResponse>;
   normalExportSession: (payload?: { session_root?: string }) => Promise<unknown>;
+  setModeFullscreen: (enabled: boolean) => Promise<boolean>;
   openPath: (targetPath: string) => Promise<unknown>;
   onAnalysisProgress: (callback: (progress: ProgressEvent) => void) => () => void;
   onNormalProgress: (callback: (progress: NormalProgressEvent) => void) => () => void;

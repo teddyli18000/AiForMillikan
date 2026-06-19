@@ -111,6 +111,16 @@ function registerIpc(): void {
       event.sender.send("normal:progress", progress);
     })
   );
+  ipcMain.handle("window:setModeFullscreen", (_event, enabled: boolean) => {
+    if (!mainWindow) return false;
+    if (enabled) {
+      mainWindow.maximize();
+    } else {
+      mainWindow.unmaximize();
+      mainWindow.center();
+    }
+    return mainWindow.isMaximized();
+  });
 
   ipcMain.handle("analysis:run", (event, payload) =>
     worker.request("analysis.run", payload, (progress) => {

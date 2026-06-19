@@ -244,6 +244,32 @@ input:focus-visible {
   border: 1px solid var(--line);
 }
 
+.step-button {
+  position: relative;
+  color: #253243;
+}
+
+.step-button--fine {
+  background: rgba(235, 246, 255, 0.9);
+  border-color: rgba(35, 136, 255, 0.24);
+}
+
+.step-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -7px;
+  min-width: 18px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  color: #0d63d8;
+  background: #ffffff;
+  border: 1px solid rgba(35, 136, 255, 0.2);
+  font-size: 9px;
+  font-weight: 760;
+  line-height: 1.2;
+  box-shadow: 0 4px 10px rgba(22, 119, 255, 0.12);
+}
+
 .primary-button.full,
 .ghost-button.full {
   width: 100%;
@@ -292,7 +318,7 @@ button:disabled {
   z-index: 20;
   height: 68px;
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto auto minmax(160px, 1fr) auto auto;
   align-items: center;
   gap: 18px;
   padding: 0 16px;
@@ -1700,7 +1726,7 @@ td {
 
 .normal-player {
   display: grid;
-  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto auto auto auto minmax(0, 1fr) auto;
   gap: 9px;
   align-items: center;
   margin-top: 12px;
@@ -1901,9 +1927,13 @@ td {
 
 @media (max-width: 1240px) {
   .topbar {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto auto 1fr;
     height: auto;
     padding: 14px;
+  }
+
+  .topbar__brand {
+    grid-column: 3;
   }
 
   .segmented,

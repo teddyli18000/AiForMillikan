@@ -12,6 +12,10 @@ describe("Millikan desktop app", () => {
     expect(await screen.findByRole("button", { name: /选择视频/ })).toBeInTheDocument();
     expect(screen.getAllByText("平衡电压 + 0V 下落逐滴测量").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /开始处理/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "后退 1 秒" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "后退 0.1 秒" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "前进 0.1 秒" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "前进 1 秒" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /选择视频/ }));
     expect(await screen.findByText("1280 x 720")).toBeInTheDocument();
     expect(screen.getByText("30.00")).toBeInTheDocument();
@@ -28,6 +32,8 @@ describe("Millikan desktop app", () => {
     expect(await screen.findByText("拖入实验视频")).toBeInTheDocument();
     expect(screen.getAllByText("平台设置").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /开始分析/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "返回模式选择" }));
+    expect(await screen.findByRole("button", { name: /Normal/ })).toBeInTheDocument();
   });
 
   it("runs the demo analysis path and shows elementary-charge diagnostics", async () => {

@@ -205,6 +205,7 @@ function createDemoApi(): DesktopApi {
       }
     }),
     normalExportSession: async () => ({ canceled: false, destination: "demo-normal-export" }),
+    setModeFullscreen: async () => false,
     openPath: async () => undefined,
     onAnalysisProgress: (callback) => {
       progressListeners = [...progressListeners, callback];
