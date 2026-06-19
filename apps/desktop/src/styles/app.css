@@ -1850,6 +1850,51 @@ td {
   padding: 0;
 }
 
+.normal-selection-preview {
+  display: grid;
+  gap: 6px;
+}
+
+.normal-selection-preview small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.normal-selection-preview__frame {
+  position: relative;
+  min-height: 128px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(8, 16, 28, 0.2);
+  border-radius: 8px;
+  background: #07101a;
+}
+
+.normal-selection-preview__frame img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.normal-selection-preview__frame span {
+  padding: 18px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  text-align: center;
+}
+
+.normal-selection-preview__frame i {
+  position: absolute;
+  border: 2px solid #35c9ff;
+  border-radius: 4px;
+  background: rgba(53, 201, 255, 0.14);
+  box-shadow: 0 0 0 9999px rgba(5, 12, 18, 0.18), 0 0 18px rgba(53, 201, 255, 0.22);
+  pointer-events: none;
+}
+
 .normal-param-grid {
   display: grid;
   gap: 8px;

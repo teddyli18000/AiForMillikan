@@ -119,6 +119,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [selectionPreviewUrl, setSelectionPreviewUrl] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -140,6 +141,10 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const selectedRecord = useMemo(
     () => session?.records.find((record) => record.record_id === selectedRecordId) ?? session?.records[session.records.length - 1] ?? null,
     [selectedRecordId, session?.records]
+  );
+  const adjustmentRecord = useMemo(
+    () => (adjustingRecordId ? session?.records.find((record) => record.record_id === adjustingRecordId) ?? null : null),
+    [adjustingRecordId, session?.records]
   );
   const crossings = selectedRecord?.crossings ?? [];
   const allCrossingsReviewedSame = crossings.every((event) => event.review_result === "same_drop");
@@ -408,10 +413,41 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     const safeDuration = metadataOverride?.duration_s || duration || metadata?.duration_s || Number.POSITIVE_INFINITY;
     const safeTime = Math.max(0, Math.min(safeDuration, time));
     if (videoRef.current) {
+      if (stage === "target") {
+        videoRef.current.pause();
+      }
       videoRef.current.currentTime = safeTime;
     }
     setCurrentTime(safeTime);
   };
+
+  const refreshSelectionPreview = () => {
+    if (stage !== "target") return;
+    const video = videoRef.current;
+    if (!video || !metadata || !video.videoWidth || !video.videoHeight || video.readyState < 2) return;
+    try {
+      const maxWidth = 720;
+      const scale = Math.min(1, maxWidth / video.videoWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      setSelectionPreviewUrl(canvas.toDataURL("image/jpeg", 0.82));
+    } catch {
+      setSelectionPreviewUrl("");
+    }
+  };
+
+  useEffect(() => {
+    if (stage !== "target") {
+      setSelectionPreviewUrl("");
+      return;
+    }
+    const handle = window.setTimeout(refreshSelectionPreview, 120);
+    return () => window.clearTimeout(handle);
+  }, [stage, selectionTime, mainVideoUrl, metadata?.width, metadata?.height]);
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -441,7 +477,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     jumpTo(next);
   };
 
-  const restoreRecordForAdjustment = (record: NormalRecord, restoredSession?: NormalSession | null) => {
+  const restoreRecordContext = (record: NormalRecord, restoredSession: NormalSession | null | undefined, destination: StageId, markRetry: boolean) => {
     const active = (restoredSession?.active_video ?? session?.active_video ?? null) as Record<string, any> | null;
     const adjustment = (active?.adjustment as Record<string, any> | undefined) ?? {};
     const recordBoundary = record.time_window as NormalBoundary | undefined;
@@ -486,10 +522,14 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
         )
       )
     );
-    setAdjustingRecordId(String(adjustment.record_id ?? record.record_id));
+    setAdjustingRecordId(markRetry ? String(adjustment.record_id ?? record.record_id) : null);
     setReviewEvent(null);
-    setStage("boundary");
+    setStage(destination);
     jumpTo(restoredSelectionTime, nextMetadata ?? metadata);
+  };
+
+  const restoreRecordForAdjustment = (record: NormalRecord, restoredSession?: NormalSession | null) => {
+    restoreRecordContext(record, restoredSession, "boundary", true);
   };
 
   const getVideoGeometry = () => {
@@ -590,14 +630,24 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     setInversion(null);
   };
 
-  const backToBoundary = () => {
+  const backToBoundary = (record?: NormalRecord | null) => {
+    if (record) {
+      restoreRecordContext(record, session, "boundary", true);
+      setMessage("已恢复该记录原本的视频、0V 边界、框选、电压和参数，可在此基础上微调 0V。");
+      return;
+    }
     setStage("boundary");
     setReviewEvent(null);
     setMessage("已返回 0V 边界确认。会在上次确认基础上微调；确认修改后需重新框选并追踪。");
     jumpTo(boundary.zero_v_start_s);
   };
 
-  const backToTarget = () => {
+  const backToTarget = (record?: NormalRecord | null) => {
+    if (record) {
+      restoreRecordContext(record, session, "target", true);
+      setMessage("已恢复该记录原本的框选时间、矩形框、电压和参数；修改后会重新追踪。");
+      return;
+    }
     setStage("target");
     setSelectedRecordId(null);
     setReviewEvent(null);
@@ -664,6 +714,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
                     setCurrentTime(event.currentTarget.currentTime || 0);
                   }}
                   onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                  onSeeked={refreshSelectionPreview}
+                  onLoadedData={refreshSelectionPreview}
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
                 />
@@ -746,6 +798,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               selectionTime={selectionTime}
               selectionWindow={selectionWindow}
               selectionBox={selectionBox}
+              selectionPreviewUrl={selectionPreviewUrl}
+              metadata={metadata}
               balanceVoltage={balanceVoltage}
               balanceConfirmed={balanceConfirmed}
               advancedOpen={advancedOpen}
@@ -770,7 +824,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
                 setInversion(null);
               }}
               onTrack={selectTargetAndTrack}
-              onBackBoundary={backToBoundary}
+              onBackBoundary={() => backToBoundary(adjustmentRecord)}
               busy={busy}
             />
           ) : null}
@@ -782,8 +836,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               onPrepareReview={prepareCrossingReview}
               onReview={submitCrossingReview}
               onContinue={() => setStage("results")}
-              onBackTarget={backToTarget}
-              onBackBoundary={backToBoundary}
+              onBackTarget={() => backToTarget(selectedRecord)}
+              onBackBoundary={() => backToBoundary(selectedRecord)}
               busy={busy}
             />
           ) : null}
@@ -798,8 +852,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               onAccept={() => acceptRecord(true)}
               onReject={() => acceptRecord(false)}
               onRunInversion={runInversion}
-              onBackReview={() => (selectedRecord?.status === "pending_crossing_review" ? setStage("review") : backToTarget())}
-              onBackBoundary={backToBoundary}
+              onBackReview={() => (selectedRecord?.status === "pending_crossing_review" ? restoreRecordContext(selectedRecord, session, "review", false) : backToTarget(selectedRecord))}
+              onBackBoundary={() => backToBoundary(selectedRecord)}
               busy={busy}
             />
           ) : null}
@@ -939,6 +993,8 @@ function TargetPanel(props: {
   selectionTime: number;
   selectionWindow: { start_s: number; end_s: number; source?: string };
   selectionBox: VideoBox | null;
+  selectionPreviewUrl: string;
+  metadata: VideoMetadata | null;
   balanceVoltage: string;
   balanceConfirmed: boolean;
   advancedOpen: boolean;
@@ -988,6 +1044,25 @@ function TargetPanel(props: {
           <button onClick={() => props.onAdjustSelection(0.1)}>+0.1s</button>
           <button onClick={() => props.onAdjustSelection(1)}>+1s</button>
         </div>
+      </div>
+      <div className="normal-selection-preview">
+        <div
+          className="normal-selection-preview__frame"
+          style={props.metadata?.width && props.metadata?.height ? { aspectRatio: `${props.metadata.width} / ${props.metadata.height}` } : undefined}
+        >
+          {props.selectionPreviewUrl ? <img src={props.selectionPreviewUrl} alt="selection frame preview" /> : <span>调整 selection time 后在这里预览当前帧</span>}
+          {props.selectionBox && props.metadata?.width && props.metadata?.height ? (
+            <i
+              style={{
+                left: `${(props.selectionBox.x / props.metadata.width) * 100}%`,
+                top: `${(props.selectionBox.y / props.metadata.height) * 100}%`,
+                width: `${(props.selectionBox.width / props.metadata.width) * 100}%`,
+                height: `${(props.selectionBox.height / props.metadata.height) * 100}%`
+              }}
+            />
+          ) : null}
+        </div>
+        <small>实时预览：当前 selection frame，蓝框同步主视频矩形框选。</small>
       </div>
       <div className="normal-diagnostic-box">
         <strong>矩形框选</strong>
