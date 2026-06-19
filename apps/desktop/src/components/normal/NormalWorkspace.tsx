@@ -32,9 +32,10 @@ const stages: Array<{ id: StageId; title: string; detail: string }> = [
 const physicsKeys = [
   "plate_distance_m",
   "air_viscosity_Pa_s",
-  "pressure_Pa",
+  "pressure_kPa",
   "oil_density_kg_m3",
-  "cunningham_b_Pa_m"
+  "cunningham_b_kPa_m",
+  "gravity_m_s2"
 ];
 
 const gridKeys = ["measurement_distance_m"];
@@ -75,10 +76,10 @@ function clampBoundary(boundary: NormalBoundary, metadata: VideoMetadata | null)
 function selectionWindowFromBoundary(boundary: NormalBoundary, metadata: VideoMetadata | null) {
   const duration = metadata?.duration_s && Number.isFinite(metadata.duration_s) ? metadata.duration_s : Number.POSITIVE_INFINITY;
   const configured = boundary.selection_window;
-  const start = configured?.start_s ?? Math.max(0, Number(boundary.zero_v_start_s || 0) - 1);
-  const end = configured?.end_s ?? Math.min(Number(boundary.zero_v_end_s || duration), Number(boundary.zero_v_start_s || 0) + 0.5);
+  const start = configured?.start_s ?? Math.max(0, Number(boundary.zero_v_start_s || 0) - 0.5);
+  const end = configured?.end_s ?? Math.min(duration, Number(boundary.zero_v_start_s || 0) + 0.5);
   const safeStart = Math.max(0, Math.min(start, duration));
-  const safeEnd = Math.max(safeStart, Math.min(end, duration, Number(boundary.zero_v_end_s || duration)));
+  const safeEnd = Math.max(safeStart, Math.min(end, duration));
   return { start_s: Number(safeStart.toFixed(3)), end_s: Number(safeEnd.toFixed(3)), source: configured?.source ?? "normal_v1_default" };
 }
 
@@ -98,6 +99,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const [videoPath, setVideoPath] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [boundary, setBoundary] = useState<NormalBoundary>({ zero_v_start_s: 0, zero_v_end_s: 1, source: "manual_ui" });
+  const [boundaryDirty, setBoundaryDirty] = useState(false);
   const [boundaryDiagnostics, setBoundaryDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [grid, setGrid] = useState<NormalGrid | null>(null);
   const [selectionTime, setSelectionTime] = useState(0);
@@ -146,6 +148,12 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const effectiveTopPx = Number(grid?.effective_top_px ?? grid?.second_line_y ?? Number.NaN);
   const effectiveBottomPx = Number(grid?.effective_bottom_px ?? grid?.penultimate_line_y ?? Number.NaN);
   const selectionWindow = selectionWindowFromBoundary(boundary, metadata);
+  const selectedOverlayUrl =
+    selectedRecord?.artifact_urls?.overlay_mp4 ??
+    selectedRecord?.artifact_urls?.single_droplet_overlay_mp4 ??
+    "";
+  const mainVideoUrl = stage === "review" || stage === "results" ? selectedOverlayUrl || videoUrl : videoUrl;
+  const showingTrackOverlay = Boolean((stage === "review" || stage === "results") && selectedOverlayUrl);
 
   const inspectVideo = async (path: string) => {
     if (!path) {
@@ -160,10 +168,13 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setVideoUrl(result.video_url);
       setDuration(result.metadata.duration_s || 0);
       setBoundary({ zero_v_start_s: 0, zero_v_end_s: Math.min(1, result.metadata.duration_s || 1), source: "manual_ui" });
+      setBoundaryDirty(false);
       setGrid(null);
       setSelectionBox(null);
+      setSelectedRecordId(null);
       setAdjustingRecordId(null);
       setReviewEvent(null);
+      setInversion(null);
       setStage("import");
       setMessage("视频预览已就绪。点击开始处理后才会检测 0V 和网格。");
     } catch (error) {
@@ -208,6 +219,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setMetadata(result.metadata);
       setVideoUrl(result.video_url || videoUrl);
       setBoundary(clampBoundary(result.boundary, result.metadata));
+      setBoundaryDirty(false);
       setBoundaryDiagnostics(result.boundary_diagnostics ?? null);
       setSelectionTime(clampSelectionTime(Number(result.boundary.selection_time_s ?? result.boundary.zero_v_start_s ?? 0), result.boundary, result.metadata));
       setGrid(result.grid);
@@ -228,8 +240,16 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setSession(result.session);
       const confirmedBoundary = (result.active_video?.boundary as NormalBoundary | undefined) ?? boundary;
       setBoundary(confirmedBoundary);
-      const nextSelectionTime = clampSelectionTime(Number(confirmedBoundary.selection_time_s ?? confirmedBoundary.zero_v_start_s ?? 0), confirmedBoundary, metadata);
+      const selectionBase = boundaryDirty ? Number(confirmedBoundary.zero_v_start_s ?? 0) : Number(selectionTime || confirmedBoundary.zero_v_start_s || 0);
+      const nextSelectionTime = clampSelectionTime(selectionBase, confirmedBoundary, metadata);
       setSelectionTime(nextSelectionTime);
+      if (boundaryDirty) {
+        setSelectionBox(null);
+        setSelectedRecordId(null);
+        setReviewEvent(null);
+        setInversion(null);
+      }
+      setBoundaryDirty(false);
       jumpTo(nextSelectionTime);
       setStage("target");
       setMessage("0V 边界已确认。请在 0V 起点附近框选目标油滴。");
@@ -404,6 +424,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   };
 
   const adjustBoundary = (field: "zero_v_start_s" | "zero_v_end_s", delta: number) => {
+    setBoundaryDirty(true);
     setBoundary((current) => {
       const next = clampBoundary({ ...current, [field]: Number((current[field] + delta).toFixed(3)) }, metadata);
       jumpTo(next[field]);
@@ -414,6 +435,9 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const adjustSelectionTime = (delta: number) => {
     const next = clampSelectionTime(Number((selectionTime + delta).toFixed(3)), boundary, metadata);
     setSelectionTime(next);
+    setSelectedRecordId(null);
+    setReviewEvent(null);
+    setInversion(null);
     jumpTo(next);
   };
 
@@ -444,6 +468,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setGrid(nextGrid);
     }
     setBoundary(nextBoundary);
+    setBoundaryDirty(false);
     setBoundaryDiagnostics(null);
 
     const restoredSelectionTime = clampSelectionTime(Number(target?.target_time_s ?? nextBoundary.zero_v_start_s ?? 0), nextBoundary, nextMetadata ?? metadata);
@@ -499,6 +524,9 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     if (stage !== "target") return;
     const point = clientToVideoPoint(event);
     if (!point) return;
+    setSelectedRecordId(null);
+    setReviewEvent(null);
+    setInversion(null);
     setDragStart(point);
     setSelectionBox({ x: point.x, y: point.y, width: 1, height: 1 });
   };
@@ -554,6 +582,32 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     Boolean(selectedRecord.q_valid) &&
     (selectedRecord.crossings?.length ? allCrossingsReviewedSame : true);
 
+  const setManualBoundary = (nextBoundary: NormalBoundary) => {
+    setBoundaryDirty(true);
+    setBoundary(nextBoundary);
+    setSelectedRecordId(null);
+    setReviewEvent(null);
+    setInversion(null);
+  };
+
+  const backToBoundary = () => {
+    setStage("boundary");
+    setReviewEvent(null);
+    setMessage("已返回 0V 边界确认。会在上次确认基础上微调；确认修改后需重新框选并追踪。");
+    jumpTo(boundary.zero_v_start_s);
+  };
+
+  const backToTarget = () => {
+    setStage("target");
+    setSelectedRecordId(null);
+    setReviewEvent(null);
+    setInversion(null);
+    const next = clampSelectionTime(selectionTime || boundary.zero_v_start_s, boundary, metadata);
+    setSelectionTime(next);
+    setMessage("已返回框选目标。保留已确认边界和参数；修改框选后会重新追踪。");
+    jumpTo(next);
+  };
+
   return (
     <div className="desktop-frame normal-workspace">
       <header className="normal-topbar">
@@ -600,11 +654,11 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
 
         <section className="normal-video-panel panel" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
           <div className="normal-video-shell">
-            {videoUrl ? (
+            {mainVideoUrl ? (
               <>
                 <video
                   ref={videoRef}
-                  src={videoUrl}
+                  src={mainVideoUrl}
                   onLoadedMetadata={(event) => {
                     setDuration(event.currentTarget.duration || metadata?.duration_s || 0);
                     setCurrentTime(event.currentTarget.currentTime || 0);
@@ -613,6 +667,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
                 />
+                {showingTrackOverlay ? <div className="normal-overlay-badge">backend overlay: target / missing / trajectory</div> : null}
                 <div ref={overlayRef} className="normal-video-overlay" onMouseDown={onSelectionDown} onMouseMove={onSelectionMove} onMouseUp={endSelection} onMouseLeave={endSelection}>
                   {boundary.zero_v_start_s <= (duration || 0) ? <span className="time-marker start" style={{ left: `${((boundary.zero_v_start_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
                   {boundary.zero_v_end_s <= (duration || 0) ? <span className="time-marker end" style={{ left: `${((boundary.zero_v_end_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
@@ -627,22 +682,22 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
             )}
           </div>
           <div className="normal-player">
-            <button className="icon-button step-button step-button--coarse" onClick={() => jumpTo(currentTime - 1)} disabled={!videoUrl} aria-label="后退 1 秒" title="后退 1 秒">
+            <button className="icon-button step-button step-button--coarse" onClick={() => jumpTo(currentTime - 1)} disabled={!mainVideoUrl} aria-label="后退 1 秒" title="后退 1 秒">
               <StepBack size={16} />
               <span className="step-badge">1s</span>
             </button>
-            <button className="icon-button step-button step-button--fine" onClick={() => jumpTo(currentTime - 0.1)} disabled={!videoUrl} aria-label="后退 0.1 秒" title="后退 0.1 秒">
+            <button className="icon-button step-button step-button--fine" onClick={() => jumpTo(currentTime - 0.1)} disabled={!mainVideoUrl} aria-label="后退 0.1 秒" title="后退 0.1 秒">
               <ChevronsLeft size={16} />
               <span className="step-badge">0.1</span>
             </button>
-            <button className="icon-button" onClick={togglePlay} disabled={!videoUrl} aria-label={isPlaying ? "暂停" : "播放"}>
+            <button className="icon-button" onClick={togglePlay} disabled={!mainVideoUrl} aria-label={isPlaying ? "暂停" : "播放"}>
               {isPlaying ? <Pause size={16} /> : <Play size={16} />}
             </button>
-            <button className="icon-button step-button step-button--fine" onClick={() => jumpTo(currentTime + 0.1)} disabled={!videoUrl} aria-label="前进 0.1 秒" title="前进 0.1 秒">
+            <button className="icon-button step-button step-button--fine" onClick={() => jumpTo(currentTime + 0.1)} disabled={!mainVideoUrl} aria-label="前进 0.1 秒" title="前进 0.1 秒">
               <ChevronsRight size={16} />
               <span className="step-badge">0.1</span>
             </button>
-            <button className="icon-button step-button step-button--coarse" onClick={() => jumpTo(currentTime + 1)} disabled={!videoUrl} aria-label="前进 1 秒" title="前进 1 秒">
+            <button className="icon-button step-button step-button--coarse" onClick={() => jumpTo(currentTime + 1)} disabled={!mainVideoUrl} aria-label="前进 1 秒" title="前进 1 秒">
               <StepForward size={16} />
               <span className="step-badge">1s</span>
             </button>
@@ -653,7 +708,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               max={duration || metadata?.duration_s || 0}
               step={0.01}
               value={currentTime}
-              disabled={!videoUrl}
+              disabled={!mainVideoUrl}
               onChange={(event) => jumpTo(Number(event.target.value))}
               aria-label="视频进度"
             />
@@ -679,7 +734,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               metadata={metadata}
               diagnostics={boundaryDiagnostics}
               grid={grid}
-              onBoundary={setBoundary}
+              onBoundary={setManualBoundary}
               onAdjust={adjustBoundary}
               onJump={jumpTo}
               onConfirm={confirmBoundary}
@@ -697,14 +752,25 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               parameterKeys={[...physicsKeys, ...gridKeys]}
               configValue={configValue}
               overrides={parameterOverrides}
-              onSelectionTime={(time) => setSelectionTime(clampSelectionTime(time, boundary, metadata))}
+              onSelectionTime={(time) => {
+                setSelectionTime(clampSelectionTime(time, boundary, metadata));
+                setSelectedRecordId(null);
+                setReviewEvent(null);
+                setInversion(null);
+              }}
               onAdjustSelection={adjustSelectionTime}
               onJump={jumpTo}
               onVoltage={setBalanceVoltage}
               onBalanceConfirmed={setBalanceConfirmed}
               onAdvancedOpen={setAdvancedOpen}
-              onOverride={(key, value) => setParameterOverrides((current) => ({ ...current, [key]: value }))}
+              onOverride={(key, value) => {
+                setParameterOverrides((current) => ({ ...current, [key]: value }));
+                setSelectedRecordId(null);
+                setReviewEvent(null);
+                setInversion(null);
+              }}
               onTrack={selectTargetAndTrack}
+              onBackBoundary={backToBoundary}
               busy={busy}
             />
           ) : null}
@@ -716,6 +782,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               onPrepareReview={prepareCrossingReview}
               onReview={submitCrossingReview}
               onContinue={() => setStage("results")}
+              onBackTarget={backToTarget}
+              onBackBoundary={backToBoundary}
               busy={busy}
             />
           ) : null}
@@ -730,6 +798,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               onAccept={() => acceptRecord(true)}
               onReject={() => acceptRecord(false)}
               onRunInversion={runInversion}
+              onBackReview={() => (selectedRecord?.status === "pending_crossing_review" ? setStage("review") : backToTarget())}
+              onBackBoundary={backToBoundary}
               busy={busy}
             />
           ) : null}
@@ -884,6 +954,7 @@ function TargetPanel(props: {
   onAdvancedOpen: (value: boolean) => void;
   onOverride: (key: string, value: string) => void;
   onTrack: () => void;
+  onBackBoundary: () => void;
 }) {
   return (
     <div className="normal-panel-stack">
@@ -891,6 +962,10 @@ function TargetPanel(props: {
         <span>stage 3</span>
         <strong>框选目标油滴</strong>
       </div>
+      <button className="ghost-button full" disabled={props.busy} onClick={props.onBackBoundary}>
+        <ArrowLeft size={16} />
+        返回修改 0V 边界
+      </button>
       <div className="normal-boundary-editor">
         <label>selection time (s)</label>
         <small>允许范围：{formatFixed(props.selectionWindow.start_s, 2)} - {formatFixed(props.selectionWindow.end_s, 2)} s</small>
@@ -957,6 +1032,8 @@ function ReviewPanel(props: {
   onPrepareReview: (event: NormalCrossingEvent) => void;
   onReview: (result: "same_drop" | "different_drop") => void;
   onContinue: () => void;
+  onBackTarget: () => void;
+  onBackBoundary: () => void;
 }) {
   const crossings = props.record?.crossings ?? [];
   return (
@@ -969,6 +1046,15 @@ function ReviewPanel(props: {
         <strong>{statusLabel(props.record?.status)}</strong>
         <span>crossings: {crossings.length}</span>
         <span>未复核 crossing 会阻断用户确认。</span>
+        <span>主视频区显示 backend overlay MP4，target/missing/轨迹坐标来自后端 track。</span>
+      </div>
+      <div className="panel-actions">
+        <button className="ghost-button" disabled={props.busy} onClick={props.onBackTarget}>
+          返回框选
+        </button>
+        <button className="ghost-button" disabled={props.busy} onClick={props.onBackBoundary}>
+          修改 0V
+        </button>
       </div>
       <div className="normal-crossing-list">
         {crossings.map((event) => (
@@ -1011,6 +1097,8 @@ function ResultsPanel(props: {
   onAccept: () => void;
   onReject: () => void;
   onRunInversion: () => void;
+  onBackReview: () => void;
+  onBackBoundary: () => void;
 }) {
   const record = props.selectedRecord;
   const q = (record?.q as Record<string, any> | undefined) ?? {};
@@ -1040,7 +1128,18 @@ function ResultsPanel(props: {
             <span>included: {Array.isArray(uncertainty?.included) ? uncertainty.included.map((row: any) => row.component).join(", ") : "-"}</span>
             <span>not included: {Array.isArray(uncertainty?.not_included) ? uncertainty.not_included.join(", ") : "-"}</span>
           </div>
+          <div className="normal-diagnostic-box">
+            <strong>追踪复核视频</strong>
+            <span>{record.artifact_urls?.overlay_mp4 ? "主视频区正在播放 backend overlay MP4。" : "当前记录没有 overlay URL。"}</span>
+            <span>target/missing/trajectory 不由前端重画，避免缩放错位。</span>
+          </div>
           <div className="panel-actions">
+            <button className="ghost-button" disabled={props.busy} onClick={props.onBackReview}>
+              返回复核/框选
+            </button>
+            <button className="ghost-button" disabled={props.busy} onClick={props.onBackBoundary}>
+              修改 0V
+            </button>
             <button className="primary-button small" disabled={props.busy || !props.canAcceptRecord} onClick={props.onAccept}>
               <Save size={15} />
               确认保留

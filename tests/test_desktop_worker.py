@@ -10,6 +10,7 @@ import numpy as np
 from millikan_ai.config import load_config, save_config
 from millikan_ai.normal.config import normal_config
 from millikan_ai.normal.grid import calibrate_grid
+from millikan_ai.normal.physics import compute_q, fit_zero_v_velocity
 
 
 def _fast_config() -> dict:
@@ -102,6 +103,63 @@ def test_normal_grid_detects_blue_screen_lines(tmp_path: Path):
     assert len(grid["grid_lines_y"]) >= 7
     assert grid["second_line_y"] == 60
     assert grid["penultimate_line_y"] == 180
+
+
+def test_normal_014_defaults_and_velocity_uncertainty_contract():
+    cfg = normal_config(
+        {
+            "grid": {"measurement_distance_m": 0.0015},
+            "fit": {"min_points": 4, "min_duration_s": 1.0, "min_displacement_px": 1.0, "min_r2": 0.9},
+        }
+    )
+
+    assert cfg["selection"]["before_zero_v_start_s"] == 0.5
+    assert cfg["selection"]["after_zero_v_start_s"] == 0.5
+    assert cfg["tracking"]["diameter"] == 5
+    assert cfg["tracking"]["minmass"] == 80.0
+    assert cfg["tracking"]["local_search_radius_px"] == 45.0
+    assert cfg["tracking"]["max_accept_distance_px"] == 30.0
+    assert cfg["tracking"]["memory_frames"] == 5
+    assert cfg["tracking"]["local_topn"] == 20
+    assert cfg["tracking"]["grid_reject_dilate_px"] == 0
+    assert cfg["tracking"]["grid_occlusion_radius_px"] == 0
+    assert cfg["tracking"]["skip_detection_on_grid"] is True
+    assert cfg["tracking"]["grid_mask_for_tracking_enabled"] is True
+    assert cfg["tracking"]["grid_removal_enabled"] is False
+    physics = cfg["physics"]
+    assert physics["gravity_m_s2"] == 9.79
+    assert physics["air_viscosity_Pa_s"] == 1.83e-5
+    assert physics["pressure_kPa"] == 101.325
+    assert physics["cunningham_b_kPa_m"] == 8.226e-6
+    assert "pressure_Pa" not in physics
+    assert "relative_uncertainty_floor" not in physics
+
+    legacy = normal_config({"physics": {"pressure_Pa": 101325.0, "cunningham_b_Pa_m": 8.226e-6, "relative_uncertainty_floor": 0.05}})
+    assert legacy["physics"]["pressure_kPa"] == 101.325
+    assert legacy["physics"]["cunningham_b_kPa_m"] == 8.226e-6
+    assert "pressure_Pa" not in legacy["physics"]
+
+    track_rows = []
+    y_values = [0.0, 1.001, 1.999, 3.001, 3.999, 5.001]
+    for frame, y in enumerate(y_values):
+        track_rows.append(
+            {
+                "source_frame": frame,
+                "x": 20.0,
+                "y": y,
+                "detected": True,
+                "state": "tracking",
+                "use_for_fit": True,
+            }
+        )
+    fit = fit_zero_v_velocity(track_rows, fps=1.0, scale_y_m_per_px=1e-6, cfg=cfg)
+    assert fit["valid"] is True
+    assert fit["sigma_v_m_s"] > 0
+    q = compute_q(fit, balance_voltage_V=239.0, cfg=cfg)
+    assert q["valid"] is True
+    assert q["sigma_q_C"] > 0
+    assert q["sigma_q_C"] / q["q_C"] < 0.05
+    assert [row["component"] for row in q["uncertainty_budget"]["included"]] == ["velocity_fit_random"]
 
 
 def test_desktop_worker_runs_analysis_and_loads_artifacts(tmp_path: Path):

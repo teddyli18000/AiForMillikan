@@ -31,6 +31,14 @@ def fit_zero_v_velocity(track_rows: list[dict[str, Any]], fps: float, scale_y_m_
         ss_tot = float(np.sum((y - np.mean(y)) ** 2))
         r2 = 1.0 if ss_tot == 0 else 1.0 - ss_res / ss_tot
         rmse = math.sqrt(ss_res / max(1, len(y)))
+        t_centered_ss = float(np.sum((t - float(np.mean(t))) ** 2))
+        if len(y) > 2 and t_centered_ss > 0:
+            residual_variance = ss_res / float(len(y) - 2)
+            slope_sigma_px_s = math.sqrt(max(0.0, residual_variance / t_centered_ss))
+            sigma_v_m_s = abs(float(scale_y_m_per_px)) * slope_sigma_px_s
+        else:
+            slope_sigma_px_s = math.nan
+            sigma_v_m_s = math.nan
         x_drift = float(np.max(x) - np.min(x))
         missing_ratio = float((track["state"] == "missing").sum() / max(1, len(track)))
         velocity_m_s = float(slope * scale_y_m_per_px)
@@ -47,11 +55,18 @@ def fit_zero_v_velocity(track_rows: list[dict[str, Any]], fps: float, scale_y_m_
             suggestions.append("确认 0V 下落窗口和视频 +Y 方向；下落应表现为 y 增大。")
     else:
         duration = displacement = r2 = rmse = x_drift = missing_ratio = velocity_m_s = math.nan
+        slope = slope_sigma_px_s = sigma_v_m_s = math.nan
+        ss_res = t_centered_ss = math.nan
         intercept = math.nan
         flags.append("too_few_fit_points")
     return {
         "valid": len(flags) == 0,
         "velocity_m_s": velocity_m_s,
+        "slope_px_s": float(slope) if math.isfinite(float(slope)) else None,
+        "slope_sigma_px_s": float(slope_sigma_px_s) if math.isfinite(float(slope_sigma_px_s)) else None,
+        "sigma_v_m_s": float(sigma_v_m_s) if math.isfinite(float(sigma_v_m_s)) else None,
+        "residual_ss_px2": float(ss_res) if math.isfinite(float(ss_res)) else None,
+        "time_centered_ss_s2": float(t_centered_ss) if math.isfinite(float(t_centered_ss)) else None,
         "duration_s": duration,
         "displacement_px": displacement,
         "r2": r2,
@@ -80,27 +95,26 @@ def compute_q(fit: dict[str, Any], balance_voltage_V: float, cfg: dict[str, Any]
     eta = float(pcfg["air_viscosity_Pa_s"])
     rho = float(pcfg["oil_density_kg_m3"])
     g = float(pcfg["gravity_m_s2"])
-    b = float(pcfg["cunningham_b_Pa_m"])
-    p = float(pcfg["pressure_Pa"])
+    b = float(pcfg["cunningham_b_kPa_m"])
+    p = float(pcfg["pressure_kPa"])
     d = float(pcfg["plate_distance_m"])
     bp = b / p
     radius = (math.sqrt(bp * bp + (18.0 * eta * velocity) / (rho * g)) - bp) / 2.0
     eta_eff = eta / (1.0 + b / (p * radius))
     charge = 6.0 * math.pi * eta_eff * radius * velocity * d / float(balance_voltage_V)
-    rel_fit = _fit_relative_uncertainty(fit)
-    rel_floor = float(pcfg.get("relative_uncertainty_floor", 0.05))
-    sigma = abs(charge) * max(rel_floor, rel_fit)
+    sigma_v = float(fit.get("sigma_v_m_s") or math.nan)
+    if not math.isfinite(sigma_v) or sigma_v <= 0:
+        flags.append("invalid_velocity_uncertainty")
+    sensitivity = 3.0 * (radius + bp) / (2.0 * radius + bp) if radius > 0 else math.nan
+    sigma = abs(charge) * sensitivity * (sigma_v / velocity) if not flags and math.isfinite(sensitivity) else math.nan
     uncertainty_budget = {
         "included": [
             {
                 "component": "velocity_fit_random",
-                "relative": float(rel_fit),
-                "source": "linear fit residuals from the confirmed 0V falling track",
-            },
-            {
-                "component": "configured_relative_floor",
-                "relative": float(rel_floor),
-                "source": "normal physics.relative_uncertainty_floor",
+                "sigma_v_m_s": float(sigma_v) if math.isfinite(sigma_v) else None,
+                "relative_velocity": float(sigma_v / velocity) if math.isfinite(sigma_v) and velocity > 0 else None,
+                "q_velocity_sensitivity": float(sensitivity) if math.isfinite(sensitivity) else None,
+                "source": "linear-regression slope standard error propagated through q(v)",
             },
         ],
         "not_included": [
@@ -112,7 +126,7 @@ def compute_q(fit: dict[str, Any], balance_voltage_V: float, cfg: dict[str, Any]
             "oil_density_uncertainty",
             "cunningham_b_uncertainty",
         ],
-        "note": "Normal v1 reports q uncertainty from implemented fit residual terms and the configured floor only; undefined instrument uncertainties are explicit non-included terms.",
+        "note": "Normal v1 reports q uncertainty from the implemented velocity-fit random term only; undefined instrument uncertainties are explicit non-included terms.",
     }
     valid = all(math.isfinite(value) and value > 0 for value in [radius, abs(charge), sigma])
     return {
@@ -120,22 +134,14 @@ def compute_q(fit: dict[str, Any], balance_voltage_V: float, cfg: dict[str, Any]
         "diagnostic_only": not bool(valid),
         "q_C": float(abs(charge)),
         "charge_abs_C": float(abs(charge)),
-        "sigma_q_C": float(sigma),
-        "sigma_q_random_C": float(sigma),
+        "sigma_q_C": float(sigma) if math.isfinite(float(sigma)) else None,
+        "sigma_q_random_C": float(sigma) if math.isfinite(float(sigma)) else None,
         "uncertainty_budget": uncertainty_budget,
         "radius_m": float(radius),
         "eta_eff_Pa_s": float(eta_eff),
         "velocity_m_s": float(velocity),
         "balance_voltage_V": float(balance_voltage_V),
-        "q_ci95_C": [max(0.0, abs(charge) - 1.96 * sigma), abs(charge) + 1.96 * sigma],
-        "flags": [] if valid else ["invalid_q_result"],
+        "q_ci95_C": [max(0.0, abs(charge) - 1.96 * sigma), abs(charge) + 1.96 * sigma] if valid else None,
+        "flags": [] if valid else list(dict.fromkeys([*flags, "invalid_q_result"])),
         "parameters": dict(pcfg),
     }
-
-
-def _fit_relative_uncertainty(fit: dict[str, Any]) -> float:
-    displacement = max(1e-9, abs(float(fit.get("displacement_px") or 0.0)))
-    rmse = max(0.0, float(fit.get("rmse_px") or 0.0))
-    points = max(2, int(fit.get("fit_point_count") or 2))
-    r2 = max(0.0, min(1.0, float(fit.get("r2") or 0.0)))
-    return (rmse / displacement) * math.sqrt(12.0 / points) + max(0.0, 1.0 - r2) * 0.25

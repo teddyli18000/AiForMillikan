@@ -196,13 +196,15 @@ All user-facing time controls in Normal use seconds. The UI should offer coarse
 display frame numbers as secondary provenance, not as the primary editing unit.
 
 After boundary confirmation, target selection is limited to a small window near
-the confirmed `0V_start_s`:
+the user-confirmed `0V_start_s`. The window is centered on the value confirmed
+by the user, not the original auto suggestion and not the beginning of the
+video:
 
 ```json
 {
   "selection_window": {
-    "start_s": "max(0, 0V_start_s - 1.0)",
-    "end_s": "min(0V_end_s, 0V_start_s + 0.5)",
+    "start_s": "max(0, confirmed_0V_start_s - 0.5)",
+    "end_s": "min(video_duration_s, confirmed_0V_start_s + 0.5)",
     "source": "normal_v1_default"
   }
 }
@@ -210,6 +212,22 @@ the confirmed `0V_start_s`:
 
 The frontend must clamp `selection_time_s` to this range and show the range to
 the user. The backend must reject target frames outside the same range.
+Tracking must start from the actual selected frame, never from an earlier
+`0V_start_s` frame with coordinates taken from a later selection frame.
+
+Normal stages are reversible. The UI must expose explicit previous-stage
+actions instead of relying only on a sidebar. Returning to a stage restores the
+last user-confirmed state for that stage. If the user changes an upstream
+dependency, downstream state is invalidated as follows:
+
+- boundary changes invalidate target, tracking, crossing review, q candidate,
+  and inversion state for the in-progress measurement
+- target time or rectangle changes invalidate tracking, crossing review, q
+  candidate, and inversion state for the in-progress measurement
+- crossing review changes recompute whether the record may advance to user
+  confirmation
+- accepted historical records are immutable evidence unless the user explicitly
+  excludes them; retrying creates a new `retry_of_record_id`
 
 ### Normal Measurement Record
 
@@ -262,6 +280,25 @@ reimplemented inside this repository from the teammate local Trackpy
 single-drop tracker at `C:\Users\Teddy\Desktop\追踪`; do not import that external
 project.
 
+The Normal v1 tracking parameters are locked to the teammate implementation
+unless a later user-approved plan changes them:
+
+```json
+{
+  "diameter": 5,
+  "minmass": 80,
+  "local_search_radius": 45,
+  "max_accept_distance": 30,
+  "single_memory": 5,
+  "local_topn": 20,
+  "grid_reject_dilate_px": 0,
+  "grid_occlusion_radius": 0,
+  "skip_detection_on_grid": true,
+  "grid_mask_for_tracking_enabled": true,
+  "grid_removal_enabled": false
+}
+```
+
 The tracker should output per-frame rows with at least:
 
 ```csv
@@ -301,6 +338,11 @@ All crossings must be reviewed as `same_drop` before a q record can become
 `accepted`. Any `different_drop` result permanently blocks that record from
 inversion unless the user reselects and retracks.
 
+The main record review video must be generated from backend track rows and must
+show the teammate overlay style: green circle plus `target`, yellow circle plus
+`missing`, and a blue trajectory line. The frontend must not draw or infer
+target/missing/trajectory positions that are absent from the backend record.
+
 ### Normal Physical Parameters
 
 Balance voltage is required for each measurement. The following parameters
@@ -310,7 +352,7 @@ current measurement only:
 - plate distance
 - grid measurement distance
 - air viscosity or temperature-derived viscosity settings
-- pressure
+- pressure in `kPa`
 - oil density
 - Cunningham correction constant
 - uncertainty settings for the current q estimate
@@ -318,6 +360,41 @@ current measurement only:
 Normal records must store the effective parameters actually used. Parameter
 overrides are not global config changes unless a future explicit "save as
 default" action is added.
+
+Normal default physics parameters are backend-owned:
+
+```json
+{
+  "gravity_m_s2": 9.79,
+  "air_viscosity_Pa_s": 1.83e-5,
+  "pressure_kPa": 101.325,
+  "cunningham_b_kPa_m": 8.226e-6
+}
+```
+
+The frontend must display values returned by `normal.initialize` and must send
+only fields the user actually changed. It must not maintain another set of
+silent physical defaults. Legacy `pressure_Pa` or `cunningham_b_Pa_m` inputs may
+be accepted at worker boundaries only for conversion to the Normal kPa
+contract; new records should persist `pressure_kPa` and
+`cunningham_b_kPa_m`.
+
+For Normal v1, q uncertainty is limited to the random velocity-fit contribution
+unless a source is explicitly documented in config. The velocity fit uses
+linear regression on `y(t)`:
+
+```text
+sigma_s^2 = SSR / (N - 2) / sum((t_i - mean(t))^2)
+sigma_v = scale_y_m_per_px * sigma_s
+```
+
+`sigma_q_C` is then propagated through the nonlinear `q(v)` relation using the
+local logarithmic sensitivity. The old empirical RMSE/R2 expression and a
+q-level `5%` floor must not be used for `sigma_q_C`. If a finite positive
+`sigma_v` or propagated `sigma_q_C` cannot be computed, the record is
+diagnostic and ineligible for inversion. Inversion may still add its own
+`sigma_floor_C` to prevent infinite weights; that floor is not written back to
+the q record.
 
 ### Normal Inversion And Visualization
 

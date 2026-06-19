@@ -11,8 +11,6 @@ import numpy as np
 import pandas as pd
 import trackpy as tp
 
-from .grid import build_grid_mask
-
 
 @dataclass(frozen=True)
 class TrackRequest:
@@ -28,6 +26,19 @@ class TrackRequest:
 
 ProgressCallback = Callable[[str, str, int | None, int | None, str | None], None]
 
+GRID_SAMPLE_FRAMES = 40
+GRID_SAMPLE_STRIDE = 3
+GRID_MIN_HORIZONTAL_LINE_LEN_PX = 600
+GRID_MIN_VERTICAL_LINE_LEN_PX = 360
+GRID_MASK_DILATE_PX = 5
+GRID_INPAINT_RADIUS = 4
+GRID_MASK_HARD_MAX_COVERAGE = 0.45
+GRID_TOPHAT_KERNEL = 31
+GRID_ADAPTIVE_BLOCK_SIZE = 51
+GRID_ADAPTIVE_BRIGHT_C = 8
+GRID_TOPHAT_PERCENTILE = 75.0
+GRID_MIN_TOPHAT_RESPONSE = 8
+
 
 def run_tracking(request: TrackRequest, progress_callback: ProgressCallback | None = None) -> dict[str, Any]:
     run_dir = Path(request.run_dir)
@@ -36,9 +47,8 @@ def run_tracking(request: TrackRequest, progress_callback: ProgressCallback | No
     end = max(start, int(request.zero_v_end_frame))
     frames, fps = _read_frames(request.video_path, start, end, progress_callback)
     grid_mask = None
-    if request.grid.get("grid_lines_y"):
-        gray0 = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
-        grid_mask = build_grid_mask(gray0, [int(y) for y in request.grid.get("grid_lines_y", [])], int(request.config["grid"].get("mask_dilate_px", 5)))
+    if bool(request.config["tracking"].get("grid_mask_for_tracking_enabled", True)):
+        grid_mask = build_static_grid_mask(request.video_path, start_frame=start, max_frames=end - start + 1)
     local_initial = np.array(request.source_center, dtype=float)
     track = track_single_drop_frames(frames, local_initial, start, request.config["tracking"], grid_mask, progress_callback)
     if not track.empty:
@@ -82,7 +92,7 @@ def track_single_drop_frames(frames: list, initial_position: np.ndarray, source_
                 progress_callback("track_frames", "正在逐帧追踪油滴", frame_id + 1, len(frames), "frames")
             continue
         predicted = search_center + velocity
-        near_grid = is_position_near_grid(predicted, grid_mask, int(cfg.get("grid_occlusion_radius_px", 2)))
+        near_grid = is_position_near_grid(predicted, grid_mask, int(cfg.get("grid_occlusion_radius_px", 0)))
         chosen = None
         if not (near_grid and bool(cfg.get("skip_detection_on_grid", True))):
             features = locate_features_near_position(gray, predicted, float(cfg.get("local_search_radius_px", 45.0)), cfg, grid_mask)
@@ -93,7 +103,7 @@ def track_single_drop_frames(frames: list, initial_position: np.ndarray, source_
             rows.append(_row(frame_id, source_frame, np.array([math.nan, math.nan]), predicted, "missing", missed, near_grid, math.nan, "grid" if near_grid else "not_found"))
             if progress_callback is not None:
                 progress_callback("track_frames", "正在逐帧追踪油滴", frame_id + 1, len(frames), "frames")
-            if missed > int(cfg.get("memory_frames", 8)):
+            if missed > int(cfg.get("memory_frames", 5)):
                 break
             continue
         current = np.array([float(chosen["x"]), float(chosen["y"])], dtype=float)
@@ -204,6 +214,45 @@ def crossing_events(track: pd.DataFrame, grid: dict[str, Any], fps: float) -> li
                 "confirmed_same_drop": None,
             }
         )
+    grid_lines = [float(y) for y in (grid.get("grid_lines_y") or grid.get("line_y_px") or []) if _is_finite_number(y)]
+    detected = track[track["detected"].astype(bool)].copy() if not track.empty and "detected" in track else pd.DataFrame()
+    if len(detected) >= 2 and grid_lines:
+        prior = None
+        for _, row in detected.iterrows():
+            if prior is None:
+                prior = row
+                continue
+            y0 = float(prior["y"])
+            y1 = float(row["y"])
+            if not math.isfinite(y0) or not math.isfinite(y1) or y0 == y1:
+                prior = row
+                continue
+            low, high = sorted((y0, y1))
+            crossed = [line for line in grid_lines if low <= line <= high]
+            for line in crossed:
+                start_frame = int(prior["source_frame"])
+                end_frame = int(row["source_frame"])
+                if any(abs(float(event["start_frame"]) - start_frame) <= 1 and abs(float(event["end_frame"]) - end_frame) <= 1 for event in events):
+                    continue
+                event_id = f"crossing_{len(events) + 1:03d}"
+                events.append(
+                    {
+                        "id": event_id,
+                        "event_id": event_id,
+                        "start_frame": start_frame,
+                        "end_frame": end_frame,
+                        "start_time_s": start_frame / fps,
+                        "end_time_s": end_frame / fps,
+                        "review_start_time_s": max(0.0, start_frame / fps - 1.0),
+                        "review_end_time_s": end_frame / fps + 1.0,
+                        "center_x_px": float(row["x"]),
+                        "center_y_px": float(line),
+                        "grid_line_y_px": float(line),
+                        "kind": "grid_line_crossing",
+                        "confirmed_same_drop": None,
+                    }
+                )
+            prior = row
     return events
 
 
@@ -242,27 +291,30 @@ def make_overlay_video(video_path: str, track: pd.DataFrame, out_path: Path, sta
         ok, frame = cap.read()
         if not ok:
             break
-        for y in grid.get("grid_lines_y", []) or []:
-            cv2.line(frame, (0, int(y)), (w - 1, int(y)), (60, 90, 120), 1)
-        for y in [grid.get("second_line_y"), grid.get("penultimate_line_y")]:
-            if y is not None:
-                cv2.line(frame, (0, int(y)), (w - 1, int(y)), (255, 180, 0), 2)
         row = by_frame.get(frame_idx)
         if row is not None:
-            x = row.x if math.isfinite(float(row.x)) else row.pred_x
-            y = row.y if math.isfinite(float(row.y)) else row.pred_y
-            color = (40, 220, 40) if row.state == "tracking" else (0, 200, 255)
-            cv2.circle(frame, (int(round(x)), int(round(y))), 7, color, 2)
+            detected = bool(row.detected)
+            x = row.x if detected and math.isfinite(float(row.x)) else row.pred_x
+            y = row.y if detected and math.isfinite(float(row.y)) else row.pred_y
+            if detected:
+                color = (0, 255, 0)
+                label = "target"
+            else:
+                color = (0, 255, 255)
+                label = "missing"
+            origin = (int(round(x)), int(round(y)))
+            cv2.circle(frame, origin, 7, color, 2)
+            cv2.putText(frame, label, (origin[0] + 10, origin[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
             if row.state in {"tracking", "reacquired"}:
-                points.append((int(round(row.x)), int(round(row.y))))
+                points.append(origin)
         for a, b in zip(points[:-1], points[1:]):
-            cv2.line(frame, a, b, (60, 160, 255), 2)
+            cv2.line(frame, a, b, (255, 0, 0), 2)
         writer.write(frame)
     cap.release()
     writer.release()
 
 
-def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: Path, crop_size: int = 96, scale: int = 3) -> dict[str, Any]:
+def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: Path, track_rows: list[dict[str, Any]] | None = None, crop_size: int = 96, scale: int = 3) -> dict[str, Any]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"cannot open video: {video_path}")
@@ -294,17 +346,34 @@ def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: 
     out_size = (max(1, (x1 - x0) * scale), max(1, (y1 - y0) * scale))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, out_size)
+    by_frame = {int(row.get("source_frame")): row for row in (track_rows or []) if row.get("source_frame") is not None}
+    trail: list[tuple[int, int]] = []
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     for frame_idx in range(start_frame, end_frame + 1):
         ok, frame = cap.read()
         if not ok:
             break
         crop = frame[y0:y1, x0:x1].copy()
-        local_x = int(round(center_x - x0))
-        local_y = int(round(center_y - y0))
-        cv2.circle(crop, (local_x, local_y), 8, (0, 220, 255), 2)
-        cv2.line(crop, (0, local_y), (crop.shape[1] - 1, local_y), (0, 220, 255), 1)
-        cv2.line(crop, (local_x, 0), (local_x, crop.shape[0] - 1), (0, 220, 255), 1)
+        row = by_frame.get(frame_idx)
+        if row:
+            detected = bool(row.get("detected"))
+            rx = row.get("x") if detected and row.get("x") is not None else row.get("pred_x", center_x)
+            ry = row.get("y") if detected and row.get("y") is not None else row.get("pred_y", center_y)
+            local_x = int(round(float(rx) - x0))
+            local_y = int(round(float(ry) - y0))
+            color = (0, 255, 0) if detected else (0, 255, 255)
+            label = "target" if detected else "missing"
+            if detected:
+                trail.append((local_x, local_y))
+        else:
+            local_x = int(round(center_x - x0))
+            local_y = int(round(center_y - y0))
+            color = (0, 255, 255)
+            label = "missing"
+        for a, b in zip(trail[:-1], trail[1:]):
+            cv2.line(crop, a, b, (255, 0, 0), 1)
+        cv2.circle(crop, (local_x, local_y), 8, color, 2)
+        cv2.putText(crop, label, (local_x + 10, max(14, local_y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
         writer.write(cv2.resize(crop, out_size, interpolation=cv2.INTER_NEAREST))
     cap.release()
     writer.release()
@@ -360,6 +429,96 @@ def _preprocess(frame) -> np.ndarray:
     return cv2.GaussianBlur(gray, (3, 3), 0)
 
 
+def build_static_grid_mask(video_path: str, start_frame: int = 0, max_frames: int | None = None) -> np.ndarray | None:
+    samples = _read_grid_sample_frames(video_path, start_frame, max_frames)
+    if not samples:
+        return None
+    first_shape = samples[0].shape
+    if any(frame.shape != first_shape for frame in samples):
+        return None
+    stack = np.stack(samples, axis=0).astype(np.uint8)
+    background_bgr = np.median(stack, axis=0).astype(np.uint8)
+    gray = cv2.cvtColor(background_bgr, cv2.COLOR_BGR2GRAY)
+    gray_eq = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    gray_blur = cv2.GaussianBlur(gray_eq, (3, 3), 0)
+    tophat_kernel_size = _ensure_odd(GRID_TOPHAT_KERNEL)
+    adaptive_block_size = _ensure_odd(GRID_ADAPTIVE_BLOCK_SIZE)
+    tophat_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (tophat_kernel_size, tophat_kernel_size))
+    tophat = cv2.morphologyEx(gray_blur, cv2.MORPH_TOPHAT, tophat_kernel)
+    nz = tophat[tophat > 0]
+    percentile_threshold = float(np.percentile(nz, float(GRID_TOPHAT_PERCENTILE))) if nz.size else 0.0
+    tophat_threshold = max(float(GRID_MIN_TOPHAT_RESPONSE), percentile_threshold)
+    bright_seed_tophat = np.where(tophat >= tophat_threshold, 255, 0).astype(np.uint8)
+    bright_seed_adaptive = cv2.adaptiveThreshold(
+        gray_blur,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        adaptive_block_size,
+        -int(GRID_ADAPTIVE_BRIGHT_C),
+    )
+    small_clean_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    bright_seed_tophat = cv2.morphologyEx(bright_seed_tophat, cv2.MORPH_OPEN, small_clean_kernel, iterations=1)
+    bright_seed_adaptive = cv2.morphologyEx(bright_seed_adaptive, cv2.MORPH_OPEN, small_clean_kernel, iterations=1)
+    bright_seed_combined = cv2.bitwise_or(bright_seed_tophat, bright_seed_adaptive)
+    height, width = bright_seed_combined.shape[:2]
+    horizontal_len = max(int(GRID_MIN_HORIZONTAL_LINE_LEN_PX), width // 12)
+    vertical_len = max(int(GRID_MIN_VERTICAL_LINE_LEN_PX), height // 8)
+    horizontal_seed = cv2.morphologyEx(
+        bright_seed_combined,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (15, 3)),
+        iterations=1,
+    )
+    vertical_seed = cv2.morphologyEx(
+        bright_seed_combined,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 15)),
+        iterations=1,
+    )
+    horizontal_lines = cv2.morphologyEx(
+        horizontal_seed,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (horizontal_len, 3)),
+        iterations=1,
+    )
+    vertical_lines = cv2.morphologyEx(
+        vertical_seed,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, vertical_len)),
+        iterations=1,
+    )
+    grid_mask = cv2.bitwise_or(horizontal_lines, vertical_lines)
+    if GRID_MASK_DILATE_PX > 0:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * GRID_MASK_DILATE_PX + 1, 2 * GRID_MASK_DILATE_PX + 1))
+        grid_mask = cv2.dilate(grid_mask, kernel, iterations=1)
+    grid_mask = np.where(grid_mask > 0, 255, 0).astype(np.uint8)
+    coverage = float(np.count_nonzero(grid_mask)) / float(grid_mask.size)
+    if coverage > GRID_MASK_HARD_MAX_COVERAGE:
+        return None
+    return grid_mask
+
+
+def _read_grid_sample_frames(video_path: str, start_frame: int, max_frames: int | None) -> list[np.ndarray]:
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return []
+    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(start_frame)))
+    samples: list[np.ndarray] = []
+    local_frame_index = 0
+    while len(samples) < GRID_SAMPLE_FRAMES:
+        if max_frames is not None and local_frame_index >= max_frames:
+            break
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if local_frame_index % GRID_SAMPLE_STRIDE == 0:
+            samples.append(frame)
+        local_frame_index += 1
+    cap.release()
+    return samples
+
+
 def _row(frame, source_frame, pos, pred, state, missed, blocked, mass, reason) -> dict[str, Any]:
     return {
         "frame_idx": int(frame),
@@ -385,3 +544,10 @@ def _ensure_odd(value: int) -> int:
 
 def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return json.loads(df.replace({np.nan: None}).to_json(orient="records"))
+
+
+def _is_finite_number(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False

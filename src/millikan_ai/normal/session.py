@@ -268,7 +268,7 @@ def prepare_crossing_review(payload: dict[str, Any]) -> dict[str, Any]:
     record_dir = Path(record["record_dir"])
     clip = record_dir / "crossing_reviews" / f"{event['event_id']}.mp4"
     if not clip.exists():
-        review = make_crossing_review_clip(record["video_path"], event, clip)
+        review = make_crossing_review_clip(record["video_path"], event, clip, (record.get("tracking") or {}).get("track") or [])
         event["review_clip_path"] = review["clip_path"]
         event["review_clip_url"] = file_url(review["clip_path"])
         event["review_source_video_box"] = review["source_video_box"]
@@ -395,12 +395,11 @@ def _selection_window(boundary: dict[str, Any], metadata: dict[str, Any], cfg: d
     fps = float(metadata.get("fps") or 30.0)
     frame_count = int(metadata.get("frame_count") or 1)
     zero_start = int(boundary["zero_v_start_frame"])
-    zero_end = int(boundary["zero_v_end_frame"])
     scfg = cfg.get("selection", {})
-    before = float(scfg.get("before_zero_v_start_s", 1.0))
+    before = float(scfg.get("before_zero_v_start_s", 0.5))
     after = float(scfg.get("after_zero_v_start_s", 0.5))
     start_frame = max(0, int(round(zero_start - before * fps)))
-    end_frame = min(frame_count - 1, zero_end, int(round(zero_start + after * fps)))
+    end_frame = min(frame_count - 1, int(round(zero_start + after * fps)))
     end_frame = max(start_frame, end_frame)
     return {
         "start_s": start_frame / fps,
@@ -528,6 +527,8 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
     q = record.get("q") if isinstance(record.get("q"), dict) else {}
     fit = record.get("fit") if isinstance(record.get("fit"), dict) else {}
     tracking = record.get("tracking") if isinstance(record.get("tracking"), dict) else {}
+    artifacts = tracking.get("artifacts") or {}
+    artifact_urls = {key: file_url(value) for key, value in artifacts.items() if key.endswith("_mp4") and value}
     public.update(
         {
             "valid": record.get("status") == "accepted" and bool(record.get("kept")),
@@ -538,7 +539,8 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
             "radius_m": q.get("radius_m"),
             "fall_velocity_m_s": fit.get("velocity_m_s"),
             "flags": list(dict.fromkeys([*(fit.get("flags") or []), *(q.get("flags") or [])])),
-            "artifacts": tracking.get("artifacts") or {},
+            "artifacts": artifacts,
+            "artifact_urls": artifact_urls,
             "crossings": record.get("crossing_events") or [],
         }
     )

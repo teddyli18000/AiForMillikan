@@ -67,11 +67,11 @@ function createDemoApi(): DesktopApi {
       config: {
         physics: {
           plate_distance_m: 0.005,
-          air_viscosity_Pa_s: 1.81e-5,
-          pressure_Pa: 101325,
+          air_viscosity_Pa_s: 1.83e-5,
+          pressure_kPa: 101.325,
           oil_density_kg_m3: 981,
-          cunningham_b_Pa_m: 0.0000082,
-          relative_uncertainty_floor: 0.05
+          cunningham_b_kPa_m: 0.000008226,
+          gravity_m_s2: 9.79
         },
         grid: { measurement_distance_m: 0.0015 }
       }
@@ -119,11 +119,11 @@ function createDemoApi(): DesktopApi {
       config: {
         physics: {
           plate_distance_m: 0.005,
-          air_viscosity_Pa_s: 1.81e-5,
-          pressure_Pa: 101325,
+          air_viscosity_Pa_s: 1.83e-5,
+          pressure_kPa: 101.325,
           oil_density_kg_m3: 981,
-          cunningham_b_Pa_m: 0.0000082,
-          relative_uncertainty_floor: 0.05
+          cunningham_b_kPa_m: 0.000008226,
+          gravity_m_s2: 9.79
         },
         grid: { measurement_distance_m: 0.0015 }
       }

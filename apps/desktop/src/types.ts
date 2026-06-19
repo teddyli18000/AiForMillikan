@@ -247,6 +247,7 @@ export type NormalRecord = {
   balance_voltage_V?: number | null;
   flags?: string[];
   artifacts?: Record<string, string>;
+  artifact_urls?: Record<string, string>;
   crossings?: NormalCrossingEvent[];
   [key: string]: unknown;
 };
