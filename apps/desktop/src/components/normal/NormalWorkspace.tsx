@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, MouseEvent } from "react";
-import { ArrowLeft, BarChart3, Check, ChevronsLeft, ChevronsRight, Download, FileVideo, FolderOpen, Pause, Play, RotateCcw, Save, Scissors, Sigma, StepBack, StepForward, Target, Video } from "lucide-react";
+import type { DragEvent, MouseEvent, ReactNode } from "react";
+import { Activity, ArrowLeft, BarChart3, Calculator, Check, ChevronsLeft, ChevronsRight, CircleDot, Download, FileVideo, FolderOpen, Gauge, Pause, Play, RotateCcw, Ruler, Save, Scissors, Sigma, StepBack, StepForward, Target, Video } from "lucide-react";
 import type {
   NormalBoundary,
   NormalCrossingEvent,
@@ -12,6 +12,7 @@ import type {
   VideoMetadata
 } from "../../types";
 import { desktopApi } from "../../lib/desktopApi";
+import { fmtCharge, fmtNumber, fmtPercentValue, fmtScientific } from "../../lib/format";
 import { clientPointToVideoPoint, getContainedVideoMetrics, videoBoxToOverlayStyle } from "./videoGeometry";
 import type { VideoBox, VideoPoint } from "./videoGeometry";
 
@@ -40,13 +41,6 @@ const physicsKeys = [
 ];
 
 const gridKeys = ["measurement_distance_m"];
-
-const formatSci = (value?: number | null, digits = 3) => {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return "-";
-  }
-  return value.toExponential(digits);
-};
 
 const formatFixed = (value?: number | null, digits = 2) => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -145,6 +139,13 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   }, []);
 
   useEffect(() => desktopApi.onNormalProgress((event) => setProgress(event)), []);
+
+  useEffect(() => {
+    if (stage === "inversion") {
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
+  }, [stage]);
 
   const selectedRecord = useMemo(
     () => session?.records.find((record) => record.record_id === selectedRecordId) ?? session?.records[session.records.length - 1] ?? null,
@@ -865,6 +866,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
                 />
                 <span>{formatFixed(currentTime, 2)} / {formatFixed(duration || metadata?.duration_s, 2)} s</span>
               </div>
+              {stage === "results" && selectedRecord ? <QCalculationFlow record={selectedRecord} /> : null}
             </>
           )}
         </section>
@@ -968,7 +970,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       <div className="normal-evidence-strip">
         <InfoTile label="Session" value={session?.session_id ? String(session.session_id) : "new"} />
         <InfoTile label="元数据" value={metadata ? `${metadata.width}x${metadata.height} / ${formatFixed(metadata.fps)} fps / ${formatFixed(metadata.duration_s)} s` : "未导入"} />
-        <InfoTile label="网格" value={grid ? `${gridLineCount} lines, ${formatSci(grid.scale_y_m_per_px, 2)} m/px` : "未检测"} />
+        <InfoTile label="网格" value={grid ? `${gridLineCount} lines, ${fmtScientific(grid.scale_y_m_per_px, 2)} m/px` : "未检测"} />
         <InfoTile label="有效区域" value={grid ? `${formatFixed(effectiveTopPx, 0)} px - ${formatFixed(effectiveBottomPx, 0)} px` : "未检测"} />
         <InfoTile label="记录" value={`${session?.counts?.total ?? 0} total / ${keptValidCount} accepted`} />
       </div>
@@ -1106,7 +1108,7 @@ function BoundaryPanel(props: {
       <div className="normal-diagnostic-box">
         <strong>网格</strong>
         <span>valid: {String(props.grid?.valid ?? false)}</span>
-        <span>scale_y: {formatSci(props.grid?.scale_y_m_per_px, 2)} m/px</span>
+        <span>scale_y: {fmtScientific(props.grid?.scale_y_m_per_px, 2)} m/px</span>
       </div>
       <button className="primary-button full" disabled={props.busy || !props.grid?.valid} onClick={props.onConfirm}>
         <Check size={16} />
@@ -1293,12 +1295,12 @@ function ResultsPanel(props: {
         <>
           <div className="normal-result-hero">
             <span>{statusLabel(record.status)}</span>
-            <strong>{formatSci(record.q_C)} C</strong>
-            <small>sigma_q = {formatSci(record.sigma_q_C)} C</small>
+            <strong>{fmtCharge(record.q_C)}</strong>
+            <small>σq = {fmtCharge(record.sigma_q_C)}</small>
           </div>
           <div className="normal-meta-grid">
-            <InfoTile label="半径" value={`${formatSci(record.radius_m)} m`} />
-            <InfoTile label="下落速度" value={`${formatSci(record.fall_velocity_m_s)} m/s`} />
+            <InfoTile label="半径" value={`${fmtNumber(Number(record.radius_m) * 1e6, 4)} μm`} />
+            <InfoTile label="下落速度" value={`${fmtScientific(record.fall_velocity_m_s, 4)} m/s`} />
             <InfoTile label="R²" value={formatFixed(fit.r2 as number | undefined, 3)} />
             <InfoTile label="拟合点" value={String(fit.fit_point_count ?? "-")} />
           </div>
@@ -1340,7 +1342,7 @@ function ResultsPanel(props: {
         {(props.session?.records ?? []).map((item) => (
           <button key={item.record_id} className={item.record_id === record?.record_id ? "active" : ""} onClick={() => props.onSelectRecord(item.record_id)}>
             <span className="record-id">{item.record_id}</span>
-            <strong>{formatSci(item.q_C)} C</strong>
+            <strong>{fmtCharge(item.q_C)}</strong>
             <small>{statusLabel(item.status)}</small>
           </button>
         ))}
@@ -1351,7 +1353,7 @@ function ResultsPanel(props: {
         {props.inversion ? (
           <>
             <span>status: {String(props.inversion.status ?? "-")}</span>
-            <span>e: {formatSci(props.inversion.e_hat_C)} C</span>
+            <span>e: {fmtCharge(props.inversion.e_hat_C)}</span>
             <span>flags: {(props.inversion.flags ?? []).join(", ") || "none"}</span>
           </>
         ) : (
@@ -1363,6 +1365,151 @@ function ResultsPanel(props: {
         运行 Normal 盲反演
       </button>
     </div>
+  );
+}
+
+function QCalculationFlow({ record }: { record: NormalRecord }) {
+  const q = (record.q as Record<string, any> | undefined) ?? {};
+  const fit = (record.fit as Record<string, any> | undefined) ?? {};
+  const trace = (q.calculation_trace as Record<string, any> | undefined) ?? {};
+  const fitTrace = (trace.fit as Record<string, any> | undefined) ?? {};
+  const physicsTrace = (trace.physics as Record<string, any> | undefined) ?? {};
+  const resultTrace = (trace.result as Record<string, any> | undefined) ?? {};
+  const timeWindow = (record.time_window as Record<string, any> | undefined) ?? {};
+  const radius = finite(physicsTrace.radius_m ?? q.radius_m ?? record.radius_m);
+  const velocity = finite(fitTrace.velocity_m_s ?? fit.velocity_m_s ?? record.fall_velocity_m_s);
+  const sigmaV = finite(fitTrace.sigma_v_m_s ?? fit.sigma_v_m_s);
+  const balanceVoltage = finite(physicsTrace.balance_voltage_V ?? q.balance_voltage_V ?? record.balance_voltage_V);
+  const etaEff = finite(physicsTrace.eta_eff_Pa_s ?? q.eta_eff_Pa_s);
+  const cunninghamLength = finite(physicsTrace.cunningham_length_m);
+  const sensitivity = finite(physicsTrace.q_velocity_sensitivity);
+  const qValue = finite(resultTrace.q_C ?? q.q_C ?? record.q_C);
+  const sigmaQ = finite(resultTrace.sigma_q_C ?? q.sigma_q_C ?? record.sigma_q_C);
+
+  return (
+    <section className="normal-q-flow" aria-label="单滴 q 计算流程">
+      <header className="normal-q-flow__heading">
+        <div>
+          <span>从视频证据到单滴电荷</span>
+          <strong>本记录的 q 计算链</strong>
+        </div>
+        <p>数值来自后端 record calculation trace；公式在此只做可审查展示。</p>
+      </header>
+      <div className="normal-q-flow__steps">
+        <CalculationStep
+          index="01"
+          tone="confirmed"
+          icon={<CircleDot size={18} />}
+          label="用户确认"
+          title="平衡与 0 V 区间"
+          formula={<FormulaLine><i>U</i><sub>bal</sub>，<i>t</i><sub>0</sub> → <i>t</i><sub>1</sub></FormulaLine>}
+          value={`${fmtNumber(balanceVoltage, 3)} V · ${fmtNumber(timeWindow.zero_v_start_s, 2)}–${fmtNumber(timeWindow.zero_v_end_s, 2)} s`}
+        />
+        <CalculationStep
+          index="02"
+          tone="measured"
+          icon={<Ruler size={18} />}
+          label="机器测量"
+          title="轨迹与标尺"
+          formula={<FormulaLine><i>y</i>(<i>t</i>)，<i>s</i><sub>y</sub></FormulaLine>}
+          value={`${fitTrace.fit_point_count ?? fit.fit_point_count ?? "—"} 点 · ${fmtScientific(fitTrace.scale_y_m_per_px ?? fit.scale_y_m_per_px, 3)} m/px`}
+        />
+        <CalculationStep
+          index="03"
+          tone="measured"
+          icon={<Activity size={18} />}
+          label="线性拟合"
+          title="下落速度"
+          formula={<FormulaLine><i>y</i> = <i>a</i> + <i>s t</i>，<i>v</i> = <i>s s</i><sub>y</sub></FormulaLine>}
+          value={`${fmtScientific(velocity, 4)} m/s · σv ${fmtScientific(sigmaV, 3)} m/s`}
+        />
+        <CalculationStep
+          index="04"
+          tone="derived"
+          icon={<Gauge size={18} />}
+          label="物理推导"
+          title="Cunningham 半径"
+          formula={
+            <FormulaLine>
+              <i>r</i> =
+              <FormulaFraction
+                numerator={<>√(<i>B</i><sup>2</sup> + 18<i>ηv</i>/(<i>ρg</i>)) − <i>B</i></>}
+                denominator={<>2</>}
+              />
+            </FormulaLine>
+          }
+          value={`B ${fmtScientific(cunninghamLength, 3)} m · r ${fmtNumber(radius === null ? null : radius * 1e6, 4)} μm`}
+        />
+        <CalculationStep
+          index="05"
+          tone="derived"
+          icon={<Calculator size={18} />}
+          label="物理推导"
+          title="有效黏度与 q"
+          formula={
+            <FormulaLine>
+              <i>q</i> =
+              <FormulaFraction
+                numerator={<>6π<i>η</i><sub>eff</sub><i>rvd</i></>}
+                denominator={<><i>U</i><sub>bal</sub></>}
+              />
+            </FormulaLine>
+          }
+          value={`ηeff ${fmtScientific(etaEff, 3)} Pa·s · q ${fmtCharge(qValue)}`}
+        />
+        <CalculationStep
+          index="06"
+          tone="result"
+          icon={<Sigma size={18} />}
+          label="最终输出"
+          title="不确定度传播"
+          formula={
+            <FormulaLine>
+              <i>σ</i><sub>q</sub> = |<i>q</i>|
+              <FormulaFraction
+                numerator={<>3(<i>r</i> + <i>B</i>)</>}
+                denominator={<>2<i>r</i> + <i>B</i></>}
+              />
+              <FormulaFraction numerator={<><i>σ</i><sub>v</sub></>} denominator={<><i>v</i></>} />
+            </FormulaLine>
+          }
+          value={`${fmtCharge(qValue)} ± ${fmtCharge(sigmaQ)} · 灵敏度 ${fmtNumber(sensitivity, 3)}`}
+        />
+      </div>
+    </section>
+  );
+}
+
+function CalculationStep(props: {
+  index: string;
+  tone: "confirmed" | "measured" | "derived" | "result";
+  icon: ReactNode;
+  label: string;
+  title: string;
+  formula: ReactNode;
+  value: string;
+}) {
+  return (
+    <article className={`normal-q-step normal-q-step--${props.tone}`}>
+      <span className="normal-q-step__index">{props.index}</span>
+      <div className="normal-q-step__label">{props.icon}<span>{props.label}</span></div>
+      <strong>{props.title}</strong>
+      {props.formula}
+      <small>{props.value}</small>
+    </article>
+  );
+}
+
+function FormulaLine({ children }: { children: ReactNode }) {
+  return <div className="normal-formula">{children}</div>;
+}
+
+function FormulaFraction({ numerator, denominator }: { numerator: ReactNode; denominator: ReactNode }) {
+  return (
+    <span className="normal-formula-fraction">
+      <span>{numerator}</span>
+      <span>{denominator}</span>
+    </span>
   );
 }
 
@@ -1385,16 +1532,16 @@ function InversionPanel(props: {
         <span>stage 6</span>
         <strong>盲反演结果</strong>
       </div>
-      <div className="normal-inversion-summary-card">
+      <div className="normal-diagnostic-box normal-inversion-inspector-lead">
+        <strong>运行诊断</strong>
         <span className={`normal-inversion-status ${status === "reliable" ? "good" : status === "insufficient_eligible_records" ? "blocked" : "warn"}`}>{inversionStatusLabel(status)}</span>
-        <strong>{formatSci(props.inversion?.e_hat_C)} C</strong>
-        <small>sigma_e = {formatSci(props.inversion?.sigma_e_C)} C</small>
+        <span>主结果、误差和百分比统一显示在中央结果页。</span>
       </div>
       <div className="normal-meta-grid">
-        <InfoTile label="使用 q" value={`${props.inversion?.valid_q_count ?? props.inversion?.num_used ?? accepted} / ${Math.max(3, props.inversion?.min_required ?? 3)}`} />
-        <InfoTile label="weighted RMS" value={formatFixed(props.inversion?.weighted_rms, 3)} />
-        <InfoTile label="chi²" value={formatFixed(props.inversion?.chi2, 3)} />
+        <InfoTile label="使用 q" value={String(props.inversion?.valid_q_count ?? props.inversion?.num_used ?? accepted)} />
         <InfoTile label="收敛" value={props.inversion?.converged === false ? "未稳定" : props.inversion ? "稳定" : "-"} />
+        <InfoTile label="边界命中" value={props.inversion?.boundary_hit ? "是" : "否"} />
+        <InfoTile label="样本结论" value={status === "exploratory" ? "探索性" : status === "reliable" ? "候选可靠" : "需诊断"} />
       </div>
       <div className="normal-diagnostic-box">
         <strong>科学边界</strong>
@@ -1403,8 +1550,8 @@ function InversionPanel(props: {
       </div>
       <div className="normal-diagnostic-box">
         <strong>搜索设置</strong>
-        <span>interval: {formatSci(props.inversion?.search_interval_C?.[0])} - {formatSci(props.inversion?.search_interval_C?.[1])} C</span>
-        <span>sigma_floor: {formatSci(props.inversion?.sigma_floor_C)} C · boundary hit: {props.inversion?.boundary_hit ? "yes" : "no"}</span>
+        <span>interval: {fmtCharge(props.inversion?.search_interval_C?.[0])} - {fmtCharge(props.inversion?.search_interval_C?.[1])}</span>
+        <span>sigma floor: {fmtCharge(props.inversion?.sigma_floor_C)}</span>
       </div>
       <div className="panel-actions">
         <button className="ghost-button" disabled={props.busy} onClick={props.onBackResults}>
@@ -1432,6 +1579,7 @@ function NormalInversionDashboard({ inversion, records }: { inversion: NormalInv
   const candidates = inversion?.candidates ?? [];
   const status = inversion?.status ?? "not_run";
   const accepted = records.filter((record) => record.status === "accepted" && record.kept);
+  const comparison = inversion?.reference_comparison;
   if (!inversion) {
     return (
       <div className="normal-inversion-empty">
@@ -1444,16 +1592,17 @@ function NormalInversionDashboard({ inversion, records }: { inversion: NormalInv
   return (
     <div className="normal-inversion-dashboard" aria-label="Normal 盲反演结果页">
       <section className="normal-inversion-hero">
-        <div>
+        <div className="normal-inversion-primary">
           <span className={`normal-inversion-status ${status === "reliable" ? "good" : status === "insufficient_eligible_records" ? "blocked" : "warn"}`}>{inversionStatusLabel(status)}</span>
-          <h2>元电荷盲反演</h2>
-          <p>基于本次 session 中用户确认保留的 q 记录，执行带不确定度权重的整数倍残差搜索。</p>
+          <span className="normal-inversion-eyebrow">元电荷估计</span>
+          <strong className="normal-inversion-value">{fmtCharge(inversion.e_hat_C, 5)}</strong>
+          <p>基于本次 session 中用户确认保留的 q，执行带不确定度权重的整数倍残差搜索。</p>
         </div>
         <div className="normal-inversion-kpis">
-          <KpiBox label="e_hat" value={`${formatSci(inversion.e_hat_C)} C`} />
-          <KpiBox label="sigma_e" value={`${formatSci(inversion.sigma_e_C)} C`} />
-          <KpiBox label="used q" value={String(inversion.valid_q_count ?? inversion.num_used ?? accepted.length)} />
-          <KpiBox label="weighted RMS" value={formatFixed(inversion.weighted_rms, 3)} />
+          <KpiBox label="标准不确定度 σe" value={fmtCharge(inversion.sigma_e_C, 5)} detail="统一按 10⁻¹⁹ C 显示" />
+          <KpiBox label="相对不确定度" value={fmtPercentValue(comparison?.relative_uncertainty_percent, 3)} detail="σe / ê" />
+          <KpiBox label="相对标准值百分误差" value={fmtPercentValue(comparison?.percent_error_vs_reference, 3)} detail={`参考 ${fmtCharge(comparison?.reference_e_C, 9)}`} />
+          <KpiBox label="观测与拟合" value={`${inversion.valid_q_count ?? inversion.num_used ?? accepted.length} q · RMS ${formatFixed(inversion.weighted_rms, 3)}`} detail={`χ² ${formatFixed(inversion.chi2, 3)}`} />
         </div>
       </section>
 
@@ -1479,11 +1628,12 @@ function NormalInversionDashboard({ inversion, records }: { inversion: NormalInv
   );
 }
 
-function KpiBox({ label, value }: { label: string; value: string }) {
+function KpiBox({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <div className="normal-inversion-kpi">
       <span>{label}</span>
       <strong>{value}</strong>
+      {detail ? <small>{detail}</small> : null}
     </div>
   );
 }
@@ -1596,7 +1746,7 @@ function CandidateList({ candidates }: { candidates: NonNullable<NormalInversion
         {candidates.slice(0, 6).map((candidate, index) => (
           <div key={`${candidate.e_C ?? index}-${index}`}>
             <span>#{index + 1}</span>
-            <strong>{formatSci(candidate.e_C)} C</strong>
+            <strong>{fmtCharge(candidate.e_C)}</strong>
             <small>RMS {formatFixed(candidate.weighted_rms, 3)} · chi² {formatFixed(candidate.chi2, 3)}</small>
             <em>{(candidate.integer_assignment ?? []).join(" : ") || "-"}</em>
             <b>{candidate.converged ? "stable" : "unstable"}{candidate.boundary_hit ? " · boundary" : ""}</b>
@@ -1629,9 +1779,9 @@ function AssignmentTable({ assignments }: { assignments: NonNullable<NormalInver
             {assignments.map((row, index) => (
               <tr key={row.record_id ?? index}>
                 <td>{String(row.record_id ?? index + 1)}</td>
-                <td>{formatSci(row.q_C)}</td>
+                <td>{fmtCharge(row.q_C)}</td>
                 <td>{row.n ?? "-"}</td>
-                <td>{formatSci(row.nearest_quantized_charge_C)}</td>
+                <td>{fmtCharge(row.nearest_quantized_charge_C)}</td>
                 <td>{formatFixed(row.residual_sigma, 3)}</td>
               </tr>
             ))}

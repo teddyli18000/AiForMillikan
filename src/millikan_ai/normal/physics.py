@@ -64,6 +64,7 @@ def fit_zero_v_velocity(track_rows: list[dict[str, Any]], fps: float, scale_y_m_
         "velocity_m_s": velocity_m_s,
         "slope_px_s": float(slope) if math.isfinite(float(slope)) else None,
         "slope_sigma_px_s": float(slope_sigma_px_s) if math.isfinite(float(slope_sigma_px_s)) else None,
+        "scale_y_m_per_px": float(scale_y_m_per_px) if math.isfinite(float(scale_y_m_per_px)) else None,
         "sigma_v_m_s": float(sigma_v_m_s) if math.isfinite(float(sigma_v_m_s)) else None,
         "residual_ss_px2": float(ss_res) if math.isfinite(float(ss_res)) else None,
         "time_centered_ss_s2": float(t_centered_ss) if math.isfinite(float(t_centered_ss)) else None,
@@ -129,6 +130,31 @@ def compute_q(fit: dict[str, Any], balance_voltage_V: float, cfg: dict[str, Any]
         "note": "Normal v1 reports q uncertainty from the implemented velocity-fit random term only; undefined instrument uncertainties are explicit non-included terms.",
     }
     valid = all(math.isfinite(value) and value > 0 for value in [radius, abs(charge), sigma])
+    calculation_trace = {
+        "model": "balance_voltage_zero_v_fall",
+        "fit": {
+            "slope_px_s": fit.get("slope_px_s"),
+            "slope_sigma_px_s": fit.get("slope_sigma_px_s"),
+            "scale_y_m_per_px": fit.get("scale_y_m_per_px"),
+            "velocity_m_s": float(velocity),
+            "sigma_v_m_s": float(sigma_v) if math.isfinite(sigma_v) else None,
+            "fit_point_count": fit.get("fit_point_count"),
+            "duration_s": fit.get("duration_s"),
+            "r2": fit.get("r2"),
+        },
+        "physics": {
+            "balance_voltage_V": float(balance_voltage_V),
+            "cunningham_length_m": float(bp),
+            "radius_m": float(radius),
+            "eta_eff_Pa_s": float(eta_eff),
+            "q_velocity_sensitivity": float(sensitivity) if math.isfinite(sensitivity) else None,
+            "plate_distance_m": float(d),
+        },
+        "result": {
+            "q_C": float(abs(charge)),
+            "sigma_q_C": float(sigma) if math.isfinite(float(sigma)) else None,
+        },
+    }
     return {
         "valid": bool(valid),
         "diagnostic_only": not bool(valid),
@@ -137,6 +163,7 @@ def compute_q(fit: dict[str, Any], balance_voltage_V: float, cfg: dict[str, Any]
         "sigma_q_C": float(sigma) if math.isfinite(float(sigma)) else None,
         "sigma_q_random_C": float(sigma) if math.isfinite(float(sigma)) else None,
         "uncertainty_budget": uncertainty_budget,
+        "calculation_trace": calculation_trace,
         "radius_m": float(radius),
         "eta_eff_Pa_s": float(eta_eff),
         "velocity_m_s": float(velocity),

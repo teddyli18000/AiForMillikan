@@ -428,13 +428,61 @@ def export_session(session_root: str | None, export_root: str) -> dict[str, Any]
 
 
 def render_report(session: dict[str, Any]) -> str:
-    lines = ["# Millikan AI Normal Session Report", "", f"Session: `{session.get('session_id')}`", "", "| Record | Status | Kept | q (C) | sigma_q (C) | Video |", "| --- | --- | --- | ---: | ---: | --- |"]
+    lines = ["# Millikan AI Normal Session Report", "", f"Session: `{session.get('session_id')}`", "", "| Record | Status | Kept | q | sigma_q | Video |", "| --- | --- | --- | ---: | ---: | --- |"]
     for record in session.get("records", []):
         q = record.get("q", {})
-        lines.append(f"| {record.get('record_id')} | {record.get('status')} | {record.get('kept')} | {q.get('q_C', '-')} | {q.get('sigma_q_C', '-')} | {record.get('video_path', '')} |")
-    if session.get("inversion"):
-        lines.extend(["", "## Inversion", "", "```json", json.dumps(session["inversion"], ensure_ascii=False, indent=2), "```"])
+        lines.append(f"| {record.get('record_id')} | {record.get('status')} | {record.get('kept')} | {_format_charge(q.get('q_C'))} | {_format_charge(q.get('sigma_q_C'))} | {record.get('video_path', '')} |")
+    inversion = session.get("inversion")
+    if inversion:
+        comparison = inversion.get("reference_comparison") or {}
+        lines.extend(
+            [
+                "",
+                "## Inversion",
+                "",
+                f"- Status: `{inversion.get('status', '-')}`",
+                f"- e_hat: {_format_charge(inversion.get('e_hat_C'))}",
+                f"- sigma_e: {_format_charge(inversion.get('sigma_e_C'))}",
+                f"- Relative uncertainty: {_format_percent(comparison.get('relative_uncertainty_percent'))}",
+                f"- Error vs SI defining constant: {_format_percent(comparison.get('percent_error_vs_reference'))}",
+                f"- Reference: {_format_charge(comparison.get('reference_e_C'))}",
+                f"- Used q: {inversion.get('valid_q_count', inversion.get('num_used', '-'))}",
+                f"- Weighted RMS: {_format_decimal(inversion.get('weighted_rms'))}",
+                "",
+                "### Machine-readable inversion payload",
+                "",
+                "```json",
+                json.dumps(inversion, ensure_ascii=False, indent=2),
+                "```",
+            ]
+        )
     return "\n".join(lines) + "\n"
+
+
+def _format_charge(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if not math.isfinite(number):
+        return "-"
+    return f"{number / 1e-19:.5g} × 10⁻¹⁹ C"
+
+
+def _format_percent(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    return f"{number:.3g}%" if math.isfinite(number) else "-"
+
+
+def _format_decimal(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    return f"{number:.4g}" if math.isfinite(number) else "-"
 
 
 def _normalize_boundary(boundary: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:

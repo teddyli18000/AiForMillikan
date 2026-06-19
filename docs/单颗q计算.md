@@ -934,6 +934,39 @@ $$
 `sigma_q_C`，也不能作为盲反演权重的来源。盲反演为了避免无限权重可以
 使用独立的 `sigma_floor_C`，但该 floor 不写回单颗 q 记录。
 
+### 8.6 前端计算证据链
+
+Normal 的有效 q record 必须保存 `calculation_trace`，包括实际使用的
+像素斜率、斜率标准误差、标尺、速度及其不确定度、Cunningham 长度
+$B=b/p$、半径、有效黏度、速度灵敏度、平衡电压和最终
+$q\pm\sigma_q$。Stage 5 只读取并展示这条后端证据链，不能在前端重新
+计算物理量。
+
+用户可见公式按以下顺序展示：
+
+$$
+y(t)=a+st,\qquad v=s\,s_y
+$$
+
+$$
+B=\frac{b}{p},\qquad
+r=\frac{\sqrt{B^2+\frac{18\eta v}{\rho g}}-B}{2}
+$$
+
+$$
+\eta_{\mathrm{eff}}=\frac{\eta}{1+\frac{B}{r}}
+$$
+
+$$
+q=\frac{6\pi\eta_{\mathrm{eff}}rvd}{U_{\mathrm{bal}}}
+$$
+
+$$
+\sigma_q=|q|\frac{3(r+B)}{2r+B}\frac{\sigma_v}{v}
+$$
+
+界面显示使用 `×10` 和上标指数，不直接暴露程序语言的 `e` 记法。
+
 ---
 
 ## 9. 质量评分与异常检测

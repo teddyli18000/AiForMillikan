@@ -423,7 +423,7 @@ def _write_report(run_dir: Path, result: dict[str, Any]) -> None:
             f"- fundamental_spacing_identified: `{elementary.get('fundamental_spacing_identified')}`",
             f"- status: `{elementary.get('status')}`",
             f"- used q count: `{elementary.get('num_used_drops', 0)}`",
-            f"- e_hat (1e-19 C): `{_scale_e(elementary)}`",
+            f"- e_hat (10⁻¹⁹ C): `{_scale_e(elementary)}`",
             f"- fixed prior interval C: `{elementary.get('elementary_charge', {}).get('search_interval_C')}`",
             f"- profile intervals C: `{elementary.get('elementary_charge', {}).get('profile_intervals_C', [])}`",
             f"- systematic e interval C: `{result['uncertainty_details'].get('elementary_charge_systematic', {}).get('e_systematic_ci95_low_C')}` to `{result['uncertainty_details'].get('elementary_charge_systematic', {}).get('e_systematic_ci95_high_C')}`",

@@ -60,6 +60,13 @@ function createDemoApi(): DesktopApi {
       status: records.length === 3 ? "exploratory" : "reliable",
       e_hat_C: eHat,
       sigma_e_C: 0.035e-19,
+      reference_comparison: {
+        reference_e_C: 1.602176634e-19,
+        reference_name: "SI defining constant",
+        relative_uncertainty_percent: (0.035e-19 / eHat) * 100,
+        percent_error_vs_reference: (Math.abs(eHat - 1.602176634e-19) / 1.602176634e-19) * 100,
+        used_for_inversion: false
+      },
       weighted_rms: 0.42,
       chi2: 0.53,
       num_used: records.length,
@@ -250,6 +257,48 @@ function createDemoApi(): DesktopApi {
         radius_m: 7.8e-7,
         fall_velocity_m_s: 2.4e-4,
         balance_voltage_V: 239,
+        time_window: { zero_v_start_s: 0.8, zero_v_end_s: 5.13 },
+        fit: {
+          slope_px_s: 48,
+          slope_sigma_px_s: 1.8,
+          scale_y_m_per_px: 5e-6,
+          velocity_m_s: 2.4e-4,
+          sigma_v_m_s: 9e-6,
+          fit_point_count: 42,
+          duration_s: 1.4,
+          r2: 0.993
+        },
+        q: {
+          valid: true,
+          q_C: 1.602e-19 * index,
+          sigma_q_C: 0.09e-19,
+          radius_m: 7.8e-7,
+          eta_eff_Pa_s: 1.72e-5,
+          velocity_m_s: 2.4e-4,
+          balance_voltage_V: 239,
+          calculation_trace: {
+            model: "balance_voltage_zero_v_fall",
+            fit: {
+              slope_px_s: 48,
+              slope_sigma_px_s: 1.8,
+              scale_y_m_per_px: 5e-6,
+              velocity_m_s: 2.4e-4,
+              sigma_v_m_s: 9e-6,
+              fit_point_count: 42,
+              duration_s: 1.4,
+              r2: 0.993
+            },
+            physics: {
+              balance_voltage_V: 239,
+              cunningham_length_m: 8.12e-8,
+              radius_m: 7.8e-7,
+              eta_eff_Pa_s: 1.72e-5,
+              q_velocity_sensitivity: 1.56,
+              plate_distance_m: 0.005
+            },
+            result: { q_C: 1.602e-19 * index, sigma_q_C: 0.09e-19 }
+          }
+        },
         flags: [],
         artifacts: {},
         track_review_frames: Array.from({ length: 10 }, (_, frameIndex) => ({

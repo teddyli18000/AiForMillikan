@@ -6,6 +6,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from millikan_ai.config import load_config, save_config
 from millikan_ai.normal.config import normal_config
@@ -327,6 +328,14 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
         assert record["q_valid"] is True
         assert record["q_C"] > 0
         assert record["sigma_q_C"] > 0
+        trace = record["q"]["calculation_trace"]
+        assert trace["model"] == "balance_voltage_zero_v_fall"
+        assert trace["fit"]["slope_px_s"] == record["fit"]["slope_px_s"]
+        assert trace["fit"]["scale_y_m_per_px"] > 0
+        assert trace["physics"]["balance_voltage_V"] == pytest.approx(239.0)
+        assert trace["physics"]["radius_m"] == pytest.approx(record["radius_m"])
+        assert trace["result"]["q_C"] == pytest.approx(record["q_C"])
+        assert trace["result"]["sigma_q_C"] == pytest.approx(record["sigma_q_C"])
         assert record["kept"] is False
         assert record["track_review_frames"]
         track_frame = record["track_review_frames"][0]
@@ -425,6 +434,15 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
     assert inverted["payload"]["inversion"]["valid_q_count"] == 3
     assert inverted["payload"]["inversion"]["e_hat_C"] > 0
     assert inverted["payload"]["inversion"]["sigma_e_C"] > 0
+    comparison = inverted["payload"]["inversion"]["reference_comparison"]
+    assert comparison["reference_e_C"] == pytest.approx(1.602176634e-19)
+    assert comparison["used_for_inversion"] is False
+    assert comparison["relative_uncertainty_percent"] == pytest.approx(
+        100.0 * inverted["payload"]["inversion"]["sigma_e_C"] / inverted["payload"]["inversion"]["e_hat_C"]
+    )
+    assert comparison["percent_error_vs_reference"] == pytest.approx(
+        100.0 * abs(inverted["payload"]["inversion"]["e_hat_C"] - 1.602176634e-19) / 1.602176634e-19
+    )
     assert len(inverted["payload"]["inversion"]["assignments"]) == 3
     assert inverted["payload"]["inversion"]["plots_data"]["charge_distribution"]
     assert inverted["payload"]["inversion"]["plots_data"]["residuals"]

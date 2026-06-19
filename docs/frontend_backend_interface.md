@@ -511,6 +511,66 @@ show the blocker and the current accepted count instead of a blank panel. Normal
 must not reuse Experimental result components in a way that calls Experimental
 business logic or implies a continuous-model comparison that was not fitted.
 
+For a successful inversion, the payload also includes:
+
+```json
+{
+  "reference_comparison": {
+    "reference_e_C": 1.602176634e-19,
+    "reference_name": "SI defining constant",
+    "relative_uncertainty_percent": 1.42,
+    "percent_error_vs_reference": 9.50
+  }
+}
+```
+
+`relative_uncertainty_percent` is `100 * sigma_e_C / e_hat_C`.
+`percent_error_vs_reference` is
+`100 * abs(e_hat_C - reference_e_C) / reference_e_C`. These are reporting
+diagnostics only. The fixed reference value must not enter the blind search,
+candidate ordering, assignment iteration, or reliability decision.
+
+All renderer-facing scientific notation must use typographic powers such as
+`1.602 × 10⁻¹⁹ C`. The UI must not display raw `e` notation. Machine JSON and
+CSV retain numeric SI values and may naturally serialize using exponent
+notation.
+
+### Normal q Calculation Trace
+
+A valid Normal q result includes a renderer-neutral `calculation_trace`.
+It records the actual backend inputs and intermediate values used by the
+calculation:
+
+```json
+{
+  "calculation_trace": {
+    "model": "balance_voltage_zero_v_fall",
+    "fit": {
+      "slope_px_s": 12.4,
+      "slope_sigma_px_s": 0.3,
+      "scale_y_m_per_px": 0.000012,
+      "velocity_m_s": 0.0001488,
+      "sigma_v_m_s": 0.0000036
+    },
+    "physics": {
+      "balance_voltage_V": 297.0,
+      "cunningham_length_m": 8.12e-8,
+      "radius_m": 1.09e-6,
+      "eta_eff_Pa_s": 1.70e-5,
+      "q_velocity_sensitivity": 1.55
+    },
+    "result": {
+      "q_C": 8.77e-19,
+      "sigma_q_C": 1.72e-20
+    }
+  }
+}
+```
+
+The Stage 5 formula flow consumes this trace. The frontend may render formulas
+and format units, but it must not reconstruct authoritative physics results
+from partial client state.
+
 The underlying backend entry point remains the Python API:
 
 ```python

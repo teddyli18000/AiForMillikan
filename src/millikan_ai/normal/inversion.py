@@ -5,6 +5,8 @@ from typing import Any
 
 import numpy as np
 
+SI_ELEMENTARY_CHARGE_C = 1.602176634e-19
+
 
 def run_weighted_integer_inversion(records: list[dict[str, Any]], cfg: dict[str, Any]) -> dict[str, Any]:
     icfg = cfg["inversion"]
@@ -17,6 +19,7 @@ def run_weighted_integer_inversion(records: list[dict[str, Any]], cfg: dict[str,
             "num_used": len(eligible),
             "valid_q_count": len(eligible),
             "min_required": min_records,
+            "reference_comparison": _reference_comparison(None, None),
             "flags": ["insufficient_eligible_records"],
         }
 
@@ -46,6 +49,7 @@ def run_weighted_integer_inversion(records: list[dict[str, Any]], cfg: dict[str,
     best = ordered[0]
     n_hat = best["n"].astype(int)
     e_hat = float(best["e_C"])
+    sigma_e = _estimate_sigma_e(n_hat, sigma)
     residual = q - n_hat * e_hat
     residual_sigma = residual / sigma
     flags: list[str] = []
@@ -64,7 +68,8 @@ def run_weighted_integer_inversion(records: list[dict[str, Any]], cfg: dict[str,
         "reliable": len([flag for flag in flags if flag != "exploratory_small_sample"]) == 0,
         "status": "exploratory" if "exploratory_small_sample" in flags else ("reliable" if len(flags) == 0 else "diagnostic"),
         "e_hat_C": e_hat,
-        "sigma_e_C": _estimate_sigma_e(n_hat, sigma),
+        "sigma_e_C": sigma_e,
+        "reference_comparison": _reference_comparison(e_hat, sigma_e),
         "weighted_rms": float(best["weighted_rms"]),
         "chi2": float(best["chi2"]),
         "num_used": len(eligible),
@@ -198,3 +203,15 @@ def _estimate_sigma_e(n_hat: np.ndarray, sigma: np.ndarray) -> float | None:
         return None
     sigma_e = math.sqrt(1.0 / denominator)
     return sigma_e if math.isfinite(sigma_e) and sigma_e > 0 else None
+
+
+def _reference_comparison(e_hat_C: float | None, sigma_e_C: float | None) -> dict[str, Any]:
+    valid_e = e_hat_C is not None and math.isfinite(float(e_hat_C)) and float(e_hat_C) > 0
+    valid_sigma = sigma_e_C is not None and math.isfinite(float(sigma_e_C)) and float(sigma_e_C) >= 0
+    return {
+        "reference_e_C": SI_ELEMENTARY_CHARGE_C,
+        "reference_name": "SI defining constant",
+        "relative_uncertainty_percent": 100.0 * float(sigma_e_C) / float(e_hat_C) if valid_e and valid_sigma else None,
+        "percent_error_vs_reference": 100.0 * abs(float(e_hat_C) - SI_ELEMENTARY_CHARGE_C) / SI_ELEMENTARY_CHARGE_C if valid_e else None,
+        "used_for_inversion": False,
+    }

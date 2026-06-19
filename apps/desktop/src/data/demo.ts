@@ -222,7 +222,7 @@ export const demoArtifacts: RunArtifacts = {
       { drop_id: "drop_001", platform_id: "P002", voltage_V: 239, velocity_m_s: -0.000044, r2_diagnostic: 0.95 }
     ]
   },
-  analysis_report_md: "# Millikan Analysis Report\n\n运行状态：PARTIAL\n\n有界候选基本电荷：1.604e-19 C\n\n最终元电荷识别：false"
+  analysis_report_md: "# Millikan Analysis Report\n\n运行状态：PARTIAL\n\n有界候选基本电荷：1.604 × 10⁻¹⁹ C\n\n最终元电荷识别：false"
 };
 
 export const demoAnalysisResponse: AnalysisResponse = {

@@ -175,3 +175,22 @@ evidence that produced it: candidate solutions, integer assignments, residuals,
 and quantized-alignment charts. The page should feel like a scientific result
 dashboard: information-dense but readable, with restrained controls and no
 model-victory wording until a real continuous baseline exists.
+
+The Stage 6 main area is the canonical result summary. It shows the elementary
+charge estimate, uncertainty, relative uncertainty, percentage error versus the
+exact SI defining constant, used-q count, and weighted residual evidence. The
+right inspector must not repeat the same e/sigma result card; it is reserved for
+convergence, boundary hits, flags, scientific limitations, export, rerun, and
+navigation.
+
+At Stage 5, the space below the full-track review should show the calculation
+path from user-confirmed balance voltage and 0 V interval through trajectory
+fit, velocity, Cunningham-corrected radius, effective viscosity, q, and
+sigma_q. Formulas should be rendered as structured mathematical typography,
+not raw code strings. Values come from the backend record calculation trace;
+the frontend does not recalculate the physics.
+
+All scientific numbers visible to a person use shared formatting. Prefer
+`a × 10ⁿ` with superscript exponents, and display charge quantities on the
+`10⁻¹⁹ C` scale. Raw `1.23e-19` notation is not acceptable in UI text, chart
+labels, tables, tooltips, or exported Markdown.

@@ -73,8 +73,8 @@ export function ResultsView({ artifacts, onExport, onOpenRun }: ResultsViewProps
                 <th>drop_id</th>
                 <th>track_id</th>
                 <th>radius μm</th>
-                <th>q / 1e-19 C</th>
-                <th>σq / 1e-19 C</th>
+                <th>q / 10⁻¹⁹ C</th>
+                <th>σq / 10⁻¹⁹ C</th>
               </tr>
             </thead>
             <tbody>

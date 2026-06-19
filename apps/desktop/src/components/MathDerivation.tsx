@@ -33,7 +33,7 @@ export function MathDerivation({ artifacts }: MathDerivationProps) {
       <div className="derivation-note">
         <FunctionSquare size={17} />
         <span>
-          主估计来自固定物理区间 [1.35e-19, 1.90e-19] C 内的 profile likelihood 全局最大值。若
+          主估计来自固定物理区间 [1.35 × 10⁻¹⁹, 1.90 × 10⁻¹⁹] C 内的 profile likelihood 全局最大值。若
           fundamental_spacing_identified=false，界面只显示为诊断候选，不宣称完成证明。
         </span>
       </div>

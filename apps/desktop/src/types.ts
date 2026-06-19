@@ -336,6 +336,13 @@ export type NormalInversionResult = {
   sigma_floor_C?: number | null;
   converged?: boolean;
   boundary_hit?: boolean;
+  reference_comparison?: {
+    reference_e_C?: number | null;
+    reference_name?: string;
+    relative_uncertainty_percent?: number | null;
+    percent_error_vs_reference?: number | null;
+    used_for_inversion?: boolean;
+  };
   quantized?: Record<string, unknown>;
   continuous?: Record<string, unknown>;
   comparison?: Record<string, unknown>;

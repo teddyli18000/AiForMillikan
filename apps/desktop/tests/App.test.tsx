@@ -43,6 +43,8 @@ async function reachAcceptedNormalRecord() {
   await userEvent.click(await screen.findByRole("button", { name: "确认保留" }));
   expect(await screen.findByRole("button", { name: /下一颗油滴/ })).toBeInTheDocument();
   expect(await screen.findByLabelText("完整轨迹复核帧播放器")).toBeInTheDocument();
+  expect(await screen.findByLabelText("单滴 q 计算流程")).toBeInTheDocument();
+  expect(screen.getByText("本记录的 q 计算链")).toBeInTheDocument();
 
   return () => {
     HTMLElement.prototype.getBoundingClientRect = originalRect;
@@ -145,12 +147,15 @@ describe("Millikan desktop app", () => {
       await userEvent.click(await screen.findByRole("button", { name: /运行 Normal 盲反演/ }));
       expect(await screen.findByLabelText("Normal 盲反演结果页")).toBeInTheDocument();
       expect(screen.getAllByText("盲反演结果").length).toBeGreaterThan(0);
-      expect(screen.getByText("e_hat")).toBeInTheDocument();
-      expect(screen.getByText("sigma_e")).toBeInTheDocument();
+      expect(screen.getByText("元电荷估计")).toBeInTheDocument();
+      expect(screen.getByText("标准不确定度 σe")).toBeInTheDocument();
+      expect(screen.getByText("相对不确定度")).toBeInTheDocument();
+      expect(screen.getByText("相对标准值百分误差")).toBeInTheDocument();
       expect(screen.getByText("候选解")).toBeInTheDocument();
       expect(screen.getByText("整数分配与残差")).toBeInTheDocument();
       expect(screen.getByText("归一化残差")).toBeInTheDocument();
       expect(screen.queryByText(/模型胜出|quantized_favored|continuous_favored/)).toBeNull();
+      expect(document.body.textContent).not.toMatch(/\d(?:\.\d+)?e[+-]\d+/i);
     } finally {
       cleanupRect();
     }
