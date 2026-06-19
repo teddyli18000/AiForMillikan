@@ -78,7 +78,7 @@ function createDemoApi(): DesktopApi {
     }),
     normalInspectVideo: async () => ({
       video_path: "raw_data/2.mp4",
-      video_url: "",
+      video_url: "demo-normal-video.mp4",
       metadata: demoMetadata
     }),
     normalPrepareVideo: async () => {
@@ -96,7 +96,7 @@ function createDemoApi(): DesktopApi {
       return {
       session_root: "runs/normal_demo/session",
       video_path: "raw_data/2.mp4",
-      video_url: "",
+      video_url: "demo-normal-video.mp4",
       metadata: demoMetadata,
       boundary: {
         zero_v_start_s: 0.8,
@@ -192,7 +192,18 @@ function createDemoApi(): DesktopApi {
     normalPrepareCrossingReview: async (payload) => {
       const record = normalRecords.find((item) => item.record_id === payload.record_id) ?? normalRecords[normalRecords.length - 1];
       const event = record?.crossings?.find((item) => item.event_id === payload.event_id) ?? record?.crossings?.[0];
-      const nextEvent = event ? { ...event, review_clip_url: "" } : undefined;
+      const demoFrame =
+        "data:image/svg+xml;utf8," +
+        encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="288" height="288" viewBox="0 0 288 288"><rect width="288" height="288" fill="#101820"/><path d="M144 34v220" stroke="#2563eb" stroke-width="3" fill="none"/><circle cx="144" cy="190" r="18" fill="none" stroke="#22c55e" stroke-width="6"/><text x="166" y="184" font-family="Arial" font-size="24" fill="#22c55e">target</text></svg>`
+        );
+      const review_frames = Array.from({ length: 8 }, (_, frameIndex) => ({
+        frame_index: 52 + frameIndex,
+        time_s: 1.72 + frameIndex / 30,
+        image_url: demoFrame,
+        source_video_box: { x: 96, y: 96, width: 96, height: 96 }
+      }));
+      const nextEvent = event ? { ...event, review_clip_url: "", review_frames } : undefined;
       return { session_root: "runs/normal_demo/session", record, event: nextEvent, session: demoNormalSession() };
     },
     normalReviewCrossing: async (payload) => {

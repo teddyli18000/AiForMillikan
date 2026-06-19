@@ -229,6 +229,13 @@ export type NormalCrossingEvent = {
   review_result?: "same_drop" | "different_drop";
   review_clip_url?: string;
   review_clip_path?: string;
+  review_frames?: Array<{
+    frame_index: number;
+    time_s: number;
+    image_url: string;
+    image_path?: string;
+    source_video_box?: { x: number; y: number; width: number; height: number };
+  }>;
   source_video_box?: { x: number; y: number; width: number; height: number };
   [key: string]: unknown;
 };

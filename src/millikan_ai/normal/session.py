@@ -267,20 +267,40 @@ def prepare_crossing_review(payload: dict[str, Any]) -> dict[str, Any]:
     event = _find_crossing(record, str(payload["event_id"]))
     record_dir = Path(record["record_dir"])
     clip = record_dir / "crossing_reviews" / f"{event['event_id']}.mp4"
-    if not clip.exists():
+    frames_manifest = clip.parent / f"{event['event_id']}_frames" / "frames_manifest.json"
+    if not clip.exists() or not frames_manifest.exists():
         review = make_crossing_review_clip(record["video_path"], event, clip, (record.get("tracking") or {}).get("track") or [])
         event["review_clip_path"] = review["clip_path"]
         event["review_clip_url"] = file_url(review["clip_path"])
         event["review_source_video_box"] = review["source_video_box"]
         event["review_clip_start_time_s"] = review["start_time_s"]
         event["review_clip_end_time_s"] = review["end_time_s"]
+        event["review_frames_manifest_path"] = review["frames_manifest_path"]
+        event["review_frames"] = _review_frames_with_urls(review["review_frames"])
     else:
         event["review_clip_path"] = str(clip)
         event["review_clip_url"] = file_url(clip)
+        frames = _read_json(frames_manifest)
+        event["review_frames_manifest_path"] = str(frames_manifest)
+        event["review_frames"] = _review_frames_with_urls(frames if isinstance(frames, list) else [])
+        if not event["review_frames"]:
+            raise RuntimeError(f"crossing review frames are empty: {frames_manifest}")
     session["updated_at"] = _now()
     _write_json(session_path, session)
     _write_json(record_dir / "record_manifest.json", record)
     return {"session_root": init["session_root"], "record": _public_record(record), "event": event, "session": _public_session(session, init["session_root"])}
+
+
+def _review_frames_with_urls(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for frame in frames:
+        image_path = frame.get("image_path")
+        if not image_path:
+            continue
+        item = dict(frame)
+        item["image_url"] = file_url(image_path)
+        out.append(item)
+    return out
 
 
 def review_crossing(payload: dict[str, Any]) -> dict[str, Any]:

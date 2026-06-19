@@ -341,10 +341,38 @@ the track is missing around a grid line, the backend should create a clickable
 }
 ```
 
-The UI should play a local magnified clip of roughly one second before and
+The UI should play a local magnified review of roughly one second before and
 after the crossing. If the video is too short or the crossing is near the
 beginning/end, clip the review window to valid video bounds instead of failing.
-The clip is generated only when the user opens that crossing review.
+The review is generated only when the user opens that crossing review.
+
+`normal.prepareCrossingReview` returns the current record, the selected event,
+and a renderer-playable frame sequence. Existing clip paths may remain as
+export artifacts, but the desktop UI must not depend on Chromium being able to
+decode the generated MP4:
+
+```json
+{
+  "event_id": "crossing_001",
+  "review_clip_path": ".../crossing_001.mp4",
+  "review_clip_url": "file:///.../crossing_001.mp4",
+  "review_frames": [
+    {
+      "frame_index": 88,
+      "time_s": 2.933,
+      "image_path": ".../crossing_001_frames/frame_0000.jpg",
+      "image_url": "file:///.../crossing_001_frames/frame_0000.jpg",
+      "source_video_box": {"x": 382, "y": 464, "width": 96, "height": 96}
+    }
+  ],
+  "review_clip_start_time_s": 2.0,
+  "review_clip_end_time_s": 4.0
+}
+```
+
+The frame images must be generated from backend crop/track data with the same
+identity evidence as the review clip. If the frame sequence cannot be generated,
+the UI must show an explicit error instead of a black or empty player.
 
 Review results are limited to:
 

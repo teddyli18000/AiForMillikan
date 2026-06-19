@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, MouseEvent, RefObject } from "react";
+import type { DragEvent, MouseEvent } from "react";
 import { ArrowLeft, Check, ChevronsLeft, ChevronsRight, Download, FileVideo, FolderOpen, Pause, Play, RotateCcw, Save, Scissors, StepBack, StepForward, Target, Video } from "lucide-react";
 import type {
   NormalBoundary,
@@ -99,7 +99,6 @@ function clampSelectionTime(time: number, boundary: NormalBoundary, metadata: Vi
 export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
-  const reviewVideoRef = useRef<HTMLVideoElement | null>(null);
   const [stage, setStage] = useState<StageId>("import");
   const [session, setSession] = useState<NormalSession | null>(null);
   const [backendConfig, setBackendConfig] = useState<Record<string, any> | null>(null);
@@ -127,6 +126,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [nextDropDialogOpen, setNextDropDialogOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -328,9 +328,6 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setSelectedRecordId(response.record.record_id);
       setReviewEvent(response.event ?? event);
       setMessage("局部放大复核片段已生成。");
-      window.setTimeout(() => {
-        reviewVideoRef.current?.play().catch(() => undefined);
-      }, 80);
     } catch (error) {
       setMessage(`生成 crossing 复核失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -426,6 +423,45 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       videoRef.current.currentTime = safeTime;
     }
     setCurrentTime(safeTime);
+  };
+
+  const clearCurrentMeasurementDraft = () => {
+    setSelectionBox(null);
+    setSelectedRecordId(null);
+    setAdjustingRecordId(null);
+    setReviewEvent(null);
+    setInversion(null);
+    setDragStart(null);
+  };
+
+  const nextDropSameVideo = () => {
+    setNextDropDialogOpen(false);
+    clearCurrentMeasurementDraft();
+    const nextSelectionTime = clampSelectionTime(Number(boundary.zero_v_start_s ?? selectionTime), boundary, metadata);
+    setSelectionTime(nextSelectionTime);
+    seekVideoTo(nextSelectionTime, metadata, true);
+    setStage("target");
+    setMessage("已准备在同一视频中测量下一颗油滴。请在 0V 起点附近重新框选。");
+  };
+
+  const nextDropDifferentVideo = () => {
+    setNextDropDialogOpen(false);
+    clearCurrentMeasurementDraft();
+    setMetadata(null);
+    setVideoPath("");
+    setVideoUrl("");
+    setBoundary({ zero_v_start_s: 0, zero_v_end_s: 1, source: "manual_ui" });
+    setBoundaryDirty(false);
+    setBoundaryDiagnostics(null);
+    setGrid(null);
+    setSelectionTime(0);
+    setBalanceVoltage("");
+    setBalanceConfirmed(false);
+    setParameterOverrides({});
+    setCurrentTime(0);
+    setDuration(0);
+    setStage("import");
+    setMessage("已保留当前 session 的 q 记录。请导入下一段视频。");
   };
 
   const jumpTo = (time: number, metadataOverride?: VideoMetadata | null) => {
@@ -845,7 +881,6 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
             <ReviewPanel
               record={selectedRecord}
               reviewEvent={reviewEvent}
-              reviewVideoRef={reviewVideoRef}
               onPrepareReview={prepareCrossingReview}
               onReview={submitCrossingReview}
               onContinue={() => setStage("results")}
@@ -867,6 +902,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               onRunInversion={runInversion}
               onBackReview={() => (selectedRecord?.status === "pending_crossing_review" ? restoreRecordContext(selectedRecord, session, "review", false) : backToTarget(selectedRecord))}
               onBackBoundary={() => backToBoundary(selectedRecord)}
+              onNextDrop={() => setNextDropDialogOpen(true)}
               busy={busy}
             />
           ) : null}
@@ -884,6 +920,28 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       <div className="status-toast" role="status">
         {busy ? progress?.label ?? "正在处理..." : message}
       </div>
+      {nextDropDialogOpen ? (
+        <div className="normal-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="next-drop-title">
+          <div className="normal-modal">
+            <div className="section-heading">
+              <span>next</span>
+              <strong id="next-drop-title">下一颗油滴</strong>
+            </div>
+            <p>是否继续使用当前视频？已确认保留的 q 记录会留在本次 session 中，用于后续盲反演。</p>
+            <div className="panel-actions">
+              <button className="primary-button" onClick={nextDropSameVideo}>
+                同一个视频
+              </button>
+              <button className="ghost-button" onClick={nextDropDifferentVideo}>
+                换一个视频
+              </button>
+              <button className="ghost-button" onClick={() => setNextDropDialogOpen(false)}>
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1092,7 +1150,6 @@ function TargetPanel(props: {
 function ReviewPanel(props: {
   record: NormalRecord | null;
   reviewEvent: NormalCrossingEvent | null;
-  reviewVideoRef: RefObject<HTMLVideoElement | null>;
   busy: boolean;
   onPrepareReview: (event: NormalCrossingEvent) => void;
   onReview: (result: "same_drop" | "different_drop") => void;
@@ -1131,9 +1188,9 @@ function ReviewPanel(props: {
         ))}
         {crossings.length === 0 ? <span className="normal-drop-hint">本次追踪没有 crossing，可进入结果确认。</span> : null}
       </div>
-      {props.reviewEvent?.review_clip_url ? (
+      {props.reviewEvent ? (
         <div className="normal-review-clip">
-          <video ref={props.reviewVideoRef} src={props.reviewEvent.review_clip_url} muted loop controls />
+          <CrossingFramePlayer event={props.reviewEvent} />
           <div className="panel-actions">
             <button className="primary-button small" disabled={props.busy} onClick={() => props.onReview("same_drop")}>
               同一颗油滴
@@ -1164,6 +1221,7 @@ function ResultsPanel(props: {
   onRunInversion: () => void;
   onBackReview: () => void;
   onBackBoundary: () => void;
+  onNextDrop: () => void;
 }) {
   const record = props.selectedRecord;
   const q = (record?.q as Record<string, any> | undefined) ?? {};
@@ -1209,6 +1267,11 @@ function ResultsPanel(props: {
               <Save size={15} />
               确认保留
             </button>
+            {record.status === "accepted" && record.kept ? (
+              <button className="primary-button small" disabled={props.busy} onClick={props.onNextDrop}>
+                下一颗油滴
+              </button>
+            ) : null}
             <button className="ghost-button" disabled={props.busy} onClick={props.onReject}>
               返回调整/排除
             </button>
@@ -1220,8 +1283,8 @@ function ResultsPanel(props: {
       <div className="normal-record-list">
         {(props.session?.records ?? []).map((item) => (
           <button key={item.record_id} className={item.record_id === record?.record_id ? "active" : ""} onClick={() => props.onSelectRecord(item.record_id)}>
-            <span>{item.record_id}</span>
-            <strong>{formatSci(item.q_C)}</strong>
+            <span className="record-id">{item.record_id}</span>
+            <strong>{formatSci(item.q_C)} C</strong>
             <small>{statusLabel(item.status)}</small>
           </button>
         ))}
@@ -1243,6 +1306,60 @@ function ResultsPanel(props: {
         <Play size={16} />
         运行 Normal 盲反演
       </button>
+    </div>
+  );
+}
+
+function CrossingFramePlayer({ event }: { event: NormalCrossingEvent }) {
+  const frames = event.review_frames ?? [];
+  const [frameIndex, setFrameIndex] = useState(0);
+  const [playing, setPlaying] = useState(true);
+  const activeFrame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))];
+
+  useEffect(() => {
+    setFrameIndex(0);
+    setPlaying(frames.length > 1);
+  }, [event.event_id, frames.length]);
+
+  useEffect(() => {
+    if (!playing || frames.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setFrameIndex((current) => (current + 1) % frames.length);
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [playing, frames.length]);
+
+  if (!frames.length || !activeFrame?.image_url) {
+    return (
+      <div className="normal-frame-player normal-frame-player--empty">
+        <strong>复核帧不可用</strong>
+        <span>后端没有返回可播放的 review_frames，请重新生成 crossing 复核。</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="normal-frame-player" aria-label="crossing 局部复核帧播放器">
+      <img src={activeFrame.image_url} alt={`${event.event_id} frame ${frameIndex + 1}`} />
+      <div className="normal-frame-player__controls">
+        <button className="icon-button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "暂停复核帧" : "播放复核帧"}>
+          {playing ? <Pause size={15} /> : <Play size={15} />}
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={Math.max(0, frames.length - 1)}
+          step={1}
+          value={frameIndex}
+          onChange={(change) => {
+            setFrameIndex(Number(change.target.value));
+            setPlaying(false);
+          }}
+          aria-label="复核帧进度"
+        />
+        <span>{formatFixed(activeFrame.time_s, 2)} s</span>
+      </div>
+      <small>{event.event_id} · {frameIndex + 1}/{frames.length}</small>
     </div>
   );
 }

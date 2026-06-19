@@ -347,7 +347,13 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
                     }
                 )[-1]
                 assert review["type"] == "result"
-                assert Path(review["payload"]["event"]["review_clip_path"]).exists()
+                event = review["payload"]["event"]
+                assert Path(event["review_clip_path"]).exists()
+                assert event["review_frames"]
+                first_frame = event["review_frames"][0]
+                assert Path(first_frame["image_path"]).exists()
+                assert first_frame["image_url"].startswith("file:///")
+                assert event["review_clip_start_time_s"] <= first_frame["time_s"] <= event["review_clip_end_time_s"]
                 reviewed = _send_worker(
                     {
                         "id": f"review-crossing-{index}-{crossing['event_id']}",
@@ -548,7 +554,12 @@ def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Pat
         }
     )[-1]
     assert review["type"] == "result"
-    assert Path(review["payload"]["event"]["review_clip_path"]).exists()
+    event = review["payload"]["event"]
+    assert Path(event["review_clip_path"]).exists()
+    assert event["review_frames"]
+    assert all(Path(frame["image_path"]).exists() for frame in event["review_frames"])
+    assert min(frame["time_s"] for frame in event["review_frames"]) >= event["review_clip_start_time_s"]
+    assert max(frame["time_s"] for frame in event["review_frames"]) <= event["review_clip_end_time_s"]
 
     rejected = _send_worker(
         {

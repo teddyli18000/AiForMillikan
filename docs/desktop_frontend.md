@@ -141,3 +141,20 @@ and submitted backend `target_frame` must refer to the same frame.
 Returning from target/review/results to `0V` must show the user's previous
 confirmed boundary for that measurement. It must not restore the original
 automatic suggestion after the user has already confirmed a different boundary.
+
+Crossing review uses a renderer-owned frame player over backend-generated
+review frames. The player must show a real current frame, play/pause state,
+looping progress, and current time. A generated MP4 may be exported or kept as
+an artifact, but the UI must not present an unplayable black video control as
+valid review evidence.
+
+After a q record is accepted, the results panel should offer "下一颗油滴".
+The confirmation dialog has two routes: same video returns to target selection
+with the current video, metadata, grid, boundary, voltage, and parameters
+available while clearing the current target/tracking/review draft; different
+video returns to the empty import panel while keeping accepted q records in the
+current session for blind inversion.
+
+The session record list must be readable at narrow inspector widths. Long
+record IDs, q values, and status labels should occupy separate lines or columns
+that cannot overlap.

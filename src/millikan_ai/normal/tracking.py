@@ -345,9 +345,12 @@ def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: 
         y1 = min(height, y0 + crop_size)
     out_size = (max(1, (x1 - x0) * scale), max(1, (y1 - y0) * scale))
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    frames_dir = out_path.parent / f"{out_path.stem}_frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
     writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, out_size)
     by_frame = {int(row.get("source_frame")): row for row in (track_rows or []) if row.get("source_frame") is not None}
     trail: list[tuple[int, int]] = []
+    review_frames: list[dict[str, Any]] = []
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     for frame_idx in range(start_frame, end_frame + 1):
         ok, frame = cap.read()
@@ -374,9 +377,23 @@ def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: 
             cv2.line(crop, a, b, (255, 0, 0), 1)
         cv2.circle(crop, (local_x, local_y), 8, color, 2)
         cv2.putText(crop, label, (local_x + 10, max(14, local_y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
-        writer.write(cv2.resize(crop, out_size, interpolation=cv2.INTER_NEAREST))
+        rendered = cv2.resize(crop, out_size, interpolation=cv2.INTER_NEAREST)
+        writer.write(rendered)
+        image_path = frames_dir / f"frame_{len(review_frames):04d}.jpg"
+        if not cv2.imwrite(str(image_path), rendered):
+            raise RuntimeError(f"cannot write crossing review frame: {image_path}")
+        review_frames.append(
+            {
+                "frame_index": frame_idx,
+                "time_s": frame_idx / fps if fps > 0 else 0.0,
+                "image_path": str(image_path),
+                "source_video_box": {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0},
+            }
+        )
     cap.release()
     writer.release()
+    manifest_path = frames_dir / "frames_manifest.json"
+    manifest_path.write_text(json.dumps(review_frames, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
         "clip_path": str(out_path),
         "start_frame": start_frame,
@@ -385,6 +402,8 @@ def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: 
         "end_time_s": end_frame / fps if fps > 0 else 0.0,
         "source_video_box": {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0},
         "scale": scale,
+        "frames_manifest_path": str(manifest_path),
+        "review_frames": review_frames,
     }
 
 
