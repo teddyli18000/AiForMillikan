@@ -51,6 +51,11 @@ Experimental `analysis.*` flow as a shortcut. Current Normal operations are:
 - `normal.updateRecordSelection`: user-confirm or exclude a q record.
   `kept=true` is allowed only from `pending_user_confirmation`; it moves the
   record to `accepted`.
+- `normal.startNextDroplet`: after a record is accepted or excluded, prepare
+  the transient session for another droplet. `mode=same_video` resets the active
+  video to `boundary_confirmed` using the current confirmed video context.
+  `mode=different_video` clears `active_video` but keeps accepted records in the
+  current session.
 - `normal.runInversion`: run the Normal-only weighted integer residual grid
   search over accepted q records.
 - `normal.exportSession`: export the Normal session report, q table, inversion
@@ -389,6 +394,30 @@ The main record review video must be generated from backend track rows and must
 show the teammate overlay style: green circle plus `target`, yellow circle plus
 `missing`, and a blue trajectory line. The frontend must not draw or infer
 target/missing/trajectory positions that are absent from the backend record.
+
+For packaged desktop review, each record should also expose whole-frame
+`track_review_frames` so the renderer can show the full tracking process without
+depending on MP4 codec support:
+
+```json
+{
+  "track_review_frames": [
+    {
+      "frame_index": 92,
+      "time_s": 3.067,
+      "image_path": ".../track_review_frames/frame_0004.jpg",
+      "image_url": "file:///.../track_review_frames/frame_0004.jpg",
+      "width": 1920,
+      "height": 1080
+    }
+  ]
+}
+```
+
+These frames are full original-video frames with the backend-drawn target,
+missing, trajectory line, pixel axes, and current frame/time text. The frontend
+plays the frames as evidence and must not rescale separate overlays onto the
+video.
 
 ### Normal Physical Parameters
 

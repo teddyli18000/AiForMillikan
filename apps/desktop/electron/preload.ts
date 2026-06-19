@@ -21,6 +21,7 @@ const api = {
   normalPrepareCrossingReview: (payload: unknown) => ipcRenderer.invoke("normal:prepareCrossingReview", payload),
   normalReviewCrossing: (payload: unknown) => ipcRenderer.invoke("normal:reviewCrossing", payload),
   normalSelectRecord: (payload: unknown) => ipcRenderer.invoke("normal:updateRecordSelection", payload),
+  normalStartNextDroplet: (payload: unknown) => ipcRenderer.invoke("normal:startNextDroplet", payload),
   normalRunInversion: (payload: unknown) => ipcRenderer.invoke("normal:runInversion", payload),
   normalExportSession: (payload: unknown) => ipcRenderer.invoke("normal:exportSession", payload),
   setModeFullscreen: (enabled: boolean) => ipcRenderer.invoke("window:setModeFullscreen", enabled),

@@ -59,16 +59,19 @@ def run_tracking(request: TrackRequest, progress_callback: ProgressCallback | No
     events_json = run_dir / "crossing_events.json"
     layers_json = run_dir / "visualization_layers.json"
     overlay_mp4 = run_dir / "overlay_review.mp4"
+    track_review_dir = run_dir / "track_review_frames"
     track.to_csv(track_csv, index=False)
     events_json.write_text(json.dumps(crossings, ensure_ascii=False, indent=2), encoding="utf-8")
     layers = visualization_layers(track, crossings, request, fps)
     layers_json.write_text(json.dumps(layers, ensure_ascii=False, indent=2), encoding="utf-8")
     make_overlay_video(request.video_path, track, overlay_mp4, start, end, request.grid)
+    track_review_frames = make_track_review_frames(request.video_path, track, track_review_dir, start, end, request.grid)
     return {
         "track_csv": str(track_csv),
         "crossing_events_json": str(events_json),
         "visualization_layers_json": str(layers_json),
         "overlay_mp4": str(overlay_mp4),
+        "track_review_frames": track_review_frames,
         "track": _records(track),
         "crossing_events": crossings,
         "visualization_layers": layers,
@@ -292,26 +295,81 @@ def make_overlay_video(video_path: str, track: pd.DataFrame, out_path: Path, sta
         if not ok:
             break
         row = by_frame.get(frame_idx)
-        if row is not None:
-            detected = bool(row.detected)
-            x = row.x if detected and math.isfinite(float(row.x)) else row.pred_x
-            y = row.y if detected and math.isfinite(float(row.y)) else row.pred_y
-            if detected:
-                color = (0, 255, 0)
-                label = "target"
-            else:
-                color = (0, 255, 255)
-                label = "missing"
-            origin = (int(round(x)), int(round(y)))
-            cv2.circle(frame, origin, 7, color, 2)
-            cv2.putText(frame, label, (origin[0] + 10, origin[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
-            if row.state in {"tracking", "reacquired"}:
-                points.append(origin)
-        for a, b in zip(points[:-1], points[1:]):
-            cv2.line(frame, a, b, (255, 0, 0), 2)
+        _draw_track_review_overlay(frame, row, points, grid, frame_idx, fps, include_axes=False)
         writer.write(frame)
     cap.release()
     writer.release()
+
+
+def make_track_review_frames(video_path: str, track: pd.DataFrame, out_dir: Path, start_frame: int, end_frame: int, grid: dict[str, Any]) -> list[dict[str, Any]]:
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"cannot open video: {video_path}")
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    by_frame = {int(row.source_frame): row for row in track.itertuples()}
+    points: list[tuple[int, int]] = []
+    frames: list[dict[str, Any]] = []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    for frame_idx in range(start_frame, end_frame + 1):
+        ok, frame = cap.read()
+        if not ok:
+            break
+        row = by_frame.get(frame_idx)
+        _draw_track_review_overlay(frame, row, points, grid, frame_idx, fps, include_axes=True)
+        image_path = out_dir / f"frame_{len(frames):04d}.jpg"
+        if not cv2.imwrite(str(image_path), frame):
+            cap.release()
+            raise RuntimeError(f"cannot write track review frame: {image_path}")
+        height, width = frame.shape[:2]
+        frames.append({"frame_index": frame_idx, "time_s": frame_idx / fps if fps > 0 else 0.0, "image_path": str(image_path), "width": width, "height": height})
+    cap.release()
+    (out_dir / "frames_manifest.json").write_text(json.dumps(frames, ensure_ascii=False, indent=2), encoding="utf-8")
+    return frames
+
+
+def _draw_track_review_overlay(frame, row, points: list[tuple[int, int]], grid: dict[str, Any], frame_idx: int, fps: float, include_axes: bool) -> None:
+    height, width = frame.shape[:2]
+    if include_axes:
+        cv2.arrowedLine(frame, (28, 32), (118, 32), (53, 201, 255), 2, tipLength=0.18)
+        cv2.arrowedLine(frame, (28, 32), (28, 122), (53, 201, 255), 2, tipLength=0.18)
+        cv2.putText(frame, "+X", (124, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (53, 201, 255), 2, cv2.LINE_AA)
+        cv2.putText(frame, "+Y", (12, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (53, 201, 255), 2, cv2.LINE_AA)
+        for y in grid.get("grid_lines_y", []) or []:
+            if _is_finite_number(y):
+                y_i = int(round(float(y)))
+                if 0 <= y_i < height:
+                    cv2.line(frame, (0, y_i), (width - 1, y_i), (255, 170, 50), 1)
+        top = grid.get("second_line_y") or grid.get("effective_top_px")
+        bottom = grid.get("penultimate_line_y") or grid.get("effective_bottom_px")
+        for y, color in [(top, (53, 201, 255)), (bottom, (255, 185, 72))]:
+            if _is_finite_number(y):
+                y_i = int(round(float(y)))
+                if 0 <= y_i < height:
+                    cv2.line(frame, (0, y_i), (width - 1, y_i), color, 2)
+
+    if row is not None:
+        detected = bool(row.detected)
+        x = row.x if detected and _is_finite_number(row.x) else row.pred_x
+        y = row.y if detected and _is_finite_number(row.y) else row.pred_y
+        if _is_finite_number(x) and _is_finite_number(y):
+            origin = (int(round(float(x))), int(round(float(y))))
+            color = (0, 255, 0) if detected else (0, 255, 255)
+            label = "target" if detected else "missing"
+            if str(row.state) in {"tracking", "reacquired"}:
+                points.append(origin)
+            for a, b in zip(points[:-1], points[1:]):
+                cv2.line(frame, a, b, (255, 0, 0), 2)
+            cv2.circle(frame, origin, 7, color, 2)
+            cv2.putText(frame, label, (origin[0] + 10, max(20, origin[1] - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
+            cv2.putText(frame, f"({origin[0]}, {origin[1]})", (origin[0] + 10, min(height - 12, origin[1] + 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+    else:
+        for a, b in zip(points[:-1], points[1:]):
+            cv2.line(frame, a, b, (255, 0, 0), 2)
+
+    if include_axes:
+        label = f"frame {frame_idx}  t={frame_idx / fps:.2f}s" if fps > 0 else f"frame {frame_idx}"
+        cv2.putText(frame, label, (28, height - 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
 
 
 def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: Path, track_rows: list[dict[str, Any]] | None = None, crop_size: int = 96, scale: int = 3) -> dict[str, Any]:

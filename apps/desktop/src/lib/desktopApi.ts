@@ -15,6 +15,11 @@ function createDemoApi(): DesktopApi {
   let normalRecords: NormalRecord[] = [];
   const emit = (progress: ProgressEvent) => progressListeners.forEach((listener) => listener(progress));
   const emitNormal = (progress: NormalProgressEvent) => normalProgressListeners.forEach((listener) => listener(progress));
+  const demoTrackFrame =
+    "data:image/svg+xml;utf8," +
+    encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#101820"/><path d="M90 88h110" stroke="#35c9ff" stroke-width="5"/><path d="M90 88v110" stroke="#35c9ff" stroke-width="5"/><text x="210" y="98" font-family="Arial" font-size="32" fill="#35c9ff">+X</text><text x="58" y="230" font-family="Arial" font-size="32" fill="#35c9ff">+Y</text><path d="M570 180 C560 260 590 330 575 430 C565 500 592 560 580 640" stroke="#2563eb" stroke-width="5" fill="none"/><circle cx="580" cy="640" r="18" fill="none" stroke="#22c55e" stroke-width="7"/><text x="606" y="632" font-family="Arial" font-size="32" fill="#22c55e">target</text><text x="36" y="684" font-family="Arial" font-size="28" fill="#ffffff">frame 96  t=3.20s</text></svg>`
+    );
   const demoNormalSession = (): NormalSession => ({
     session_root: "runs/normal_demo/session",
     records: normalRecords,
@@ -182,6 +187,13 @@ function createDemoApi(): DesktopApi {
         balance_voltage_V: 239,
         flags: [],
         artifacts: {},
+        track_review_frames: Array.from({ length: 10 }, (_, frameIndex) => ({
+          frame_index: 40 + frameIndex,
+          time_s: 1.4 + frameIndex / 30,
+          image_url: demoTrackFrame,
+          width: 1280,
+          height: 720
+        })),
         crossings: [
           { event_id: `N${String(index).padStart(3, "0")}-C001`, time_s: 1.8, start_time_s: 1.7, review_start_time_s: 0.8, review_end_time_s: 2.8, grid_line_y_px: 220 }
         ]
@@ -219,6 +231,36 @@ function createDemoApi(): DesktopApi {
       normalRecords = normalRecords.map((record) => (record.record_id === payload.record_id ? { ...record, kept: payload.kept, valid: payload.kept, status: payload.kept ? "accepted" : "rejected_by_user" } : record));
       return demoNormalSession();
     },
+    normalStartNextDroplet: async (payload) => ({
+      session_root: "runs/normal_demo/session",
+      active_video:
+        payload.mode === "same_video"
+          ? {
+              state: "boundary_confirmed",
+              path: "raw_data/2.mp4",
+              video_url: "demo-normal-video.mp4",
+              metadata: demoMetadata,
+              boundary: {
+                zero_v_start_s: 0.8,
+                zero_v_end_s: 5.13,
+                zero_v_start_frame: 24,
+                zero_v_end_frame: 154,
+                selection_window: { start_s: 0.3, end_s: 1.3, start_frame: 9, end_frame: 39, source: "normal_v1_default" }
+              },
+              grid: {
+                valid: true,
+                line_y_px: [120, 220, 320, 420, 520],
+                grid_lines_y: [120, 220, 320, 420, 520],
+                effective_top_px: 220,
+                effective_bottom_px: 420,
+                measurement_distance_m: 0.001,
+                scale_y_m_per_px: 5e-6,
+                flags: []
+              }
+            }
+          : null,
+      session: demoNormalSession()
+    }),
     normalRunInversion: async () => ({
       session_root: "runs/normal_demo/session",
       inversion: {

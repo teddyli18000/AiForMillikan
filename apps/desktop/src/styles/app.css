@@ -1945,6 +1945,39 @@ td {
   background: rgba(7, 16, 26, 0.92);
 }
 
+.normal-track-frame-player {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  color: rgba(255, 255, 255, 0.86);
+  background: #07101a;
+}
+
+.normal-track-frame-player img {
+  width: 100%;
+  max-height: 640px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #03070c;
+}
+
+.normal-track-frame-player__controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+}
+
+.normal-track-frame-player__controls input {
+  min-width: 0;
+}
+
+.normal-track-frame-player small {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+}
+
 .normal-result-hero {
   background: linear-gradient(135deg, rgba(231, 241, 255, 0.88), rgba(255, 255, 255, 0.72));
 }

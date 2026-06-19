@@ -255,6 +255,14 @@ export type NormalRecord = {
   flags?: string[];
   artifacts?: Record<string, string>;
   artifact_urls?: Record<string, string>;
+  track_review_frames?: Array<{
+    frame_index: number;
+    time_s: number;
+    image_url: string;
+    image_path?: string;
+    width?: number;
+    height?: number;
+  }>;
   crossings?: NormalCrossingEvent[];
   [key: string]: unknown;
 };
@@ -305,7 +313,7 @@ export type NormalPrepareVideoResponse = {
 
 export type NormalStateResponse = {
   session_root: string;
-  active_video?: Record<string, unknown>;
+  active_video?: Record<string, unknown> | null;
   session: NormalSession;
 };
 
@@ -383,6 +391,7 @@ export type DesktopApi = {
   normalPrepareCrossingReview: (payload: { session_root?: string; record_id: string; event_id: string }) => Promise<NormalCrossingReviewResponse>;
   normalReviewCrossing: (payload: { session_root?: string; record_id: string; event_id: string; result: "same_drop" | "different_drop" }) => Promise<NormalCrossingReviewResponse>;
   normalSelectRecord: (payload: { session_root?: string; record_id: string; kept: boolean }) => Promise<NormalSession>;
+  normalStartNextDroplet: (payload: { session_root?: string; record_id?: string; mode: "same_video" | "different_video" }) => Promise<NormalStateResponse>;
   normalRunInversion: (payload?: { session_root?: string; config_overrides?: Record<string, unknown> }) => Promise<NormalInversionResponse>;
   normalExportSession: (payload?: { session_root?: string }) => Promise<unknown>;
   setModeFullscreen: (enabled: boolean) => Promise<boolean>;

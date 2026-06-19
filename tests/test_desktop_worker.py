@@ -328,6 +328,12 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
         assert record["q_C"] > 0
         assert record["sigma_q_C"] > 0
         assert record["kept"] is False
+        assert record["track_review_frames"]
+        track_frame = record["track_review_frames"][0]
+        assert Path(track_frame["image_path"]).exists()
+        assert track_frame["image_url"].startswith("file:///")
+        assert track_frame["width"] == payload["metadata"]["width"]
+        assert track_frame["height"] == payload["metadata"]["height"]
 
         blocked = _send_worker(
             {
@@ -376,6 +382,36 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
         accepted_record = [row for row in accepted["payload"]["records"] if row["record_id"] == record["record_id"]][0]
         assert accepted_record["status"] == "accepted"
         assert accepted_record["kept"] is True
+        if index == 0:
+            next_same = _send_worker(
+                {
+                    "id": "next-same-video",
+                    "op": "normal.startNextDroplet",
+                    "payload": {"session_root": str(session_root), "record_id": record["record_id"], "mode": "same_video"},
+                }
+            )[-1]
+            assert next_same["type"] == "result"
+            assert next_same["payload"]["active_video"]["state"] == "boundary_confirmed"
+            retry_select = _send_worker(
+                {
+                    "id": "select-second-drop-same-video",
+                    "op": "normal.selectTarget",
+                    "payload": {
+                        "session_root": str(session_root),
+                        "balance_voltage_V": 239.0,
+                        "balance_confirmed": True,
+                        "target": {
+                            "target_frame": 3,
+                            "target_time_s": 0.1,
+                            "source_center": {"x": 96.0, "y": 88.0},
+                            "source_video_box": {"x": 82.0, "y": 74.0, "width": 28.0, "height": 28.0},
+                        },
+                        "parameter_overrides": overrides,
+                    },
+                }
+            )[-1]
+            assert retry_select["type"] == "result"
+            assert retry_select["payload"]["active_video"]["state"] == "target_selected"
 
     inverted = _send_worker(
         {
@@ -389,6 +425,16 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
     assert inverted["payload"]["inversion"]["valid_q_count"] == 3
     assert "quantized_favored" not in inverted["payload"]["inversion"].get("comparison", {})
     assert inverted["payload"]["inversion"]["candidates"]
+    next_new_video = _send_worker(
+        {
+            "id": "next-different-video-keeps-records",
+            "op": "normal.startNextDroplet",
+            "payload": {"session_root": str(session_root), "mode": "different_video"},
+        }
+    )[-1]
+    assert next_new_video["type"] == "result"
+    assert next_new_video["payload"]["active_video"] is None
+    assert next_new_video["payload"]["session"]["counts"]["kept_valid"] == 3
 
 
 def test_normal_confirm_boundary_seconds_override_stale_frames_and_window(tmp_path: Path):

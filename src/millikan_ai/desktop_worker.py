@@ -35,6 +35,7 @@ from millikan_ai.normal.session import (
     run_inversion as normal_run_inversion,
     save_measurement as normal_save_measurement,
     select_target as normal_select_target,
+    start_next_droplet as normal_start_next_droplet,
     update_record_selection as normal_update_record_selection,
 )
 
@@ -252,6 +253,10 @@ def _op_normal_select_record(payload: Json, _request_id: str) -> Json:
         record_id=str(_value(payload, "record_id")),
         kept=bool(_value(payload, "kept", _value(payload, "selected", True))),
     )["session"]
+
+
+def _op_normal_start_next_droplet(payload: Json, _request_id: str) -> Json:
+    return normal_start_next_droplet(payload)
 
 
 def _op_normal_run_inversion(payload: Json, _request_id: str) -> Json:
@@ -490,6 +495,7 @@ OPS: dict[str, Callable[[Json, str], Json]] = {
     "normal.prepareCrossingReview": _op_normal_prepare_crossing_review,
     "normal.reviewCrossing": _op_normal_review_crossing,
     "normal.updateRecordSelection": _op_normal_select_record,
+    "normal.startNextDroplet": _op_normal_start_next_droplet,
     "normal.runInversion": _op_normal_run_inversion,
     "normal.exportSession": _op_normal_export,
     "analysis.run": _op_analysis_run,

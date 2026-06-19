@@ -42,6 +42,7 @@ async function reachAcceptedNormalRecord() {
   await userEvent.click(screen.getByRole("button", { name: /同一颗油滴/ }));
   await userEvent.click(await screen.findByRole("button", { name: "确认保留" }));
   expect(await screen.findByRole("button", { name: /下一颗油滴/ })).toBeInTheDocument();
+  expect(await screen.findByLabelText("完整轨迹复核帧播放器")).toBeInTheDocument();
 
   return () => {
     HTMLElement.prototype.getBoundingClientRect = originalRect;
@@ -97,6 +98,14 @@ describe("Millikan desktop app", () => {
       await userEvent.click(screen.getByRole("button", { name: /同一个视频/ }));
       expect(await screen.findByText("selection time (s)")).toBeInTheDocument();
       expect(screen.getByText("在视频画面上拖拽一个矩形包住油滴")).toBeInTheDocument();
+      const overlay = document.querySelector(".normal-video-overlay");
+      if (!overlay) throw new Error("normal video overlay not found for second droplet");
+      fireEvent.mouseDown(overlay, { clientX: 180, clientY: 140 });
+      fireEvent.mouseMove(overlay, { clientX: 220, clientY: 180 });
+      fireEvent.mouseUp(overlay, { clientX: 220, clientY: 180 });
+      await userEvent.click(screen.getByRole("button", { name: /确认框选并开始追踪/ }));
+      await userEvent.click(await screen.findByRole("button", { name: /C001/ }));
+      expect(await screen.findByLabelText("crossing 局部复核帧播放器")).toBeInTheDocument();
     } finally {
       cleanupRect();
     }

@@ -240,7 +240,7 @@ def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] |
             "grid": grid,
             "parameter_overrides": overrides,
             "effective_parameters": {"physics": effective_cfg["physics"], "grid": effective_cfg["grid"]},
-            "tracking": {"stats": _tracking_stats(tracking["track"]), "artifacts": _artifact_paths(tracking), "track": tracking["track"]},
+            "tracking": {"stats": _tracking_stats(tracking["track"]), "artifacts": _artifact_paths(tracking), "track": tracking["track"], "track_review_frames": tracking.get("track_review_frames") or []},
             "crossing_events": crossings,
             "fit": fit,
             "q": q,
@@ -348,6 +348,48 @@ def update_record_selection(session_root: str | None, record_id: str, kept: bool
     _write_json(session_path, session)
     _write_json(Path(record["record_dir"]) / "record_manifest.json", record)
     return {"session": _public_session(session, init["session_root"])}
+
+
+def start_next_droplet(payload: dict[str, Any]) -> dict[str, Any]:
+    mode = str(payload.get("mode") or "")
+    if mode not in {"same_video", "different_video"}:
+        raise RuntimeError("mode must be same_video or different_video")
+    init = initialize_session(payload.get("session_root"))
+    session_path = Path(init["session_file"])
+    session = _read_json(session_path)
+    if mode == "different_video":
+        session["active_video"] = None
+        session["updated_at"] = _now()
+        _write_json(session_path, session)
+        return {"session_root": init["session_root"], "active_video": None, "session": _public_session(session, init["session_root"])}
+
+    record = None
+    record_id = payload.get("record_id")
+    if record_id:
+        record = _find_record(session, str(record_id))
+    active = session.get("active_video") if isinstance(session.get("active_video"), dict) else {}
+    video_path = (record or {}).get("video_path") or active.get("path")
+    metadata = (record or {}).get("metadata") or active.get("metadata")
+    boundary = (record or {}).get("time_window") or active.get("boundary")
+    grid = (record or {}).get("grid") or active.get("grid")
+    if not video_path or not isinstance(metadata, dict) or not isinstance(boundary, dict) or not isinstance(grid, dict):
+        raise RuntimeError("same_video next droplet requires an active or record video context")
+    session["active_video"] = {
+        "state": "boundary_confirmed",
+        "path": video_path,
+        "metadata": metadata,
+        "video_url": file_url(video_path),
+        "boundary_suggestion": boundary,
+        "boundary": boundary,
+        "grid": grid,
+        "previous_balance_voltage_V": (record or {}).get("balance_voltage_V") or active.get("balance_voltage_V"),
+        "previous_parameter_overrides": (record or {}).get("parameter_overrides") or active.get("parameter_overrides") or {},
+        "next_droplet_from_record_id": (record or {}).get("record_id"),
+        "next_droplet_started_at": _now(),
+    }
+    session["updated_at"] = _now()
+    _write_json(session_path, session)
+    return {"session_root": init["session_root"], "active_video": session["active_video"], "session": _public_session(session, init["session_root"])}
 
 
 def run_inversion(session_root: str | None = None, config_overrides: dict[str, Any] | None = None, progress_callback: ProgressCallback | None = None) -> dict[str, Any]:
@@ -567,6 +609,7 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
             "flags": list(dict.fromkeys([*(fit.get("flags") or []), *(q.get("flags") or [])])),
             "artifacts": artifacts,
             "artifact_urls": artifact_urls,
+            "track_review_frames": _review_frames_with_urls(tracking.get("track_review_frames") or []),
             "crossings": record.get("crossing_events") or [],
         }
     )

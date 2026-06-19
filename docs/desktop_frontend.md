@@ -149,11 +149,19 @@ an artifact, but the UI must not present an unplayable black video control as
 valid review evidence.
 
 After a q record is accepted, the results panel should offer "下一颗油滴".
-The confirmation dialog has two routes: same video returns to target selection
-with the current video, metadata, grid, boundary, voltage, and parameters
-available while clearing the current target/tracking/review draft; different
-video returns to the empty import panel while keeping accepted q records in the
-current session for blind inversion.
+The confirmation dialog has two routes and both must call the backend before
+changing stage. Same video returns to target selection only after the worker has
+reset `active_video.state` to `boundary_confirmed` with the current video,
+metadata, grid, boundary, voltage, and parameters available while clearing the
+current target/tracking/review draft. Different video clears backend
+`active_video` and returns to the empty import panel while keeping accepted q
+records in the current session for blind inversion.
+
+The review/results main media should prefer backend-generated full-frame track
+review frames over MP4 overlay playback. The frame player should expose
+play/pause, scrubber, current time/frame, and show the original video frame with
+backend-drawn target/missing labels, trajectory, and pixel axes. The renderer
+must not draw a separate trajectory overlay on top of a scaled video.
 
 The session record list must be readable at narrow inspector widths. Long
 record IDs, q values, and status labels should occupy separate lines or columns

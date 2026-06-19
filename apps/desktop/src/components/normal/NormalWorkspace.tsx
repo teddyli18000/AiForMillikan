@@ -164,8 +164,10 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     selectedRecord?.artifact_urls?.overlay_mp4 ??
     selectedRecord?.artifact_urls?.single_droplet_overlay_mp4 ??
     "";
-  const mainVideoUrl = stage === "review" || stage === "results" ? selectedOverlayUrl || videoUrl : videoUrl;
-  const showingTrackOverlay = Boolean((stage === "review" || stage === "results") && selectedOverlayUrl);
+  const selectedTrackFrames = selectedRecord?.track_review_frames ?? [];
+  const showingTrackFrames = Boolean((stage === "review" || stage === "results") && selectedTrackFrames.length);
+  const mainVideoUrl = showingTrackFrames ? "" : stage === "review" || stage === "results" ? selectedOverlayUrl || videoUrl : videoUrl;
+  const showingTrackOverlay = Boolean((stage === "review" || stage === "results") && selectedOverlayUrl && !showingTrackFrames);
 
   const inspectVideo = async (path: string) => {
     if (!path) {
@@ -434,34 +436,62 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     setDragStart(null);
   };
 
-  const nextDropSameVideo = () => {
-    setNextDropDialogOpen(false);
-    clearCurrentMeasurementDraft();
-    const nextSelectionTime = clampSelectionTime(Number(boundary.zero_v_start_s ?? selectionTime), boundary, metadata);
-    setSelectionTime(nextSelectionTime);
-    seekVideoTo(nextSelectionTime, metadata, true);
-    setStage("target");
-    setMessage("已准备在同一视频中测量下一颗油滴。请在 0V 起点附近重新框选。");
+  const nextDropSameVideo = async () => {
+    setBusy(true);
+    try {
+      const response = await desktopApi.normalStartNextDroplet({ session_root: session?.session_root, record_id: selectedRecord?.record_id, mode: "same_video" });
+      const active = response.active_video as Record<string, any> | null | undefined;
+      const nextBoundary = (active?.boundary as NormalBoundary | undefined) ?? boundary;
+      const nextMetadata = (active?.metadata as VideoMetadata | undefined) ?? metadata;
+      setSession(response.session);
+      setNextDropDialogOpen(false);
+      clearCurrentMeasurementDraft();
+      setMetadata(nextMetadata ?? null);
+      setVideoPath(typeof active?.path === "string" ? active.path : videoPath);
+      setVideoUrl(typeof active?.video_url === "string" ? active.video_url : videoUrl);
+      setGrid((active?.grid as NormalGrid | undefined) ?? grid);
+      setBoundary(nextBoundary);
+      setBoundaryDirty(false);
+      setBoundaryDiagnostics(null);
+      const nextSelectionTime = clampSelectionTime(Number(nextBoundary.zero_v_start_s ?? selectionTime), nextBoundary, nextMetadata ?? metadata);
+      setSelectionTime(nextSelectionTime);
+      seekVideoTo(nextSelectionTime, nextMetadata ?? metadata, true);
+      setStage("target");
+      setMessage("已准备在同一视频中测量下一颗油滴。请在 0V 起点附近重新框选。");
+    } catch (error) {
+      setMessage(`准备下一颗油滴失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const nextDropDifferentVideo = () => {
-    setNextDropDialogOpen(false);
-    clearCurrentMeasurementDraft();
-    setMetadata(null);
-    setVideoPath("");
-    setVideoUrl("");
-    setBoundary({ zero_v_start_s: 0, zero_v_end_s: 1, source: "manual_ui" });
-    setBoundaryDirty(false);
-    setBoundaryDiagnostics(null);
-    setGrid(null);
-    setSelectionTime(0);
-    setBalanceVoltage("");
-    setBalanceConfirmed(false);
-    setParameterOverrides({});
-    setCurrentTime(0);
-    setDuration(0);
-    setStage("import");
-    setMessage("已保留当前 session 的 q 记录。请导入下一段视频。");
+  const nextDropDifferentVideo = async () => {
+    setBusy(true);
+    try {
+      const response = await desktopApi.normalStartNextDroplet({ session_root: session?.session_root, record_id: selectedRecord?.record_id, mode: "different_video" });
+      setSession(response.session);
+      setNextDropDialogOpen(false);
+      clearCurrentMeasurementDraft();
+      setMetadata(null);
+      setVideoPath("");
+      setVideoUrl("");
+      setBoundary({ zero_v_start_s: 0, zero_v_end_s: 1, source: "manual_ui" });
+      setBoundaryDirty(false);
+      setBoundaryDiagnostics(null);
+      setGrid(null);
+      setSelectionTime(0);
+      setBalanceVoltage("");
+      setBalanceConfirmed(false);
+      setParameterOverrides({});
+      setCurrentTime(0);
+      setDuration(0);
+      setStage("import");
+      setMessage("已保留当前 session 的 q 记录。请导入下一段视频。");
+    } catch (error) {
+      setMessage(`准备新视频失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const jumpTo = (time: number, metadataOverride?: VideoMetadata | null) => {
@@ -749,7 +779,9 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
 
         <section className="normal-video-panel panel" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
           <div className="normal-video-shell">
-            {mainVideoUrl ? (
+            {showingTrackFrames ? (
+              <TrackFramePlayer frames={selectedTrackFrames} />
+            ) : mainVideoUrl ? (
               <>
                 <video
                   ref={videoRef}
@@ -1253,8 +1285,8 @@ function ResultsPanel(props: {
           </div>
           <div className="normal-diagnostic-box">
             <strong>追踪复核视频</strong>
-            <span>{record.artifact_urls?.overlay_mp4 ? "主视频区正在播放 backend overlay MP4。" : "当前记录没有 overlay URL。"}</span>
-            <span>target/missing/trajectory 不由前端重画，避免缩放错位。</span>
+            <span>{record.track_review_frames?.length ? "主视频区正在播放 backend 整帧轨迹复核。" : record.artifact_urls?.overlay_mp4 ? "主视频区正在播放 backend overlay MP4。" : "当前记录没有轨迹复核帧。"}</span>
+            <span>target/missing/trajectory/坐标轴由后端画在原始视频像素上，前端只播放帧，避免缩放错位。</span>
           </div>
           <div className="panel-actions">
             <button className="ghost-button" disabled={props.busy} onClick={props.onBackReview}>
@@ -1360,6 +1392,61 @@ function CrossingFramePlayer({ event }: { event: NormalCrossingEvent }) {
         <span>{formatFixed(activeFrame.time_s, 2)} s</span>
       </div>
       <small>{event.event_id} · {frameIndex + 1}/{frames.length}</small>
+    </div>
+  );
+}
+
+function TrackFramePlayer({ frames }: { frames: NonNullable<NormalRecord["track_review_frames"]> }) {
+  const [frameIndex, setFrameIndex] = useState(0);
+  const [playing, setPlaying] = useState(true);
+  const activeFrame = frames[Math.min(frameIndex, Math.max(0, frames.length - 1))];
+
+  useEffect(() => {
+    setFrameIndex(0);
+    setPlaying(frames.length > 1);
+  }, [frames.length]);
+
+  useEffect(() => {
+    if (!playing || frames.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setFrameIndex((current) => (current + 1) % frames.length);
+    }, 80);
+    return () => window.clearInterval(timer);
+  }, [playing, frames.length]);
+
+  if (!frames.length || !activeFrame?.image_url) {
+    return (
+      <div className="normal-track-frame-player normal-frame-player--empty">
+        <strong>轨迹复核帧不可用</strong>
+        <span>后端没有返回可播放的 track_review_frames。</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="normal-track-frame-player" aria-label="完整轨迹复核帧播放器">
+      <img src={activeFrame.image_url} alt={`track review frame ${frameIndex + 1}`} />
+      <div className="normal-track-frame-player__controls">
+        <button className="icon-button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "暂停完整轨迹" : "播放完整轨迹"}>
+          {playing ? <Pause size={16} /> : <Play size={16} />}
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={Math.max(0, frames.length - 1)}
+          step={1}
+          value={frameIndex}
+          onChange={(change) => {
+            setFrameIndex(Number(change.target.value));
+            setPlaying(false);
+          }}
+          aria-label="完整轨迹帧进度"
+        />
+        <span>{formatFixed(activeFrame.time_s, 2)} s</span>
+      </div>
+      <small>
+        frame {activeFrame.frame_index} · {frameIndex + 1}/{frames.length}
+      </small>
     </div>
   );
 }
