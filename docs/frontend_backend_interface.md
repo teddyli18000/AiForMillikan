@@ -80,6 +80,9 @@ Within one launch it may contain q records from multiple videos, because the
 experiment needs several independent droplets and a single short video may not
 contain enough usable measurements. Long-term persistence is not implicit:
 records are durable only when the user explicitly exports the session.
+The Electron shell owns cleanup for implicit transient sessions created during
+the launch: on application exit it must delete those tracked session roots so
+unexported cache/session directories do not survive as future experiments.
 
 Session-level fields:
 
@@ -115,6 +118,13 @@ Normal state is split but must stay consistent:
   `pending_user_confirmation`, `accepted`, `diagnostic`,
   `rejected_crossing_identity`, `rejected_by_user`.
 
+Backend code must never copy a record status into `active_video.state`.
+After `normal.saveMeasurement`, `normal.reviewCrossing`, or
+`normal.updateRecordSelection`, the active video remains in a video-level state
+unless a rejected record is restored for adjustment. Adjustment restore sets
+`active_video.state=boundary_confirmed` and carries the record's original video,
+metadata, URL, grid, boundary, target, balance voltage, and parameter overrides.
+
 The combined user-visible state machine is:
 
 ```text
@@ -141,8 +151,10 @@ buttons for usability, but the worker remains the authority.
 
 Rejected or diagnostic records remain in the transient session for adjustment
 and evidence. They are never eligible for inversion. When the user chooses
-"return/adjust", the UI restores the record's previous boundary, selection
-time, target rectangle, balance voltage, and parameter overrides. Retrying
+"return/adjust", the UI restores the record's previous video, preview URL,
+metadata, grid, boundary, selection time, target rectangle, balance voltage,
+and parameter overrides, then returns to the boundary-confirmation stage so the
+user can adjust `0V_start_s`/`0V_end_s` before selecting and retracking. Retrying
 creates a new record linked to the previous record with `retry_of_record_id`;
 the old record remains immutable evidence.
 

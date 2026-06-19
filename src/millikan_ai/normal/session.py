@@ -16,12 +16,14 @@ from .tracking import TrackRequest, make_crossing_review_clip, run_tracking
 from .video import file_sha256, file_url, inspect_video
 from .voltage import suggest_zero_v_window
 
-NORMAL_STATES = {
-    "video_imported",
+ACTIVE_VIDEO_STATES = {
     "video_prepared",
     "boundary_confirmed",
     "target_selected",
     "tracking",
+}
+
+RECORD_STATES = {
     "pending_crossing_review",
     "pending_user_confirmation",
     "accepted",
@@ -132,7 +134,7 @@ def confirm_boundary(payload: dict[str, Any], config_overrides: dict[str, Any] |
     init = initialize_session(payload.get("session_root"), payload.get("run_root"), config_overrides)
     session_path = Path(init["session_file"])
     session = _read_json(session_path)
-    active = _require_active_state(session, {"video_prepared"})
+    active = _require_active_state(session, {"video_prepared", "boundary_confirmed"})
     metadata = active["metadata"]
     boundary = _normalize_boundary(payload["boundary"], metadata)
     boundary["selection_window"] = _selection_window(boundary, metadata, cfg)
@@ -251,7 +253,6 @@ def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] |
 
     _write_json(record_dir / "record_manifest.json", record)
     session.setdefault("records", []).append(record)
-    active["state"] = record["status"]
     active["last_record_id"] = record_id
     session["updated_at"] = _now()
     _write_json(session_path, session)
@@ -299,7 +300,6 @@ def review_crossing(payload: dict[str, Any]) -> dict[str, Any]:
         _restore_active_for_adjustment(session, record)
     elif record.get("status") == "pending_crossing_review" and _all_crossings_reviewed_same(record):
         record["status"] = "pending_user_confirmation"
-        _set_active_state(session, "pending_user_confirmation", record.get("record_id"))
     session["updated_at"] = _now()
     _write_json(session_path, session)
     _write_json(Path(record["record_dir"]) / "record_manifest.json", record)
@@ -318,7 +318,6 @@ def update_record_selection(session_root: str | None, record_id: str, kept: bool
             record["status"] = "accepted"
             record["kept"] = True
             record["accepted_at"] = _now()
-            _set_active_state(session, "accepted", record.get("record_id"))
         else:
             raise RuntimeError(f"record cannot be accepted from status={record.get('status')}")
     else:
@@ -492,14 +491,6 @@ def _restore_active_for_adjustment(session: dict[str, Any], record: dict[str, An
     }
 
 
-def _set_active_state(session: dict[str, Any], state: str, record_id: Any = None) -> None:
-    active = session.get("active_video")
-    if isinstance(active, dict):
-        active["state"] = state
-        if record_id:
-            active["last_record_id"] = record_id
-
-
 def _tracking_stats(track: list[dict[str, Any]]) -> dict[str, int]:
     return {
         "total_points": len(track),
@@ -521,6 +512,7 @@ def _public_session(session: dict[str, Any], session_root: str | None = None) ->
         "schema_version": session.get("schema_version", 1),
         "session_id": session.get("session_id"),
         "session_root": session_root,
+        "transient": bool(session.get("transient", True)),
         "created_at": session.get("created_at"),
         "updated_at": session.get("updated_at"),
         "records": records,
@@ -558,8 +550,10 @@ def _require_active_state(session: dict[str, Any], allowed: set[str]) -> dict[st
     if not isinstance(active, dict):
         raise RuntimeError("no active Normal video")
     state = str(active.get("state") or "")
-    if state not in NORMAL_STATES:
-        raise RuntimeError(f"unknown Normal state: {state}")
+    if state not in ACTIVE_VIDEO_STATES:
+        if state in RECORD_STATES:
+            raise RuntimeError(f"record status cannot be used as active_video.state: {state}")
+        raise RuntimeError(f"unknown Normal active_video.state: {state}")
     if state not in allowed:
         raise RuntimeError(f"invalid Normal state transition: state={state}, expected={sorted(allowed)}")
     return active

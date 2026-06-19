@@ -323,8 +323,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
         setStage("results");
         setMessage("所有 crossing 已确认同一颗油滴。请决定是否保留 q 记录。");
       } else if (response.record.status === "rejected_crossing_identity") {
-        setStage("results");
-        setMessage("该记录已因 crossing 身份不一致被阻断，不能进入反演。");
+        restoreRecordForAdjustment(response.record, response.session);
+        setMessage("该记录已因 crossing 身份不一致被阻断。已恢复原视频与 0V 边界，可调整后重新追踪。");
       } else {
         setMessage("crossing 复核结论已保存。");
       }
@@ -346,8 +346,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       });
       setSession(nextSession);
       if (!kept) {
-        restoreRecordForAdjustment(selectedRecord);
-        setMessage("已进入返回调整：已恢复该记录的时间、框选、电压和参数，可微调后重新追踪。");
+        restoreRecordForAdjustment(selectedRecord, nextSession);
+        setMessage("已进入返回调整：已恢复该记录所属视频和 0V 边界，可先微调边界再重新追踪。");
       } else {
         setMessage("本滴 q 已由用户确认保留。");
       }
@@ -384,8 +384,9 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     }
   };
 
-  const jumpTo = (time: number) => {
-    const safeTime = Math.max(0, Math.min(duration || metadata?.duration_s || Number.POSITIVE_INFINITY, time));
+  const jumpTo = (time: number, metadataOverride?: VideoMetadata | null) => {
+    const safeDuration = metadataOverride?.duration_s || duration || metadata?.duration_s || Number.POSITIVE_INFINITY;
+    const safeTime = Math.max(0, Math.min(safeDuration, time));
     if (videoRef.current) {
       videoRef.current.currentTime = safeTime;
     }
@@ -416,17 +417,41 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     jumpTo(next);
   };
 
-  const restoreRecordForAdjustment = (record: NormalRecord) => {
+  const restoreRecordForAdjustment = (record: NormalRecord, restoredSession?: NormalSession | null) => {
+    const active = (restoredSession?.active_video ?? session?.active_video ?? null) as Record<string, any> | null;
+    const adjustment = (active?.adjustment as Record<string, any> | undefined) ?? {};
     const recordBoundary = record.time_window as NormalBoundary | undefined;
-    const target = record.target as { target_time_s?: number; source_video_box?: VideoBox } | undefined;
-    const overrides = record.parameter_overrides as Record<string, unknown> | undefined;
-    if (recordBoundary) {
-      setBoundary(recordBoundary);
+    const activeBoundary = active?.boundary as NormalBoundary | undefined;
+    const nextBoundary = activeBoundary ?? recordBoundary ?? boundary;
+    const nextMetadata = (active?.metadata as VideoMetadata | undefined) ?? (record.metadata as VideoMetadata | undefined) ?? metadata;
+    const nextGrid = (active?.grid as NormalGrid | undefined) ?? (record.grid as NormalGrid | undefined) ?? grid;
+    const target = (adjustment.target ?? record.target) as { target_time_s?: number; source_video_box?: VideoBox } | undefined;
+    const overrides = (adjustment.parameter_overrides ?? record.parameter_overrides) as Record<string, unknown> | undefined;
+    const nextVideoPath = typeof active?.path === "string" ? active.path : record.video_path ?? videoPath;
+    const nextVideoUrl = typeof active?.video_url === "string" ? active.video_url : videoUrl;
+
+    if (nextMetadata) {
+      setMetadata(nextMetadata);
+      setDuration(nextMetadata.duration_s || 0);
     }
-    setSelectionTime(clampSelectionTime(Number(target?.target_time_s ?? recordBoundary?.zero_v_start_s ?? boundary.zero_v_start_s), recordBoundary ?? boundary, metadata));
+    if (nextVideoPath) {
+      setVideoPath(nextVideoPath);
+    }
+    if (nextVideoUrl) {
+      setVideoUrl(nextVideoUrl);
+    }
+    if (nextGrid) {
+      setGrid(nextGrid);
+    }
+    setBoundary(nextBoundary);
+    setBoundaryDiagnostics(null);
+
+    const restoredSelectionTime = clampSelectionTime(Number(target?.target_time_s ?? nextBoundary.zero_v_start_s ?? 0), nextBoundary, nextMetadata ?? metadata);
+    const restoredVoltage = adjustment.balance_voltage_V ?? record.balance_voltage_V;
+    setSelectionTime(restoredSelectionTime);
     setSelectionBox(target?.source_video_box ?? null);
-    setBalanceVoltage(record.balance_voltage_V ? String(record.balance_voltage_V) : "");
-    setBalanceConfirmed(Boolean(record.balance_confirmed ?? record.balance_voltage_V));
+    setBalanceVoltage(restoredVoltage ? String(restoredVoltage) : "");
+    setBalanceConfirmed(Boolean(adjustment.balance_confirmed ?? record.balance_confirmed ?? record.balance_voltage_V));
     setParameterOverrides(
       Object.fromEntries(
         Object.entries(overrides ?? {}).flatMap(([group, value]) =>
@@ -436,9 +461,10 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
         )
       )
     );
-    setAdjustingRecordId(record.record_id);
-    setStage("target");
-    jumpTo(clampSelectionTime(Number(target?.target_time_s ?? recordBoundary?.zero_v_start_s ?? boundary.zero_v_start_s), recordBoundary ?? boundary, metadata));
+    setAdjustingRecordId(String(adjustment.record_id ?? record.record_id));
+    setReviewEvent(null);
+    setStage("boundary");
+    jumpTo(restoredSelectionTime, nextMetadata ?? metadata);
   };
 
   const getVideoGeometry = () => {

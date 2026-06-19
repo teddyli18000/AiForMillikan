@@ -264,6 +264,7 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
         )[-1]
         assert measured["type"] == "result"
         record = measured["payload"]["record"]
+        assert measured["payload"]["session"]["active_video"]["state"] == "tracking"
         assert record["valid"] is False
         assert record["q_valid"] is True
         assert record["q_C"] > 0
@@ -297,6 +298,7 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
                     }
                 )[-1]
                 assert reviewed["type"] == "result"
+                assert reviewed["payload"]["session"]["active_video"]["state"] == "tracking"
 
         accepted = _send_worker(
             {
@@ -306,6 +308,7 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
             }
         )[-1]
         assert accepted["type"] == "result"
+        assert accepted["payload"]["active_video"]["state"] == "tracking"
         accepted_record = [row for row in accepted["payload"]["records"] if row["record_id"] == record["record_id"]][0]
         assert accepted_record["status"] == "accepted"
         assert accepted_record["kept"] is True
@@ -387,6 +390,7 @@ def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Pat
     )[-1]
     assert measured["type"] == "result"
     record = measured["payload"]["record"]
+    assert measured["payload"]["session"]["active_video"]["state"] == "tracking"
     assert record["crossings"], "synthetic crossing video should require human review"
 
     crossing = record["crossings"][0]
@@ -415,7 +419,23 @@ def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Pat
     assert rejected["type"] == "result"
     assert rejected["payload"]["record"]["status"] == "rejected_crossing_identity"
     assert rejected["payload"]["session"]["active_video"]["state"] == "boundary_confirmed"
+    assert rejected["payload"]["session"]["active_video"]["path"] == str(video)
+    assert rejected["payload"]["session"]["active_video"]["metadata"]["readable"] is True
     assert rejected["payload"]["session"]["active_video"]["adjustment"]["record_id"] == record["record_id"]
+
+    reconfirmed = _send_worker(
+        {
+            "id": "reconfirm-restored-boundary",
+            "op": "normal.confirmBoundary",
+            "payload": {
+                "session_root": str(session_root),
+                "boundary": {"zero_v_start_s": 0.1, "zero_v_end_s": 3.6, "source": "test_adjusted"},
+            },
+        }
+    )[-1]
+    assert reconfirmed["type"] == "result"
+    assert reconfirmed["payload"]["active_video"]["state"] == "boundary_confirmed"
+    assert reconfirmed["payload"]["active_video"]["boundary"]["source"] == "test_adjusted"
 
     blocked_accept = _send_worker(
         {

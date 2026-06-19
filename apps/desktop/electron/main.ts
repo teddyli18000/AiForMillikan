@@ -1,10 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { WorkerClient } from "./workerClient";
 
 let mainWindow: BrowserWindow | null = null;
 const worker = new WorkerClient();
+const transientNormalSessionRoots = new Set<string>();
 
 function createWindow(): void {
   const display = screen.getPrimaryDisplay();
@@ -58,6 +60,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  cleanupTransientNormalSessions();
   worker.dispose();
 });
 
@@ -89,13 +92,19 @@ function registerIpc(): void {
   ipcMain.handle("analysis:loadRun", (_event, payload) => worker.request("analysis.loadRun", payload));
   ipcMain.handle("analysis:validate", (_event, payload) => worker.request("analysis.validate", payload));
   ipcMain.handle("downstream:run", (_event, payload) => worker.request("downstream.run", payload));
-  ipcMain.handle("normal:initialize", (_event, payload) => worker.request("normal.initialize", payload || {}));
+  ipcMain.handle("normal:initialize", async (_event, payload) => {
+    const result = await worker.request("normal.initialize", payload || {});
+    trackTransientNormalSession(payload || {}, result);
+    return result;
+  });
   ipcMain.handle("normal:inspectVideo", (_event, payload) => worker.request("normal.inspectVideo", payload));
-  ipcMain.handle("normal:prepareVideo", (event, payload) =>
-    worker.request("normal.prepareVideo", payload, (progress) => {
+  ipcMain.handle("normal:prepareVideo", async (event, payload) => {
+    const result = await worker.request("normal.prepareVideo", payload, (progress) => {
       event.sender.send("normal:progress", progress);
-    })
-  );
+    });
+    trackTransientNormalSession(payload || {}, result);
+    return result;
+  });
   ipcMain.handle("normal:confirmBoundary", (_event, payload) => worker.request("normal.confirmBoundary", payload));
   ipcMain.handle("normal:selectTarget", (_event, payload) => worker.request("normal.selectTarget", payload));
   ipcMain.handle("normal:saveMeasurement", (event, payload) =>
@@ -137,6 +146,34 @@ function registerIpc(): void {
   ipcMain.handle("report:export", async (_event, payload) => exportReport(payload));
   ipcMain.handle("normal:exportSession", async (_event, payload) => exportNormalSession(payload || {}));
   ipcMain.handle("shell:openPath", (_event, targetPath: string) => shell.openPath(targetPath));
+}
+
+function trackTransientNormalSession(payload: unknown, result: unknown): void {
+  const payloadRecord = payload && typeof payload === "object" ? (payload as Record<string, any>) : {};
+  const resultRecord = result && typeof result === "object" ? (result as Record<string, any>) : {};
+  const explicitSessionRoot =
+    typeof payloadRecord.session_root === "string" && payloadRecord.session_root.length > 0
+      ? payloadRecord.session_root
+      : payloadRecord.config_overrides?.session?.session_root;
+  if (explicitSessionRoot) {
+    return;
+  }
+  const session = resultRecord.session && typeof resultRecord.session === "object" ? (resultRecord.session as Record<string, any>) : {};
+  if (session.transient === false || typeof resultRecord.session_root !== "string" || resultRecord.session_root.length === 0) {
+    return;
+  }
+  transientNormalSessionRoots.add(path.resolve(resultRecord.session_root));
+}
+
+function cleanupTransientNormalSessions(): void {
+  for (const root of transientNormalSessionRoots) {
+    try {
+      fsSync.rmSync(root, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`Failed to clean transient Normal session ${root}:`, error);
+    }
+  }
+  transientNormalSessionRoots.clear();
 }
 
 async function exportReport(payload: {
