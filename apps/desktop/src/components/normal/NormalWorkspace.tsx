@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, MouseEvent } from "react";
-import { ArrowLeft, Check, ChevronsLeft, ChevronsRight, Download, FileVideo, FolderOpen, Pause, Play, RotateCcw, Save, Scissors, StepBack, StepForward, Target, Video } from "lucide-react";
+import { ArrowLeft, BarChart3, Check, ChevronsLeft, ChevronsRight, Download, FileVideo, FolderOpen, Pause, Play, RotateCcw, Save, Scissors, Sigma, StepBack, StepForward, Target, Video } from "lucide-react";
 import type {
   NormalBoundary,
   NormalCrossingEvent,
@@ -19,14 +19,15 @@ type NormalWorkspaceProps = {
   onBack: () => void;
 };
 
-type StageId = "import" | "boundary" | "target" | "review" | "results";
+type StageId = "import" | "boundary" | "target" | "review" | "results" | "inversion";
 
 const stages: Array<{ id: StageId; title: string; detail: string }> = [
   { id: "import", title: "导入与预览", detail: "inspect 只读元数据" },
   { id: "boundary", title: "0V 边界确认", detail: "秒级微调起止" },
   { id: "target", title: "框选目标油滴", detail: "平衡确认后追踪" },
   { id: "review", title: "轨迹与 crossing", detail: "人工复核身份" },
-  { id: "results", title: "结果与 session", detail: "确认保留再反演" }
+  { id: "results", title: "结果与 session", detail: "确认保留再反演" },
+  { id: "inversion", title: "盲反演结果", detail: "e 与量子化诊断" }
 ];
 
 const physicsKeys = [
@@ -396,7 +397,7 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       const response = await desktopApi.normalRunInversion({ session_root: session?.session_root });
       setSession(response.session);
       setInversion(response.inversion);
-      setStage("results");
+      setStage("inversion");
       setProgress(null);
       setMessage(response.inversion.status === "insufficient_eligible_records" ? "有效保留记录不足 3 条，暂不能反演。" : "盲反演完成。");
     } catch (error) {
@@ -767,7 +768,12 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
           </div>
           <div className="normal-stage-list">
             {stages.map((item, index) => (
-              <button key={item.id} className={item.id === stage ? "normal-stage active" : "normal-stage"} onClick={() => setStage(item.id)} disabled={item.id !== "results" && item.id !== stage}>
+              <button
+                key={item.id}
+                className={item.id === stage ? "normal-stage active" : "normal-stage"}
+                onClick={() => setStage(item.id)}
+                disabled={item.id !== "results" && item.id !== stage && !(item.id === "inversion" && Boolean(inversion ?? session?.inversion))}
+              >
                 <span>{index + 1}</span>
                 <strong>{item.title}</strong>
                 <small>{item.detail}</small>
@@ -777,84 +783,90 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
           <ProgressBox progress={progress} busy={busy} />
         </aside>
 
-        <section className="normal-video-panel panel" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
-          <div className="normal-video-shell">
-            {showingTrackFrames ? (
-              <TrackFramePlayer frames={selectedTrackFrames} />
-            ) : mainVideoUrl ? (
-              <>
-                <video
-                  ref={videoRef}
-                  src={mainVideoUrl}
-                  onLoadedMetadata={(event) => {
-                    setDuration(event.currentTarget.duration || metadata?.duration_s || 0);
-                    setCurrentTime(event.currentTarget.currentTime || 0);
-                  }}
-                  onTimeUpdate={(event) => {
-                    const time = event.currentTarget.currentTime || 0;
-                    if (stage === "target") {
-                      const safe = clampSelectionTime(time, boundary, metadata);
-                      if (Math.abs(safe - time) > 0.01) {
-                        event.currentTarget.currentTime = safe;
-                      }
-                      event.currentTarget.pause();
-                      setSelectionTime(safe);
-                      setCurrentTime(safe);
-                    } else {
-                      setCurrentTime(time);
-                    }
-                  }}
-                  onPlay={() => setIsPlaying(true)}
-                  onPause={() => setIsPlaying(false)}
-                />
-                {showingTrackOverlay ? <div className="normal-overlay-badge">backend overlay: target / missing / trajectory</div> : null}
-                {stage === "target" ? <div className="normal-overlay-badge normal-overlay-badge--selection">selection frame {formatFixed(selectionTime, 2)} s</div> : null}
-                <div ref={overlayRef} className="normal-video-overlay" onMouseDown={onSelectionDown} onMouseMove={onSelectionMove} onMouseUp={endSelection} onMouseLeave={endSelection}>
-                  {boundary.zero_v_start_s <= (duration || 0) ? <span className="time-marker start" style={{ left: `${((boundary.zero_v_start_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
-                  {boundary.zero_v_end_s <= (duration || 0) ? <span className="time-marker end" style={{ left: `${((boundary.zero_v_end_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
-                  {selectionBox ? <span className="selection-box" style={videoBoxStyle(selectionBox)} /> : null}
-                </div>
-              </>
-            ) : (
-              <div className="normal-video-placeholder">
-                <FileVideo size={44} />
-                <span>拖入视频或选择文件</span>
+        <section className={stage === "inversion" ? "normal-video-panel panel normal-video-panel--inversion" : "normal-video-panel panel"} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
+          {stage === "inversion" ? (
+            <NormalInversionDashboard inversion={inversion ?? session?.inversion ?? null} records={session?.records ?? []} />
+          ) : (
+            <>
+              <div className="normal-video-shell">
+                {showingTrackFrames ? (
+                  <TrackFramePlayer frames={selectedTrackFrames} />
+                ) : mainVideoUrl ? (
+                  <>
+                    <video
+                      ref={videoRef}
+                      src={mainVideoUrl}
+                      onLoadedMetadata={(event) => {
+                        setDuration(event.currentTarget.duration || metadata?.duration_s || 0);
+                        setCurrentTime(event.currentTarget.currentTime || 0);
+                      }}
+                      onTimeUpdate={(event) => {
+                        const time = event.currentTarget.currentTime || 0;
+                        if (stage === "target") {
+                          const safe = clampSelectionTime(time, boundary, metadata);
+                          if (Math.abs(safe - time) > 0.01) {
+                            event.currentTarget.currentTime = safe;
+                          }
+                          event.currentTarget.pause();
+                          setSelectionTime(safe);
+                          setCurrentTime(safe);
+                        } else {
+                          setCurrentTime(time);
+                        }
+                      }}
+                      onPlay={() => setIsPlaying(true)}
+                      onPause={() => setIsPlaying(false)}
+                    />
+                    {showingTrackOverlay ? <div className="normal-overlay-badge">backend overlay: target / missing / trajectory</div> : null}
+                    {stage === "target" ? <div className="normal-overlay-badge normal-overlay-badge--selection">selection frame {formatFixed(selectionTime, 2)} s</div> : null}
+                    <div ref={overlayRef} className="normal-video-overlay" onMouseDown={onSelectionDown} onMouseMove={onSelectionMove} onMouseUp={endSelection} onMouseLeave={endSelection}>
+                      {boundary.zero_v_start_s <= (duration || 0) ? <span className="time-marker start" style={{ left: `${((boundary.zero_v_start_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
+                      {boundary.zero_v_end_s <= (duration || 0) ? <span className="time-marker end" style={{ left: `${((boundary.zero_v_end_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
+                      {selectionBox ? <span className="selection-box" style={videoBoxStyle(selectionBox)} /> : null}
+                    </div>
+                  </>
+                ) : (
+                  <div className="normal-video-placeholder">
+                    <FileVideo size={44} />
+                    <span>拖入视频或选择文件</span>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <div className="normal-player">
-            <button className="icon-button step-button step-button--coarse" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) - 1)} disabled={!mainVideoUrl} aria-label="后退 1 秒" title="后退 1 秒">
-              <StepBack size={16} />
-              <span className="step-badge">1s</span>
-            </button>
-            <button className="icon-button step-button step-button--fine" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) - 0.1)} disabled={!mainVideoUrl} aria-label="后退 0.1 秒" title="后退 0.1 秒">
-              <ChevronsLeft size={16} />
-              <span className="step-badge">0.1</span>
-            </button>
-            <button className="icon-button" onClick={togglePlay} disabled={!mainVideoUrl} aria-label={isPlaying ? "暂停" : "播放"}>
-              {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-            </button>
-            <button className="icon-button step-button step-button--fine" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) + 0.1)} disabled={!mainVideoUrl} aria-label="前进 0.1 秒" title="前进 0.1 秒">
-              <ChevronsRight size={16} />
-              <span className="step-badge">0.1</span>
-            </button>
-            <button className="icon-button step-button step-button--coarse" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) + 1)} disabled={!mainVideoUrl} aria-label="前进 1 秒" title="前进 1 秒">
-              <StepForward size={16} />
-              <span className="step-badge">1s</span>
-            </button>
-            <input
-              className="normal-scrubber"
-              type="range"
-              min={stage === "target" ? selectionWindow.start_s : 0}
-              max={stage === "target" ? selectionWindow.end_s : duration || metadata?.duration_s || 0}
-              step={0.01}
-              value={stage === "target" ? selectionTime : currentTime}
-              disabled={!mainVideoUrl}
-              onChange={(event) => playerJumpTo(Number(event.target.value))}
-              aria-label="视频进度"
-            />
-            <span>{formatFixed(currentTime, 2)} / {formatFixed(duration || metadata?.duration_s, 2)} s</span>
-          </div>
+              <div className="normal-player">
+                <button className="icon-button step-button step-button--coarse" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) - 1)} disabled={!mainVideoUrl} aria-label="后退 1 秒" title="后退 1 秒">
+                  <StepBack size={16} />
+                  <span className="step-badge">1s</span>
+                </button>
+                <button className="icon-button step-button step-button--fine" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) - 0.1)} disabled={!mainVideoUrl} aria-label="后退 0.1 秒" title="后退 0.1 秒">
+                  <ChevronsLeft size={16} />
+                  <span className="step-badge">0.1</span>
+                </button>
+                <button className="icon-button" onClick={togglePlay} disabled={!mainVideoUrl} aria-label={isPlaying ? "暂停" : "播放"}>
+                  {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                </button>
+                <button className="icon-button step-button step-button--fine" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) + 0.1)} disabled={!mainVideoUrl} aria-label="前进 0.1 秒" title="前进 0.1 秒">
+                  <ChevronsRight size={16} />
+                  <span className="step-badge">0.1</span>
+                </button>
+                <button className="icon-button step-button step-button--coarse" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) + 1)} disabled={!mainVideoUrl} aria-label="前进 1 秒" title="前进 1 秒">
+                  <StepForward size={16} />
+                  <span className="step-badge">1s</span>
+                </button>
+                <input
+                  className="normal-scrubber"
+                  type="range"
+                  min={stage === "target" ? selectionWindow.start_s : 0}
+                  max={stage === "target" ? selectionWindow.end_s : duration || metadata?.duration_s || 0}
+                  step={0.01}
+                  value={stage === "target" ? selectionTime : currentTime}
+                  disabled={!mainVideoUrl}
+                  onChange={(event) => playerJumpTo(Number(event.target.value))}
+                  aria-label="视频进度"
+                />
+                <span>{formatFixed(currentTime, 2)} / {formatFixed(duration || metadata?.duration_s, 2)} s</span>
+              </div>
+            </>
+          )}
         </section>
 
         <aside className="normal-inspector panel">
@@ -935,6 +947,18 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
               onBackReview={() => (selectedRecord?.status === "pending_crossing_review" ? restoreRecordContext(selectedRecord, session, "review", false) : backToTarget(selectedRecord))}
               onBackBoundary={() => backToBoundary(selectedRecord)}
               onNextDrop={() => setNextDropDialogOpen(true)}
+              busy={busy}
+            />
+          ) : null}
+          {stage === "inversion" ? (
+            <InversionPanel
+              session={session}
+              inversion={inversion ?? session?.inversion ?? null}
+              keptValidCount={keptValidCount}
+              onBackResults={() => setStage("results")}
+              onNextDrop={() => setNextDropDialogOpen(true)}
+              onExport={exportSession}
+              onRunInversion={runInversion}
               busy={busy}
             />
           ) : null}
@@ -1340,6 +1364,308 @@ function ResultsPanel(props: {
       </button>
     </div>
   );
+}
+
+function InversionPanel(props: {
+  session: NormalSession | null;
+  inversion: NormalInversionResult | null;
+  keptValidCount: number;
+  busy: boolean;
+  onBackResults: () => void;
+  onNextDrop: () => void;
+  onExport: () => void;
+  onRunInversion: () => void;
+}) {
+  const status = props.inversion?.status ?? "not_run";
+  const flags = props.inversion?.flags ?? [];
+  const accepted = props.session?.counts?.kept_valid ?? props.keptValidCount;
+  return (
+    <div className="normal-panel-stack">
+      <div className="section-heading">
+        <span>stage 6</span>
+        <strong>盲反演结果</strong>
+      </div>
+      <div className="normal-inversion-summary-card">
+        <span className={`normal-inversion-status ${status === "reliable" ? "good" : status === "insufficient_eligible_records" ? "blocked" : "warn"}`}>{inversionStatusLabel(status)}</span>
+        <strong>{formatSci(props.inversion?.e_hat_C)} C</strong>
+        <small>sigma_e = {formatSci(props.inversion?.sigma_e_C)} C</small>
+      </div>
+      <div className="normal-meta-grid">
+        <InfoTile label="使用 q" value={`${props.inversion?.valid_q_count ?? props.inversion?.num_used ?? accepted} / ${Math.max(3, props.inversion?.min_required ?? 3)}`} />
+        <InfoTile label="weighted RMS" value={formatFixed(props.inversion?.weighted_rms, 3)} />
+        <InfoTile label="chi²" value={formatFixed(props.inversion?.chi2, 3)} />
+        <InfoTile label="收敛" value={props.inversion?.converged === false ? "未稳定" : props.inversion ? "稳定" : "-"} />
+      </div>
+      <div className="normal-diagnostic-box">
+        <strong>科学边界</strong>
+        <span>{status === "insufficient_eligible_records" ? "有效保留 q 不足 3 条，不能给出 e 候选。" : "Normal v1 展示整数倍残差对齐诊断；没有拟合真实连续 baseline，因此不输出模型胜负。"}</span>
+        <span>flags: {flags.length ? flags.join(", ") : "none"}</span>
+      </div>
+      <div className="normal-diagnostic-box">
+        <strong>搜索设置</strong>
+        <span>interval: {formatSci(props.inversion?.search_interval_C?.[0])} - {formatSci(props.inversion?.search_interval_C?.[1])} C</span>
+        <span>sigma_floor: {formatSci(props.inversion?.sigma_floor_C)} C · boundary hit: {props.inversion?.boundary_hit ? "yes" : "no"}</span>
+      </div>
+      <div className="panel-actions">
+        <button className="ghost-button" disabled={props.busy} onClick={props.onBackResults}>
+          返回结果与 session
+        </button>
+        <button className="ghost-button" disabled={props.busy} onClick={props.onExport}>
+          <Download size={15} />
+          导出 session
+        </button>
+        <button className="primary-button small" disabled={props.busy || accepted < 3} onClick={props.onRunInversion}>
+          <Play size={15} />
+          重新反演
+        </button>
+      </div>
+      <button className="primary-button full" disabled={props.busy || !props.session?.records?.some((record) => record.status === "accepted" && record.kept)} onClick={props.onNextDrop}>
+        下一颗油滴
+      </button>
+    </div>
+  );
+}
+
+function NormalInversionDashboard({ inversion, records }: { inversion: NormalInversionResult | null; records: NormalRecord[] }) {
+  const charts = normalizeInversionCharts(inversion);
+  const assignments = inversion?.assignments ?? [];
+  const candidates = inversion?.candidates ?? [];
+  const status = inversion?.status ?? "not_run";
+  const accepted = records.filter((record) => record.status === "accepted" && record.kept);
+  if (!inversion) {
+    return (
+      <div className="normal-inversion-empty">
+        <Sigma size={44} />
+        <strong>等待盲反演</strong>
+        <span>至少三条用户确认保留的 q 记录后，运行 Normal 盲反演。</span>
+      </div>
+    );
+  }
+  return (
+    <div className="normal-inversion-dashboard" aria-label="Normal 盲反演结果页">
+      <section className="normal-inversion-hero">
+        <div>
+          <span className={`normal-inversion-status ${status === "reliable" ? "good" : status === "insufficient_eligible_records" ? "blocked" : "warn"}`}>{inversionStatusLabel(status)}</span>
+          <h2>元电荷盲反演</h2>
+          <p>基于本次 session 中用户确认保留的 q 记录，执行带不确定度权重的整数倍残差搜索。</p>
+        </div>
+        <div className="normal-inversion-kpis">
+          <KpiBox label="e_hat" value={`${formatSci(inversion.e_hat_C)} C`} />
+          <KpiBox label="sigma_e" value={`${formatSci(inversion.sigma_e_C)} C`} />
+          <KpiBox label="used q" value={String(inversion.valid_q_count ?? inversion.num_used ?? accepted.length)} />
+          <KpiBox label="weighted RMS" value={formatFixed(inversion.weighted_rms, 3)} />
+        </div>
+      </section>
+
+      {status === "insufficient_eligible_records" ? (
+        <section className="normal-inversion-blocker">
+          <BarChart3 size={30} />
+          <strong>有效 q 记录不足</strong>
+          <span>当前 {inversion.valid_q_count ?? accepted.length} 条，至少需要 {inversion.min_required ?? 3} 条 accepted q 才能反演。</span>
+        </section>
+      ) : (
+        <>
+          <section className="normal-inversion-chart-grid">
+            <ChargeAlignmentChart rows={charts.charge_distribution} levels={charts.quantized_levels} eHat={inversion.e_hat_C ?? null} />
+            <ResidualChart rows={charts.residuals} />
+          </section>
+          <section className="normal-inversion-tables">
+            <CandidateList candidates={candidates} />
+            <AssignmentTable assignments={assignments} />
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function KpiBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="normal-inversion-kpi">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ChargeAlignmentChart({
+  rows,
+  levels,
+  eHat
+}: {
+  rows: Array<{ q_C?: number; sigma_q_C?: number; n?: number; nearest_C?: number }>;
+  levels: Array<{ n?: number; charge_C?: number }>;
+  eHat: number | null;
+}) {
+  const width = 720;
+  const height = 310;
+  const pad = { left: 58, right: 28, top: 28, bottom: 48 };
+  const values = rows.flatMap((row) => [finite(row.q_C), finite(row.nearest_C)]).filter((value): value is number => value !== null);
+  const levelValues = levels.map((level) => finite(level.charge_C)).filter((value): value is number => value !== null);
+  const all = [...values, ...levelValues, eHat ?? undefined].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const max = all.length ? Math.max(...all) * 1.08 : 1;
+  const min = 0;
+  const x = (index: number) => pad.left + (rows.length <= 1 ? 0.5 : index / (rows.length - 1)) * (width - pad.left - pad.right);
+  const y = (value: number) => height - pad.bottom - ((value - min) / Math.max(1e-30, max - min)) * (height - pad.top - pad.bottom);
+  return (
+    <div className="normal-chart-panel">
+      <div className="chart-heading">
+        <span>q 观测与整数倍对齐</span>
+        <small>误差条为 sigma_q；横线为 n * e_hat</small>
+      </div>
+      <svg className="normal-chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="q 观测与整数倍对齐图">
+        <line className="axis strong" x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} />
+        <line className="axis strong" x1={pad.left} y1={pad.top} x2={pad.left} y2={height - pad.bottom} />
+        {levels.map((level) => {
+          const value = finite(level.charge_C);
+          if (value === null) return null;
+          return (
+            <g key={`level-${level.n ?? value}`}>
+              <line className="normal-level-line" x1={pad.left} x2={width - pad.right} y1={y(value)} y2={y(value)} />
+              <text x={width - pad.right - 46} y={y(value) - 5}>n={level.n}</text>
+            </g>
+          );
+        })}
+        {rows.map((row, index) => {
+          const q = finite(row.q_C);
+          if (q === null) return null;
+          const sigma = Math.max(0, finite(row.sigma_q_C) ?? 0);
+          const cx = x(index);
+          const cy = y(q);
+          return (
+            <g key={`q-${index}`}>
+              <line className="normal-error-bar" x1={cx} x2={cx} y1={y(q - sigma)} y2={y(q + sigma)} />
+              <circle className="normal-q-dot" cx={cx} cy={cy} r="6" />
+              <text x={cx - 12} y={height - 18}>{index + 1}</text>
+            </g>
+          );
+        })}
+        <text x={pad.left} y={height - 10}>accepted q index</text>
+        <text x={12} y={26}>C</text>
+      </svg>
+    </div>
+  );
+}
+
+function ResidualChart({ rows }: { rows: Array<{ residual_sigma?: number; n?: number; record_id?: string }> }) {
+  const width = 720;
+  const height = 310;
+  const pad = { left: 58, right: 30, top: 32, bottom: 48 };
+  const maxAbs = Math.max(2.5, ...rows.map((row) => Math.abs(finite(row.residual_sigma) ?? 0))) * 1.1;
+  const x = (index: number) => pad.left + (rows.length <= 1 ? 0.5 : index / (rows.length - 1)) * (width - pad.left - pad.right);
+  const y = (value: number) => pad.top + ((maxAbs - value) / (2 * maxAbs)) * (height - pad.top - pad.bottom);
+  return (
+    <div className="normal-chart-panel">
+      <div className="chart-heading">
+        <span>归一化残差</span>
+        <small>residual / sigma_eff，越接近 0 越对齐整数倍</small>
+      </div>
+      <svg className="normal-chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="归一化残差图">
+        <line className="axis strong" x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} />
+        <line className="axis strong" x1={pad.left} y1={pad.top} x2={pad.left} y2={height - pad.bottom} />
+        {[0, 1, -1, 2, -2].map((tick) => (
+          <g key={tick}>
+            <line className={tick === 0 ? "normal-zero-line" : "axis faint"} x1={pad.left} x2={width - pad.right} y1={y(tick)} y2={y(tick)} />
+            <text x={18} y={y(tick) + 4}>{tick}</text>
+          </g>
+        ))}
+        {rows.map((row, index) => {
+          const residual = finite(row.residual_sigma) ?? 0;
+          const strong = Math.abs(residual) > 2;
+          return (
+            <g key={`residual-${row.record_id ?? index}`}>
+              <line className="normal-residual-stem" x1={x(index)} x2={x(index)} y1={y(0)} y2={y(residual)} />
+              <circle className={strong ? "normal-residual-dot warn" : "normal-residual-dot"} cx={x(index)} cy={y(residual)} r="6" />
+              <text x={x(index) - 10} y={height - 18}>n{row.n ?? "-"}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function CandidateList({ candidates }: { candidates: NonNullable<NormalInversionResult["candidates"]> }) {
+  return (
+    <div className="normal-inversion-table-card">
+      <div className="chart-heading">
+        <span>候选解</span>
+        <small>按残差排序，保留不同整数分配</small>
+      </div>
+      <div className="normal-candidate-list">
+        {candidates.slice(0, 6).map((candidate, index) => (
+          <div key={`${candidate.e_C ?? index}-${index}`}>
+            <span>#{index + 1}</span>
+            <strong>{formatSci(candidate.e_C)} C</strong>
+            <small>RMS {formatFixed(candidate.weighted_rms, 3)} · chi² {formatFixed(candidate.chi2, 3)}</small>
+            <em>{(candidate.integer_assignment ?? []).join(" : ") || "-"}</em>
+            <b>{candidate.converged ? "stable" : "unstable"}{candidate.boundary_hit ? " · boundary" : ""}</b>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AssignmentTable({ assignments }: { assignments: NonNullable<NormalInversionResult["assignments"]> }) {
+  return (
+    <div className="normal-inversion-table-card">
+      <div className="chart-heading">
+        <span>整数分配与残差</span>
+        <small>每颗 accepted q 对应一个 n_i</small>
+      </div>
+      <div className="table-wrap normal-inversion-table">
+        <table>
+          <thead>
+            <tr>
+              <th>record</th>
+              <th>q / C</th>
+              <th>n</th>
+              <th>n e / C</th>
+              <th>residual σ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {assignments.map((row, index) => (
+              <tr key={row.record_id ?? index}>
+                <td>{String(row.record_id ?? index + 1)}</td>
+                <td>{formatSci(row.q_C)}</td>
+                <td>{row.n ?? "-"}</td>
+                <td>{formatSci(row.nearest_quantized_charge_C)}</td>
+                <td>{formatFixed(row.residual_sigma, 3)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function normalizeInversionCharts(inversion: NormalInversionResult | null) {
+  const raw = (inversion?.charts ?? inversion?.plots_data ?? {}) as Record<string, any>;
+  return {
+    charge_distribution: Array.isArray(raw.charge_distribution) ? raw.charge_distribution : [],
+    residuals: Array.isArray(raw.residuals) ? raw.residuals : [],
+    quantized_levels: Array.isArray(raw.quantized_levels) ? raw.quantized_levels : []
+  };
+}
+
+function finite(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function inversionStatusLabel(status?: string) {
+  const labels: Record<string, string> = {
+    reliable: "可靠候选",
+    exploratory: "探索性结果",
+    diagnostic: "诊断结果",
+    insufficient_eligible_records: "记录不足",
+    ok: "探索性结果",
+    not_run: "未运行"
+  };
+  return labels[status || ""] ?? status ?? "未运行";
 }
 
 function CrossingFramePlayer({ event }: { event: NormalCrossingEvent }) {

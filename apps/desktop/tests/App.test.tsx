@@ -123,6 +123,39 @@ describe("Millikan desktop app", () => {
     }
   });
 
+  it("opens a dedicated Normal inversion result page after three accepted q records", async () => {
+    const cleanupRect = await reachAcceptedNormalRecord();
+    async function acceptNextDroplet(x: number) {
+      await userEvent.click(screen.getByRole("button", { name: /下一颗油滴/ }));
+      await userEvent.click(await screen.findByRole("button", { name: /同一个视频/ }));
+      const overlay = document.querySelector(".normal-video-overlay");
+      if (!overlay) throw new Error("normal video overlay not found for inversion test");
+      fireEvent.mouseDown(overlay, { clientX: x, clientY: 130 });
+      fireEvent.mouseMove(overlay, { clientX: x + 36, clientY: 170 });
+      fireEvent.mouseUp(overlay, { clientX: x + 36, clientY: 170 });
+      await userEvent.click(screen.getByRole("button", { name: /确认框选并开始追踪/ }));
+      await userEvent.click(await screen.findByRole("button", { name: /C001/ }));
+      await userEvent.click(await screen.findByRole("button", { name: /同一颗油滴/ }));
+      await userEvent.click(await screen.findByRole("button", { name: "确认保留" }));
+      expect(await screen.findByRole("button", { name: /下一颗油滴/ })).toBeInTheDocument();
+    }
+    try {
+      await acceptNextDroplet(180);
+      await acceptNextDroplet(240);
+      await userEvent.click(await screen.findByRole("button", { name: /运行 Normal 盲反演/ }));
+      expect(await screen.findByLabelText("Normal 盲反演结果页")).toBeInTheDocument();
+      expect(screen.getAllByText("盲反演结果").length).toBeGreaterThan(0);
+      expect(screen.getByText("e_hat")).toBeInTheDocument();
+      expect(screen.getByText("sigma_e")).toBeInTheDocument();
+      expect(screen.getByText("候选解")).toBeInTheDocument();
+      expect(screen.getByText("整数分配与残差")).toBeInTheDocument();
+      expect(screen.getByText("归一化残差")).toBeInTheDocument();
+      expect(screen.queryByText(/模型胜出|quantized_favored|continuous_favored/)).toBeNull();
+    } finally {
+      cleanupRect();
+    }
+  });
+
   it("runs the demo analysis path and shows elementary-charge diagnostics", async () => {
     render(<App />);
 

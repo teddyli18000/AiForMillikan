@@ -327,11 +327,61 @@ export type NormalInversionResult = {
   status?: string;
   e_hat_C?: number | null;
   sigma_e_C?: number | null;
+  weighted_rms?: number | null;
+  chi2?: number | null;
+  num_used?: number;
   valid_q_count?: number;
+  min_required?: number;
+  search_interval_C?: [number, number] | number[];
+  sigma_floor_C?: number | null;
+  converged?: boolean;
+  boundary_hit?: boolean;
   quantized?: Record<string, unknown>;
   continuous?: Record<string, unknown>;
   comparison?: Record<string, unknown>;
-  assignments?: Array<Record<string, unknown>>;
+  assignments?: Array<{
+    record_id?: string;
+    q_C?: number;
+    sigma_q_C?: number;
+    sigma_eff_C?: number;
+    n?: number;
+    nearest_quantized_charge_C?: number;
+    residual_C?: number;
+    residual_sigma?: number;
+    [key: string]: unknown;
+  }>;
+  candidates?: Array<{
+    e_C?: number;
+    weighted_rms?: number;
+    chi2?: number;
+    converged?: boolean;
+    boundary_hit?: boolean;
+    integer_assignment?: number[];
+    residuals?: Array<Record<string, unknown>>;
+    [key: string]: unknown;
+  }>;
+  charts?: {
+    charge_distribution?: Array<{
+      q_C?: number;
+      sigma_q_C?: number;
+      n?: number;
+      nearest_C?: number;
+      [key: string]: unknown;
+    }>;
+    residuals?: Array<{
+      q_C?: number;
+      residual_sigma?: number;
+      n?: number;
+      record_id?: string;
+      [key: string]: unknown;
+    }>;
+    quantized_levels?: Array<{
+      n?: number;
+      charge_C?: number;
+      [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
+  };
   plots_data?: Record<string, unknown>;
   flags?: string[];
   [key: string]: unknown;

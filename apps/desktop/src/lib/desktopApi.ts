@@ -30,6 +30,71 @@ function createDemoApi(): DesktopApi {
     },
     inversion: null
   });
+  const demoNormalInversion = () => {
+    const accepted = normalRecords.filter((record) => record.valid && record.kept);
+    const records = accepted.length >= 3 ? accepted : [1, 2, 3].map((index) => ({
+      record_id: `demo-q-${index}`,
+      q_C: 1.602e-19 * index,
+      sigma_q_C: 0.08e-19,
+      valid: true,
+      kept: true
+    } as NormalRecord));
+    const eHat = 1.602e-19;
+    const assignments = records.map((record, index) => {
+      const q = Number(record.q_C ?? eHat * (index + 1));
+      const sigma = Number(record.sigma_q_C ?? 0.08e-19);
+      const n = Math.max(1, Math.round(q / eHat));
+      const nearest = n * eHat;
+      return {
+        record_id: record.record_id,
+        q_C: q,
+        sigma_q_C: sigma,
+        sigma_eff_C: Math.sqrt(sigma * sigma + (0.02e-19) ** 2),
+        n,
+        nearest_quantized_charge_C: nearest,
+        residual_C: q - nearest,
+        residual_sigma: (q - nearest) / sigma
+      };
+    });
+    return {
+      status: records.length === 3 ? "exploratory" : "reliable",
+      e_hat_C: eHat,
+      sigma_e_C: 0.035e-19,
+      weighted_rms: 0.42,
+      chi2: 0.53,
+      num_used: records.length,
+      valid_q_count: records.length,
+      search_interval_C: [1.35e-19, 1.9e-19],
+      sigma_floor_C: 0.02e-19,
+      converged: true,
+      boundary_hit: false,
+      assignments,
+      candidates: [
+        { e_C: eHat, weighted_rms: 0.42, chi2: 0.53, converged: true, boundary_hit: false, integer_assignment: assignments.map((row) => row.n) },
+        { e_C: 1.548e-19, weighted_rms: 1.31, chi2: 5.16, converged: true, boundary_hit: false, integer_assignment: assignments.map((row) => Math.max(1, row.n + (row.n > 2 ? 1 : 0))) },
+        { e_C: 1.711e-19, weighted_rms: 1.84, chi2: 10.15, converged: false, boundary_hit: false, integer_assignment: assignments.map((row) => Math.max(1, row.n - 1)) }
+      ],
+      charts: {
+        charge_distribution: assignments.map((row) => ({ q_C: row.q_C, sigma_q_C: row.sigma_q_C, n: row.n, nearest_C: row.nearest_quantized_charge_C })),
+        residuals: assignments.map((row) => ({ q_C: row.q_C, residual_sigma: row.residual_sigma, n: row.n, record_id: row.record_id })),
+        quantized_levels: Array.from({ length: Math.max(...assignments.map((row) => row.n)) + 1 }, (_, index) => ({
+          n: index + 1,
+          charge_C: (index + 1) * eHat
+        }))
+      },
+      plots_data: {
+        charge_distribution: assignments.map((row) => ({ q_C: row.q_C, sigma_q_C: row.sigma_q_C, n: row.n, nearest_C: row.nearest_quantized_charge_C })),
+        residuals: assignments.map((row) => ({ q_C: row.q_C, residual_sigma: row.residual_sigma, n: row.n, record_id: row.record_id })),
+        quantized_levels: Array.from({ length: Math.max(...assignments.map((row) => row.n)) + 1 }, (_, index) => ({
+          n: index + 1,
+          charge_C: (index + 1) * eHat
+        }))
+      },
+      quantized_alignment: { model: "integer_multiple_weighted_residual", weighted_rms: 0.42 },
+      comparison: { status: "not_computed", reason: "Normal v1 has no fitted continuous baseline." },
+      flags: records.length === 3 ? ["exploratory_small_sample"] : []
+    };
+  };
   return {
     openVideoDialog: async () => "raw_data/2.mp4",
     openRunDialog: async () => "runs/demo_millikan",
@@ -261,26 +326,17 @@ function createDemoApi(): DesktopApi {
           : null,
       session: demoNormalSession()
     }),
-    normalRunInversion: async () => ({
-      session_root: "runs/normal_demo/session",
-      inversion: {
-        status: "ok",
-        e_hat_C: 1.602e-19,
-        sigma_e_C: 0.04e-19,
-        valid_q_count: normalRecords.filter((record) => record.valid && record.kept).length,
-        comparison: { status: "not_computed" }
-      },
-      session: {
-        ...demoNormalSession(),
-        inversion: {
-          status: "ok",
-          e_hat_C: 1.602e-19,
-          sigma_e_C: 0.04e-19,
-          valid_q_count: normalRecords.filter((record) => record.valid && record.kept).length,
-          comparison: { status: "not_computed" }
+    normalRunInversion: async () => {
+      const inversion = demoNormalInversion();
+      return {
+        session_root: "runs/normal_demo/session",
+        inversion,
+        session: {
+          ...demoNormalSession(),
+          inversion
         }
-      }
-    }),
+      };
+    },
     normalExportSession: async () => ({ canceled: false, destination: "demo-normal-export" }),
     setModeFullscreen: async () => false,
     openPath: async () => undefined,

@@ -423,6 +423,11 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
     assert inverted["type"] == "result"
     assert inverted["payload"]["session"]["eligible_for_inversion"] is True
     assert inverted["payload"]["inversion"]["valid_q_count"] == 3
+    assert inverted["payload"]["inversion"]["e_hat_C"] > 0
+    assert inverted["payload"]["inversion"]["sigma_e_C"] > 0
+    assert len(inverted["payload"]["inversion"]["assignments"]) == 3
+    assert inverted["payload"]["inversion"]["plots_data"]["charge_distribution"]
+    assert inverted["payload"]["inversion"]["plots_data"]["residuals"]
     assert "quantized_favored" not in inverted["payload"]["inversion"].get("comparison", {})
     assert inverted["payload"]["inversion"]["candidates"]
     next_new_video = _send_worker(

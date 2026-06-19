@@ -1,6 +1,6 @@
 {
   "name": "millikan-ai-desktop",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "main": "dist-electron/main.js",
   "description": "Portable Electron desktop frontend for Millikan AI",

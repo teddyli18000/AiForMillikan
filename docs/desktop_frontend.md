@@ -166,3 +166,12 @@ must not draw a separate trajectory overlay on top of a scaled video.
 The session record list must be readable at narrow inspector widths. Long
 record IDs, q values, and status labels should occupy separate lines or columns
 that cannot overlap.
+
+After at least three accepted q records, clicking "运行 Normal 盲反演" must
+open a dedicated Normal inversion result stage rather than leaving the user on
+the per-drop results panel. This stage should make the final estimate visually
+obvious (`e_hat_C`, `sigma_e_C`, status, flags, used q count) and then show the
+evidence that produced it: candidate solutions, integer assignments, residuals,
+and quantized-alignment charts. The page should feel like a scientific result
+dashboard: information-dense but readable, with restrained controls and no
+model-victory wording until a real continuous baseline exists.

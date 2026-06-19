@@ -492,6 +492,25 @@ must be labeled exploratory. Until a real continuous baseline is defined and
 fitted, Normal must not output `quantized_favored`, `continuous_favored`, or any
 model-win claim. The UI may show residual and alignment plots only.
 
+### Normal Inversion Result Page
+
+`normal.runInversion` is not complete from a user-experience perspective until
+the renderer navigates to a dedicated Normal inversion result stage. The result
+stage must display the returned `e_hat_C`, `sigma_e_C`, used q count, `status`,
+`flags`, `weighted_rms`, `chi2`, search interval, candidate solutions, integer
+assignments, and residual rows. It must render chart data from
+`plots_data`/`charts` directly in the Normal UI:
+
+- observed `q_i` with `sigma_q_i` uncertainty
+- nearest `n_i * e_hat` levels
+- normalized residuals by accepted record
+- sorted local candidate solutions and convergence/boundary flags
+
+If the result is `insufficient_eligible_records`, the dedicated stage should
+show the blocker and the current accepted count instead of a blank panel. Normal
+must not reuse Experimental result components in a way that calls Experimental
+business logic or implies a continuous-model comparison that was not fitted.
+
 The underlying backend entry point remains the Python API:
 
 ```python
