@@ -25,9 +25,8 @@ inversion with visible evidence, not as an unreviewed fully automatic answer.
 
 For Normal real-video acceptance, use:
 
-```text
 [test.mp4](https://github.com/teddyli18000/AiForMillikan/releases/download/process/test.mp4)
-```
+
 
 This sample is a short 1920 x 1080, 30 fps video suitable for checking import,
 time-window editing, droplet selection, local tracking, and review UI behavior.
