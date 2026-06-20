@@ -28,7 +28,10 @@ def _fmt(value: Any) -> str:
         return ""
     if isinstance(value, float):
         if abs(value) >= 1e4 or (value != 0 and abs(value) < 1e-3):
-            return f"{value:.6e}"
+            exponent = int(math.floor(math.log10(abs(value))))
+            coefficient = value / (10**exponent)
+            superscript = str(exponent).translate(str.maketrans("-+0123456789", "⁻⁺⁰¹²³⁴⁵⁶⁷⁸⁹"))
+            return f"{coefficient:.6g} × 10{superscript}"
         return f"{value:.6g}"
     return str(value)
 

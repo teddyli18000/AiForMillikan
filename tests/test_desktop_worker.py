@@ -1,0 +1,684 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import cv2
+import numpy as np
+import pytest
+
+from millikan_ai.config import load_config, save_config
+from millikan_ai.normal.config import normal_config
+from millikan_ai.normal.grid import calibrate_grid
+from millikan_ai.normal.physics import compute_q, fit_zero_v_velocity
+
+
+def _fast_config() -> dict:
+    config = load_config("configs/default.yaml")
+    config["elementary"]["e_bootstrap_samples"] = 0
+    config["elementary"]["measurement_mc_samples"] = 0
+    config["elementary"]["null_simulation_samples"] = 0
+    config["physics"]["random_mc_samples"] = 30
+    config["segment"]["velocity_bootstrap_samples_quick"] = 0
+    return config
+
+
+def _make_synthetic_video(path: Path) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+    for idx in range(120):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        for y in [30, 70, 110, 150, 190]:
+            cv2.line(frame, (30, y), (230, y), (255, 255, 255), 2)
+        cv2.circle(frame, (90, int(50 + idx * 0.35)), 4, (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+
+def _make_normal_synthetic_video(path: Path) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+    for idx in range(120):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        for y in [30, 70, 110, 150, 190]:
+            cv2.line(frame, (24, y), (296, y), (190, 190, 190), 1)
+        cv2.circle(frame, (92, int(82 + idx * 0.24)), 5, (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+
+def _make_crossing_normal_video(path: Path) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+    for idx in range(120):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        for y in [30, 70, 110, 150, 190]:
+            cv2.line(frame, (24, y), (296, y), (190, 190, 190), 1)
+        cv2.circle(frame, (92, int(52 + idx * 0.5)), 5, (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+
+def _make_blue_grid_video(path: Path) -> None:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (320, 240))
+    for _idx in range(20):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        for y in [30, 60, 90, 120, 150, 180, 210]:
+            cv2.line(frame, (24, y), (296, y), (255, 150, 90), 2)
+        writer.write(frame)
+    writer.release()
+
+
+def _send_worker(message: dict) -> list[dict]:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path.cwd() / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run(
+        [sys.executable, "-m", "millikan_ai.desktop_worker"],
+        input=json.dumps(message, ensure_ascii=False) + "\n",
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+
+
+def test_desktop_worker_inspects_video(tmp_path: Path):
+    video = tmp_path / "synthetic.mp4"
+    _make_synthetic_video(video)
+
+    messages = _send_worker({"id": "inspect", "op": "video.inspect", "payload": {"videoPath": str(video)}})
+
+    assert messages[-1]["type"] == "result"
+    assert messages[-1]["payload"]["metadata"]["readable"] is True
+    assert messages[-1]["payload"]["metadata"]["frame_count"] == 120
+
+
+def test_normal_grid_detects_blue_screen_lines(tmp_path: Path):
+    video = tmp_path / "blue_grid.mp4"
+    _make_blue_grid_video(video)
+    cfg = normal_config({"grid": {"measurement_distance_m": 0.0015, "min_horizontal_coverage": 0.55}})
+
+    grid = calibrate_grid(str(video), cfg)
+
+    assert grid["valid"] is True
+    assert len(grid["grid_lines_y"]) >= 7
+    assert grid["second_line_y"] == 60
+    assert grid["penultimate_line_y"] == 180
+
+
+def test_normal_014_defaults_and_velocity_uncertainty_contract():
+    cfg = normal_config(
+        {
+            "grid": {"measurement_distance_m": 0.0015},
+            "fit": {"min_points": 4, "min_duration_s": 1.0, "min_displacement_px": 1.0, "min_r2": 0.9},
+        }
+    )
+
+    assert cfg["selection"]["before_zero_v_start_s"] == 0.5
+    assert cfg["selection"]["after_zero_v_start_s"] == 0.5
+    assert cfg["tracking"]["diameter"] == 5
+    assert cfg["tracking"]["minmass"] == 80.0
+    assert cfg["tracking"]["local_search_radius_px"] == 45.0
+    assert cfg["tracking"]["max_accept_distance_px"] == 30.0
+    assert cfg["tracking"]["memory_frames"] == 5
+    assert cfg["tracking"]["local_topn"] == 20
+    assert cfg["tracking"]["grid_reject_dilate_px"] == 0
+    assert cfg["tracking"]["grid_occlusion_radius_px"] == 0
+    assert cfg["tracking"]["skip_detection_on_grid"] is True
+    assert cfg["tracking"]["grid_mask_for_tracking_enabled"] is True
+    assert cfg["tracking"]["grid_removal_enabled"] is False
+    physics = cfg["physics"]
+    assert physics["gravity_m_s2"] == 9.79
+    assert physics["air_viscosity_Pa_s"] == 1.83e-5
+    assert physics["pressure_kPa"] == 101.325
+    assert physics["cunningham_b_kPa_m"] == 8.226e-6
+    assert "pressure_Pa" not in physics
+    assert "relative_uncertainty_floor" not in physics
+
+    legacy = normal_config({"physics": {"pressure_Pa": 101325.0, "cunningham_b_Pa_m": 8.226e-6, "relative_uncertainty_floor": 0.05}})
+    assert legacy["physics"]["pressure_kPa"] == 101.325
+    assert legacy["physics"]["cunningham_b_kPa_m"] == 8.226e-6
+    assert "pressure_Pa" not in legacy["physics"]
+
+    track_rows = []
+    y_values = [0.0, 1.001, 1.999, 3.001, 3.999, 5.001]
+    for frame, y in enumerate(y_values):
+        track_rows.append(
+            {
+                "source_frame": frame,
+                "x": 20.0,
+                "y": y,
+                "detected": True,
+                "state": "tracking",
+                "use_for_fit": True,
+            }
+        )
+    fit = fit_zero_v_velocity(track_rows, fps=1.0, scale_y_m_per_px=1e-6, cfg=cfg)
+    assert fit["valid"] is True
+    assert fit["sigma_v_m_s"] > 0
+    q = compute_q(fit, balance_voltage_V=239.0, cfg=cfg)
+    assert q["valid"] is True
+    assert q["sigma_q_C"] > 0
+    assert q["sigma_q_C"] / q["q_C"] < 0.05
+    assert [row["component"] for row in q["uncertainty_budget"]["included"]] == ["velocity_fit_random"]
+
+
+def test_desktop_worker_runs_analysis_and_loads_artifacts(tmp_path: Path):
+    video = tmp_path / "synthetic.mp4"
+    _make_synthetic_video(video)
+    config = _fast_config()
+    config["project"]["run_root"] = str(tmp_path / "runs")
+    config["roi"]["microscope_roi"] = [20, 20, 240, 200]
+    config["segment"]["stable_min_duration_s"] = 0.5
+    config["segment"]["min_valid_points"] = 10
+    config_path = tmp_path / "config.yaml"
+    save_config(config, config_path)
+    run_dir = tmp_path / "run"
+
+    messages = _send_worker(
+        {
+            "id": "run",
+            "op": "analysis.run",
+            "payload": {
+                "video_path": str(video),
+                "config_path": str(config_path),
+                "run_dir": str(run_dir),
+                "manual_platforms": [
+                    {"startFrame": 0, "endFrame": 59, "voltageV": 0.0, "source": "manual_ui"},
+                    {"startFrame": 60, "endFrame": 119, "voltageV": 200.0, "source": "manual_ui"},
+                ],
+            },
+        }
+    )
+
+    assert any(message["type"] == "progress" for message in messages)
+    result = messages[-1]
+    assert result["type"] == "result"
+    assert result["payload"]["validation_errors"] == []
+    assert result["payload"]["artifacts"]["manifest"]["schema_version"] == 1
+    assert result["payload"]["artifacts"]["plots_data"]["schema_version"] == 2
+
+    loaded = _send_worker({"id": "load", "op": "analysis.loadRun", "payload": {"runDir": str(run_dir)}})[-1]
+    assert loaded["payload"]["artifacts"]["run_dir"] == str(run_dir)
+
+
+def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path):
+    video = tmp_path / "normal_synthetic.mp4"
+    _make_normal_synthetic_video(video)
+    session_base = tmp_path / "normal_session"
+    overrides = {
+        "session": {"session_root": str(session_base), "run_root": str(tmp_path / "normal_runs")},
+        "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 3},
+        "tracking": {"minmass": 20, "memory_frames": 4, "grid_occlusion_radius_px": 1},
+        "fit": {"min_points": 8, "min_duration_s": 0.4, "min_displacement_px": 2.0, "min_r2": 0.2},
+    }
+
+    inspected = _send_worker(
+        {
+            "id": "inspect-normal",
+            "op": "normal.inspectVideo",
+            "payload": {"video_path": str(video)},
+        }
+    )[-1]
+    assert inspected["type"] == "result"
+    assert inspected["payload"]["metadata"]["readable"] is True
+
+    prepared_messages = _send_worker(
+        {
+            "id": "prepare",
+            "op": "normal.prepareVideo",
+            "payload": {"video_path": str(video), "config_overrides": overrides},
+        }
+    )
+    assert any(message["type"] == "progress" and message["payload"]["operation"] == "prepare_video" for message in prepared_messages)
+    prepared = prepared_messages[-1]
+    assert prepared["type"] == "result"
+    payload = prepared["payload"]
+    assert payload["metadata"]["readable"] is True
+    assert payload["grid"]["valid"] is True
+    assert payload["session"]["counts"]["total"] == 0
+    assert "config" in payload
+    session_root = Path(payload["session_root"])
+    assert session_root.parent == session_base
+
+    fresh = _send_worker({"id": "fresh-normal", "op": "normal.initialize", "payload": {"config_overrides": overrides}})[-1]
+    assert fresh["type"] == "result"
+    assert fresh["payload"]["session"]["session_id"] != payload["session"]["session_id"]
+    assert fresh["payload"]["session"]["counts"]["total"] == 0
+
+    for index in range(3):
+        prepared = _send_worker(
+            {
+                "id": f"prepare-{index}",
+                "op": "normal.prepareVideo",
+                "payload": {"video_path": str(video), "session_root": str(session_root), "config_overrides": overrides},
+            }
+        )[-1]
+        payload = prepared["payload"]
+        confirmed = _send_worker(
+            {
+                "id": f"confirm-{index}",
+                "op": "normal.confirmBoundary",
+                "payload": {
+                    "session_root": str(session_root),
+                    "boundary": {"zero_v_start_s": 0.1, "zero_v_end_s": 2.8, "source": "test_manual"},
+                },
+            }
+        )[-1]
+        assert confirmed["type"] == "result"
+        assert confirmed["payload"]["active_video"]["state"] == "boundary_confirmed"
+        assert confirmed["payload"]["active_video"]["boundary"]["selection_window"]["end_s"] <= 0.6
+
+        if index == 0:
+            out_of_range = _send_worker(
+                {
+                    "id": "select-out-of-range",
+                    "op": "normal.selectTarget",
+                    "payload": {
+                        "session_root": str(session_root),
+                        "balance_voltage_V": 239.0,
+                        "balance_confirmed": True,
+                        "target": {
+                            "target_frame": 90,
+                            "target_time_s": 3.0,
+                            "source_center": {"x": 92.0, "y": 83.0},
+                            "source_video_box": {"x": 78.0, "y": 69.0, "width": 28.0, "height": 28.0},
+                        },
+                        "parameter_overrides": overrides,
+                    },
+                }
+            )[-1]
+            assert out_of_range["type"] == "error"
+
+        selected = _send_worker(
+            {
+                "id": f"select-{index}",
+                "op": "normal.selectTarget",
+                "payload": {
+                    "session_root": str(session_root),
+                    "balance_voltage_V": 239.0,
+                    "balance_confirmed": True,
+                    "target": {
+                        "target_frame": 3,
+                        "target_time_s": 0.1,
+                        "source_center": {"x": 92.0, "y": 83.0},
+                        "source_video_box": {"x": 78.0, "y": 69.0, "width": 28.0, "height": 28.0},
+                    },
+                    "parameter_overrides": overrides,
+                },
+            }
+        )[-1]
+        assert selected["type"] == "result"
+        assert selected["payload"]["active_video"]["state"] == "target_selected"
+
+        measured = _send_worker(
+            {
+                "id": f"measure-{index}",
+                "op": "normal.saveMeasurement",
+                "payload": {
+                    "session_root": str(session_root),
+                    "config_overrides": overrides,
+                },
+            }
+        )[-1]
+        assert measured["type"] == "result"
+        record = measured["payload"]["record"]
+        assert measured["payload"]["session"]["active_video"]["state"] == "tracking"
+        assert record["valid"] is False
+        assert record["q_valid"] is True
+        assert record["q_C"] > 0
+        assert record["sigma_q_C"] > 0
+        trace = record["q"]["calculation_trace"]
+        assert trace["model"] == "balance_voltage_zero_v_fall"
+        assert trace["fit"]["slope_px_s"] == record["fit"]["slope_px_s"]
+        assert trace["fit"]["scale_y_m_per_px"] > 0
+        assert trace["physics"]["balance_voltage_V"] == pytest.approx(239.0)
+        assert trace["physics"]["radius_m"] == pytest.approx(record["radius_m"])
+        assert trace["result"]["q_C"] == pytest.approx(record["q_C"])
+        assert trace["result"]["sigma_q_C"] == pytest.approx(record["sigma_q_C"])
+        assert record["kept"] is False
+        assert record["track_review_frames"]
+        track_frame = record["track_review_frames"][0]
+        assert Path(track_frame["image_path"]).exists()
+        assert track_frame["image_url"].startswith("file:///")
+        assert track_frame["width"] == payload["metadata"]["width"]
+        assert track_frame["height"] == payload["metadata"]["height"]
+
+        blocked = _send_worker(
+            {
+                "id": f"blocked-accept-{index}",
+                "op": "normal.updateRecordSelection",
+                "payload": {"session_root": str(session_root), "record_id": record["record_id"], "kept": True},
+            }
+        )[-1]
+        if record["crossings"]:
+            assert blocked["type"] == "error"
+            for crossing in record["crossings"]:
+                review = _send_worker(
+                    {
+                        "id": f"prepare-crossing-{index}-{crossing['event_id']}",
+                        "op": "normal.prepareCrossingReview",
+                        "payload": {"session_root": str(session_root), "record_id": record["record_id"], "event_id": crossing["event_id"]},
+                    }
+                )[-1]
+                assert review["type"] == "result"
+                event = review["payload"]["event"]
+                assert Path(event["review_clip_path"]).exists()
+                assert event["review_frames"]
+                first_frame = event["review_frames"][0]
+                assert Path(first_frame["image_path"]).exists()
+                assert first_frame["image_url"].startswith("file:///")
+                assert event["review_clip_start_time_s"] <= first_frame["time_s"] <= event["review_clip_end_time_s"]
+                reviewed = _send_worker(
+                    {
+                        "id": f"review-crossing-{index}-{crossing['event_id']}",
+                        "op": "normal.reviewCrossing",
+                        "payload": {"session_root": str(session_root), "record_id": record["record_id"], "event_id": crossing["event_id"], "result": "same_drop"},
+                    }
+                )[-1]
+                assert reviewed["type"] == "result"
+                assert reviewed["payload"]["session"]["active_video"]["state"] == "tracking"
+
+        accepted = _send_worker(
+            {
+                "id": f"accept-{index}",
+                "op": "normal.updateRecordSelection",
+                "payload": {"session_root": str(session_root), "record_id": record["record_id"], "kept": True},
+            }
+        )[-1]
+        assert accepted["type"] == "result"
+        assert accepted["payload"]["active_video"]["state"] == "tracking"
+        accepted_record = [row for row in accepted["payload"]["records"] if row["record_id"] == record["record_id"]][0]
+        assert accepted_record["status"] == "accepted"
+        assert accepted_record["kept"] is True
+        if index == 0:
+            next_same = _send_worker(
+                {
+                    "id": "next-same-video",
+                    "op": "normal.startNextDroplet",
+                    "payload": {"session_root": str(session_root), "record_id": record["record_id"], "mode": "same_video"},
+                }
+            )[-1]
+            assert next_same["type"] == "result"
+            assert next_same["payload"]["active_video"]["state"] == "boundary_confirmed"
+            retry_select = _send_worker(
+                {
+                    "id": "select-second-drop-same-video",
+                    "op": "normal.selectTarget",
+                    "payload": {
+                        "session_root": str(session_root),
+                        "balance_voltage_V": 239.0,
+                        "balance_confirmed": True,
+                        "target": {
+                            "target_frame": 3,
+                            "target_time_s": 0.1,
+                            "source_center": {"x": 96.0, "y": 88.0},
+                            "source_video_box": {"x": 82.0, "y": 74.0, "width": 28.0, "height": 28.0},
+                        },
+                        "parameter_overrides": overrides,
+                    },
+                }
+            )[-1]
+            assert retry_select["type"] == "result"
+            assert retry_select["payload"]["active_video"]["state"] == "target_selected"
+
+    inverted = _send_worker(
+        {
+            "id": "invert",
+            "op": "normal.runInversion",
+            "payload": {"session_root": str(session_root), "config_overrides": overrides},
+        }
+    )[-1]
+    assert inverted["type"] == "result"
+    assert inverted["payload"]["session"]["eligible_for_inversion"] is True
+    assert inverted["payload"]["inversion"]["valid_q_count"] == 3
+    assert inverted["payload"]["inversion"]["e_hat_C"] > 0
+    assert inverted["payload"]["inversion"]["sigma_e_C"] > 0
+    comparison = inverted["payload"]["inversion"]["reference_comparison"]
+    assert comparison["reference_e_C"] == pytest.approx(1.602176634e-19)
+    assert comparison["used_for_inversion"] is False
+    assert comparison["relative_uncertainty_percent"] == pytest.approx(
+        100.0 * inverted["payload"]["inversion"]["sigma_e_C"] / inverted["payload"]["inversion"]["e_hat_C"]
+    )
+    assert comparison["percent_error_vs_reference"] == pytest.approx(
+        100.0 * abs(inverted["payload"]["inversion"]["e_hat_C"] - 1.602176634e-19) / 1.602176634e-19
+    )
+    assert len(inverted["payload"]["inversion"]["assignments"]) == 3
+    assert inverted["payload"]["inversion"]["plots_data"]["charge_distribution"]
+    assert inverted["payload"]["inversion"]["plots_data"]["residuals"]
+    assert "quantized_favored" not in inverted["payload"]["inversion"].get("comparison", {})
+    assert inverted["payload"]["inversion"]["candidates"]
+    next_new_video = _send_worker(
+        {
+            "id": "next-different-video-keeps-records",
+            "op": "normal.startNextDroplet",
+            "payload": {"session_root": str(session_root), "mode": "different_video"},
+        }
+    )[-1]
+    assert next_new_video["type"] == "result"
+    assert next_new_video["payload"]["active_video"] is None
+    assert next_new_video["payload"]["session"]["counts"]["kept_valid"] == 3
+
+
+def test_normal_confirm_boundary_seconds_override_stale_frames_and_window(tmp_path: Path):
+    video = tmp_path / "normal_boundary_restore.mp4"
+    _make_normal_synthetic_video(video)
+    session_base = tmp_path / "normal_boundary_session"
+    overrides = {
+        "session": {"session_root": str(session_base), "run_root": str(tmp_path / "normal_boundary_runs")},
+        "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 3},
+    }
+
+    prepared = _send_worker(
+        {
+            "id": "prepare-boundary-restore",
+            "op": "normal.prepareVideo",
+            "payload": {"video_path": str(video), "config_overrides": overrides},
+        }
+    )[-1]
+    assert prepared["type"] == "result"
+    session_root = prepared["payload"]["session_root"]
+    fps = prepared["payload"]["metadata"]["fps"]
+
+    confirmed = _send_worker(
+        {
+            "id": "confirm-stale-frame-boundary",
+            "op": "normal.confirmBoundary",
+            "payload": {
+                "session_root": str(session_root),
+                "boundary": {
+                    "zero_v_start_s": 2.0,
+                    "zero_v_end_s": 3.0,
+                    "zero_v_start_frame": 0,
+                    "zero_v_end_frame": 15,
+                    "selection_window": {"start_s": 0.0, "end_s": 0.5, "start_frame": 0, "end_frame": 15},
+                    "source": "test_user_adjusted_seconds",
+                },
+            },
+        }
+    )[-1]
+    assert confirmed["type"] == "result"
+    boundary = confirmed["payload"]["active_video"]["boundary"]
+    assert boundary["zero_v_start_frame"] == round(2.0 * fps)
+    assert boundary["zero_v_end_frame"] == round(3.0 * fps)
+    assert boundary["zero_v_start_s"] == boundary["zero_v_start_frame"] / fps
+    assert boundary["selection_window"]["start_s"] == (round(2.0 * fps) - round(0.5 * fps)) / fps
+    assert boundary["selection_window"]["end_s"] == (round(2.0 * fps) + round(0.5 * fps)) / fps
+    assert boundary["selection_window"]["start_s"] > 1.4
+
+    out_of_range = _send_worker(
+        {
+            "id": "select-before-confirmed-window",
+            "op": "normal.selectTarget",
+            "payload": {
+                "session_root": str(session_root),
+                "balance_voltage_V": 239.0,
+                "balance_confirmed": True,
+                "target": {
+                    "target_frame": 3,
+                    "target_time_s": 0.1,
+                    "source_center": {"x": 92.0, "y": 83.0},
+                    "source_video_box": {"x": 78.0, "y": 69.0, "width": 28.0, "height": 28.0},
+                },
+                "parameter_overrides": overrides,
+            },
+        }
+    )[-1]
+    assert out_of_range["type"] == "error"
+
+    selected = _send_worker(
+        {
+            "id": "select-confirmed-window-frame",
+            "op": "normal.selectTarget",
+            "payload": {
+                "session_root": str(session_root),
+                "balance_voltage_V": 239.0,
+                "balance_confirmed": True,
+                "target": {
+                    "target_frame": round(2.0 * fps),
+                    "target_time_s": 2.0,
+                    "source_center": {"x": 92.0, "y": 83.0},
+                    "source_video_box": {"x": 78.0, "y": 69.0, "width": 28.0, "height": 28.0},
+                },
+                "parameter_overrides": overrides,
+            },
+        }
+    )[-1]
+    assert selected["type"] == "result"
+    assert selected["payload"]["active_video"]["target"]["target_frame"] == round(2.0 * fps)
+
+
+def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Path):
+    video = tmp_path / "crossing_synthetic.mp4"
+    _make_crossing_normal_video(video)
+    session_base = tmp_path / "normal_crossing_session"
+    overrides = {
+        "session": {"session_root": str(session_base), "run_root": str(tmp_path / "normal_crossing_runs")},
+        "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 1},
+        "tracking": {"minmass": 20, "memory_frames": 4, "grid_occlusion_radius_px": 1},
+        "fit": {"min_points": 8, "min_duration_s": 0.4, "min_displacement_px": 2.0, "min_r2": 0.2},
+    }
+
+    prepared = _send_worker(
+        {
+            "id": "prepare-crossing-block",
+            "op": "normal.prepareVideo",
+            "payload": {"video_path": str(video), "config_overrides": overrides},
+        }
+    )[-1]
+    assert prepared["type"] == "result"
+    assert prepared["payload"]["grid"]["valid"] is True
+    session_root = Path(prepared["payload"]["session_root"])
+
+    confirmed = _send_worker(
+        {
+            "id": "confirm-crossing-block",
+            "op": "normal.confirmBoundary",
+            "payload": {
+                "session_root": str(session_root),
+                "boundary": {"zero_v_start_s": 0.0, "zero_v_end_s": 3.8, "source": "test_manual"},
+            },
+        }
+    )[-1]
+    assert confirmed["type"] == "result"
+
+    selected = _send_worker(
+        {
+            "id": "select-crossing-block",
+            "op": "normal.selectTarget",
+            "payload": {
+                "session_root": str(session_root),
+                "balance_voltage_V": 239.0,
+                "balance_confirmed": True,
+                "target": {
+                    "target_frame": 0,
+                    "target_time_s": 0.0,
+                    "source_center": {"x": 92.0, "y": 52.0},
+                    "source_video_box": {"x": 78.0, "y": 38.0, "width": 28.0, "height": 28.0},
+                },
+                "parameter_overrides": overrides,
+            },
+        }
+    )[-1]
+    assert selected["type"] == "result"
+
+    measured = _send_worker(
+        {
+            "id": "measure-crossing-block",
+            "op": "normal.saveMeasurement",
+            "payload": {"session_root": str(session_root), "config_overrides": overrides},
+        }
+    )[-1]
+    assert measured["type"] == "result"
+    record = measured["payload"]["record"]
+    assert measured["payload"]["session"]["active_video"]["state"] == "tracking"
+    assert record["crossings"], "synthetic crossing video should require human review"
+
+    crossing = record["crossings"][0]
+    review = _send_worker(
+        {
+            "id": "prepare-crossing-block-review",
+            "op": "normal.prepareCrossingReview",
+            "payload": {"session_root": str(session_root), "record_id": record["record_id"], "event_id": crossing["event_id"]},
+        }
+    )[-1]
+    assert review["type"] == "result"
+    event = review["payload"]["event"]
+    assert Path(event["review_clip_path"]).exists()
+    assert event["review_frames"]
+    assert all(Path(frame["image_path"]).exists() for frame in event["review_frames"])
+    assert min(frame["time_s"] for frame in event["review_frames"]) >= event["review_clip_start_time_s"]
+    assert max(frame["time_s"] for frame in event["review_frames"]) <= event["review_clip_end_time_s"]
+
+    rejected = _send_worker(
+        {
+            "id": "reject-crossing-block",
+            "op": "normal.reviewCrossing",
+            "payload": {
+                "session_root": str(session_root),
+                "record_id": record["record_id"],
+                "event_id": crossing["event_id"],
+                "result": "different_drop",
+            },
+        }
+    )[-1]
+    assert rejected["type"] == "result"
+    assert rejected["payload"]["record"]["status"] == "rejected_crossing_identity"
+    assert rejected["payload"]["session"]["active_video"]["state"] == "boundary_confirmed"
+    assert rejected["payload"]["session"]["active_video"]["path"] == str(video)
+    assert rejected["payload"]["session"]["active_video"]["metadata"]["readable"] is True
+    assert rejected["payload"]["session"]["active_video"]["boundary"] == record["time_window"]
+    assert rejected["payload"]["session"]["active_video"]["adjustment"]["record_id"] == record["record_id"]
+
+    reconfirmed = _send_worker(
+        {
+            "id": "reconfirm-restored-boundary",
+            "op": "normal.confirmBoundary",
+            "payload": {
+                "session_root": str(session_root),
+                "boundary": {"zero_v_start_s": 0.1, "zero_v_end_s": 3.6, "source": "test_adjusted"},
+            },
+        }
+    )[-1]
+    assert reconfirmed["type"] == "result"
+    assert reconfirmed["payload"]["active_video"]["state"] == "boundary_confirmed"
+    assert reconfirmed["payload"]["active_video"]["boundary"]["source"] == "test_adjusted"
+
+    blocked_accept = _send_worker(
+        {
+            "id": "accept-rejected-crossing",
+            "op": "normal.updateRecordSelection",
+            "payload": {"session_root": str(session_root), "record_id": record["record_id"], "kept": True},
+        }
+    )[-1]
+    assert blocked_accept["type"] == "error"
+
+    inverted = _send_worker(
+        {
+            "id": "invert-rejected-crossing",
+            "op": "normal.runInversion",
+            "payload": {"session_root": str(session_root), "config_overrides": overrides},
+        }
+    )[-1]
+    assert inverted["type"] == "result"
+    assert inverted["payload"]["inversion"]["status"] == "insufficient_eligible_records"

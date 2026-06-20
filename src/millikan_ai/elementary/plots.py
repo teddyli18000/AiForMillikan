@@ -39,7 +39,7 @@ def build_elementary_plots_data(elementary: dict[str, Any], drop_results: list[d
         "status": status,
         "reason": reason,
         "units": {
-            "charge_primary": "1e-19 C",
+            "charge_primary": "10⁻¹⁹ C",
             "charge_si": "C",
             "density": "relative_density",
             "residual": "C",
@@ -65,7 +65,7 @@ def build_elementary_plots_data(elementary: dict[str, Any], drop_results: list[d
                 "chart_type": "distribution_overlay",
                 "title": "Charge distribution and model fit",
                 "description": "Observed droplet charges with quantized and continuous predictive densities.",
-                "units": {"x": "C", "x_display": "1e-19 C", "density": "relative_density"},
+                "units": {"x": "C", "x_display": "10⁻¹⁹ C", "density": "relative_density"},
                 "recommended_rendering": "rug_or_scatter_with_horizontal_error_bars_plus_density_curves",
                 "x_axis": _axis("charge", x_range),
                 "observations": observations,
@@ -79,7 +79,7 @@ def build_elementary_plots_data(elementary: dict[str, Any], drop_results: list[d
                 "chart_type": "scatter_with_error_bars",
                 "title": "Integer assignment comb",
                 "description": "Each droplet charge compared with the nearest integer multiple of the bounded candidate.",
-                "units": {"x": "integer n", "y": "C", "y_display": "1e-19 C"},
+                "units": {"x": "integer n", "y": "C", "y_display": "10⁻¹⁹ C"},
                 "recommended_rendering": "scatter_with_vertical_error_bars_and_reference_levels",
                 "points": _integer_assignment_points(observations),
                 "reference_levels": quantized_levels,
@@ -245,7 +245,7 @@ def _axis(name: str, x_range: list[float] | None) -> dict[str, Any]:
     return {
         "field": name,
         "unit": "C",
-        "display_unit": "1e-19 C",
+        "display_unit": "10⁻¹⁹ C",
         "recommended_range_C": x_range,
         "recommended_range_1e_minus_19_C": [_scale_charge(value) for value in x_range] if x_range else None,
     }

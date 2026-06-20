@@ -4,7 +4,574 @@ This document defines the current backend contract for the future portable deskt
 
 ## CLI/API Entry Point
 
-The preferred backend entry point for the future desktop app is the Python API:
+The Electron desktop app talks to a Python worker over newline-delimited JSON.
+The worker is implemented in `millikan_ai.desktop_worker` and wraps the same
+public APIs described below. In development Electron starts
+`.venv\Scripts\python -m millikan_ai.desktop_worker`; production packages a
+PyInstaller onefile worker beside the Electron app.
+
+Supported worker operations:
+
+- `video.inspect`: inspect video metadata and optional diagnostic frame data.
+- `platform.detectBoundaries`: suggest voltage-platform frame ranges from visual display changes; voltage values still come from the user.
+- `analysis.run`: run the backend with explicit manual voltage platforms.
+- `analysis.runAuto`: run with auto-detected boundaries plus user-supplied voltage values.
+- `analysis.loadRun`: load `run_manifest.json` and frontend-facing artifacts for an existing run.
+- `analysis.validate`: validate a run directory and return checklist/report artifacts.
+- `downstream.run`: run standalone downstream physics/e analysis from accepted trajectories.
+- `report.export`: copy Markdown, CSV/JSON, overlay, plots data, and a reproducibility manifest into a user-selected package folder or zip.
+
+Normal-mode operations use a separate `normal.*` namespace and must not call the
+Experimental `analysis.*` flow as a shortcut. Current Normal operations are:
+
+- `normal.initialize`: create a fresh transient Normal session for this app
+  launch and return backend defaults. It must not auto-load records from a
+  previous launch unless an explicit `session_root` is provided by an in-flight
+  operation from the same session.
+- `normal.inspectVideo`: inspect a video and return metadata plus a playable
+  file URL. It must not create or modify a session, detect `0 V`, detect grid
+  lines, track, or calculate q.
+- `normal.prepareVideo`: after the user clicks start, suggest `0V_start_s` and
+  `0V_end_s`, detect grid lines, update the active video to `video_prepared`,
+  and emit Normal-only progress events.
+- `normal.confirmBoundary`: persist the user-confirmed second-based `0 V`
+  window and advance the active video to `boundary_confirmed`.
+- `normal.selectTarget`: persist balance-voltage confirmation, sparse
+  per-record parameter overrides, and the user rectangle selection; advance to
+  `target_selected`.
+- `normal.saveMeasurement`: from `target_selected`, run the Normal-only local
+  Trackpy single-drop tracker from the actual selected frame, fit the `0 V`
+  falling velocity, compute `q_i ± sigma_q_i`, and create a record in
+  `pending_crossing_review`, `pending_user_confirmation`, or `diagnostic`.
+- `normal.prepareCrossingReview`: generate and cache one local magnified
+  crossing clip on demand.
+- `normal.reviewCrossing`: save `same_drop` or `different_drop`. Unreviewed
+  crossings block acceptance; `different_drop` moves the record to
+  `rejected_crossing_identity`.
+- `normal.updateRecordSelection`: user-confirm or exclude a q record.
+  `kept=true` is allowed only from `pending_user_confirmation`; it moves the
+  record to `accepted`.
+- `normal.startNextDroplet`: after a record is accepted or excluded, prepare
+  the transient session for another droplet. `mode=same_video` resets the active
+  video to `boundary_confirmed` using the current confirmed video context.
+  `mode=different_video` clears `active_video` but keeps accepted records in the
+  current session.
+- `normal.runInversion`: run the Normal-only weighted integer residual grid
+  search over accepted q records.
+- `normal.exportSession`: export the Normal session report, q table, inversion
+  JSON, and review artifacts.
+
+Experimental/current-backend operations remain available for the Experimental
+mode only. The renderer must not mix Normal session records into Experimental
+run manifests or feed Experimental candidate tracks into Normal inversion.
+
+The renderer must not read arbitrary files directly. It should use Electron IPC
+for file dialogs, run loading, artifact reads, PDF generation, and export.
+Backend output files remain internal run artifacts for reproducibility, while
+the user-facing report is rendered in the app. The UI may offer an export action
+that saves PDF/Markdown plus selected machine-readable files to a chosen path.
+
+## Normal Mode Contract
+
+Normal is the main recommended workflow for the physics-themed experiment. It is
+not a fully automatic video-to-e pipeline. The app supplies AI assistance and
+blind inversion, while the user confirms the physical measurements that are
+ambiguous in real videos.
+
+### Normal Session
+
+A Normal session is transient and starts fresh on every application launch.
+Within one launch it may contain q records from multiple videos, because the
+experiment needs several independent droplets and a single short video may not
+contain enough usable measurements. Long-term persistence is not implicit:
+records are durable only when the user explicitly exports the session.
+The Electron shell owns cleanup for implicit transient sessions created during
+the launch: on application exit it must delete those tracked session roots so
+unexported cache/session directories do not survive as future experiments.
+
+Session-level fields:
+
+```json
+{
+  "schema_version": 1,
+  "session_id": "normal_...",
+  "created_at": "...",
+  "updated_at": "...",
+  "transient": true,
+  "records": [],
+  "counts": {
+    "total": 0,
+    "valid": 0,
+    "kept_valid": 0
+  },
+  "eligible_for_inversion": false,
+  "inversion": null
+}
+```
+
+`eligible_for_inversion` is true only when at least three kept records have
+`status=accepted`, finite positive `q_C`, finite positive `sigma_q_C`, and no
+unreviewed or rejected crossing identity.
+
+Normal state is split but must stay consistent:
+
+- frontend `video_imported` is local UI state after a pure
+  `normal.inspectVideo`; the backend session is not mutated by inspect.
+- backend `active_video.state` owns video-level states through tracking setup:
+  `video_prepared`, `boundary_confirmed`, `target_selected`, `tracking`.
+- record `status` owns post-tracking outcomes: `pending_crossing_review`,
+  `pending_user_confirmation`, `accepted`, `diagnostic`,
+  `rejected_crossing_identity`, `rejected_by_user`.
+
+Backend code must never copy a record status into `active_video.state`.
+After `normal.saveMeasurement`, `normal.reviewCrossing`, or
+`normal.updateRecordSelection`, the active video remains in a video-level state
+unless a rejected record is restored for adjustment. Adjustment restore sets
+`active_video.state=boundary_confirmed` and carries the record's original video,
+metadata, URL, grid, boundary, target, balance voltage, and parameter overrides.
+
+The combined user-visible state machine is:
+
+```text
+video_imported
+→ video_prepared
+→ boundary_confirmed
+→ target_selected
+→ tracking
+→ pending_crossing_review
+→ pending_user_confirmation
+→ accepted
+```
+
+Exceptional states are:
+
+```text
+diagnostic
+rejected_crossing_identity
+rejected_by_user
+```
+
+Worker operations must check predecessor state. The frontend may disable
+buttons for usability, but the worker remains the authority.
+
+Rejected or diagnostic records remain in the transient session for adjustment
+and evidence. They are never eligible for inversion. When the user chooses
+"return/adjust", the UI restores the record's previous video, preview URL,
+metadata, grid, boundary, selection time, target rectangle, balance voltage,
+and parameter overrides, then returns to the boundary-confirmation stage so the
+user can adjust `0V_start_s`/`0V_end_s` before selecting and retracking. Retrying
+creates a new record linked to the previous record with `retry_of_record_id`;
+the old record remains immutable evidence.
+
+### Normal Video Preparation
+
+`normal.inspectVideo` returns only video metadata and a playable file URL.
+
+`normal.prepareVideo` returns:
+
+- video metadata: path, fps, frame count, width, height, duration in seconds
+- suggested `0V_start_s` and `0V_end_s`
+- equivalent frame indices for reproducible artifacts
+- detected horizontal grid lines
+- effective measurement region from the second line to the penultimate line
+- `scale_y_m_per_px`
+- warnings/flags when voltage-operation or grid detection confidence is low
+
+Normal progress events are separate from Experimental progress:
+
+```json
+{
+  "request_id": "req_...",
+  "operation": "prepare_video",
+  "stage": "sample_voltage_region",
+  "label": "正在采样电压显示区域",
+  "current": 36,
+  "total": 120,
+  "unit": "frames",
+  "fraction": 0.3,
+  "indeterminate": false
+}
+```
+
+`fraction` is present only when it is derived from real `current / total`.
+Unquantified stages must set `indeterminate=true`.
+
+All user-facing time controls in Normal use seconds. The UI should offer coarse
+`±1 s` and fine `±0.1 s` nudges for both `0V_start_s` and `0V_end_s`. The UI may
+display frame numbers as secondary provenance, not as the primary editing unit.
+
+After boundary confirmation, target selection is limited to a small window near
+the user-confirmed `0V_start_s`. The window is centered on the value confirmed
+by the user, not the original auto suggestion and not the beginning of the
+video:
+
+```json
+{
+  "selection_window": {
+    "start_s": "max(0, confirmed_0V_start_s - 0.5)",
+    "end_s": "min(video_duration_s, confirmed_0V_start_s + 0.5)",
+    "source": "normal_v1_default"
+  }
+}
+```
+
+The frontend must clamp `selection_time_s` to this range and show the range to
+the user. The backend must reject target frames outside the same range.
+Tracking must start from the actual selected frame, never from an earlier
+`0V_start_s` frame with coordinates taken from a later selection frame.
+
+The main video player is the selection-frame preview. When the UI enters target
+selection, it must pause the main video and seek to `selection_time_s`, which
+defaults to the backend-confirmed `zero_v_start_s`. The `selection_time_s`
+input, `±1 s` / `±0.1 s` nudges, scrubber, displayed video frame, and submitted
+`target_frame` must stay synchronized. A separate screenshot preview is not a
+replacement for this contract.
+
+If the user modifies `0V_start_s` or `0V_end_s`, any stale
+`selection_window` or frame index fields carried by an older boundary object
+must be discarded before confirmation. `normal.confirmBoundary` is a
+second-based user-confirmation API: if a client accidentally sends both seconds
+and stale frame indices, seconds are authoritative. The worker recomputes frame
+indices and the selection window from the normalized, user-confirmed boundary.
+
+Normal stages are reversible. The UI must expose explicit previous-stage
+actions instead of relying only on a sidebar. Returning to a stage restores the
+last user-confirmed state for that stage. If the user changes an upstream
+dependency, downstream state is invalidated as follows:
+
+- boundary changes invalidate target, tracking, crossing review, q candidate,
+  and inversion state for the in-progress measurement
+- target time or rectangle changes invalidate tracking, crossing review, q
+  candidate, and inversion state for the in-progress measurement
+- crossing review changes recompute whether the record may advance to user
+  confirmation
+- accepted historical records are immutable evidence unless the user explicitly
+  excludes them; retrying creates a new `retry_of_record_id`
+
+Return/adjust restoration must use the relevant record or in-progress
+measurement snapshot. `active_video.adjustment` may override record fields only
+when its `record_id` matches the record being adjusted; otherwise the frontend
+must ignore it to avoid restoring an unrelated or initial boundary.
+
+### Normal Measurement Record
+
+Each saved Normal record represents one user-reviewed droplet measurement:
+
+```json
+{
+  "record_id": "rec_...",
+  "video_path": "...",
+  "video_sha256_16": "...",
+  "balance_voltage_V": 240.0,
+  "time_window": {
+    "zero_v_start_s": 1.8,
+    "zero_v_end_s": 4.7,
+    "zero_v_start_frame": 54,
+    "zero_v_end_frame": 141
+  },
+  "target": {
+    "target_time_s": 1.5,
+    "selection_window": {"start_s": 0.8, "end_s": 2.3},
+    "source_center": {"x": 430.0, "y": 220.0},
+    "source_video_box": {"x": 424.0, "y": 214.0, "width": 12.0, "height": 12.0}
+  },
+  "parameter_overrides": {},
+  "grid": {},
+  "tracking": {},
+  "crossing_events": [],
+  "q": {
+    "valid": true,
+    "q_C": 6.4e-19,
+    "sigma_q_C": 4.0e-20,
+    "radius_m": 8.0e-7,
+    "flags": []
+  },
+  "status": "pending_user_confirmation",
+  "kept": false
+}
+```
+
+The record must keep enough provenance to reproduce the q calculation: the
+video identity, selected droplet position, edited `0 V` window, grid scale,
+physical constants or overrides, track rows, velocity fit, and q uncertainty.
+It should also keep `retry_of_record_id` when it was created from a previous
+rejected/diagnostic record's adjustment path.
+
+### Normal Tracking And Crossing Review
+
+Normal tracks one selected droplet at a time. The algorithm must be copied or
+reimplemented inside this repository from the teammate local Trackpy
+single-drop tracker at `C:\Users\Teddy\Desktop\追踪`; do not import that external
+project.
+
+The Normal v1 tracking parameters are locked to the teammate implementation
+unless a later user-approved plan changes them:
+
+```json
+{
+  "diameter": 5,
+  "minmass": 80,
+  "local_search_radius": 45,
+  "max_accept_distance": 30,
+  "single_memory": 5,
+  "local_topn": 20,
+  "grid_reject_dilate_px": 0,
+  "grid_occlusion_radius": 0,
+  "skip_detection_on_grid": true,
+  "grid_mask_for_tracking_enabled": true,
+  "grid_removal_enabled": false
+}
+```
+
+The tracker should output per-frame rows with at least:
+
+```csv
+frame_idx,time_s,x_px,y_px,pred_x_px,pred_y_px,detected,missed_count,blocked_by_grid,mass,state,reason
+```
+
+When the predicted or measured droplet enters a grid-line neighborhood, or when
+the track is missing around a grid line, the backend should create a clickable
+`crossing_event`:
+
+```json
+{
+  "id": "crossing_001",
+  "start_time_s": 2.1,
+  "end_time_s": 2.4,
+  "review_start_time_s": 1.1,
+  "review_end_time_s": 3.4,
+  "center_x_px": 430.0,
+  "center_y_px": 512.0,
+  "kind": "grid_crossing_or_reacquire"
+}
+```
+
+The UI should play a local magnified review of roughly one second before and
+after the crossing. If the video is too short or the crossing is near the
+beginning/end, clip the review window to valid video bounds instead of failing.
+The review is generated only when the user opens that crossing review.
+
+`normal.prepareCrossingReview` returns the current record, the selected event,
+and a renderer-playable frame sequence. Existing clip paths may remain as
+export artifacts, but the desktop UI must not depend on Chromium being able to
+decode the generated MP4:
+
+```json
+{
+  "event_id": "crossing_001",
+  "review_clip_path": ".../crossing_001.mp4",
+  "review_clip_url": "file:///.../crossing_001.mp4",
+  "review_frames": [
+    {
+      "frame_index": 88,
+      "time_s": 2.933,
+      "image_path": ".../crossing_001_frames/frame_0000.jpg",
+      "image_url": "file:///.../crossing_001_frames/frame_0000.jpg",
+      "source_video_box": {"x": 382, "y": 464, "width": 96, "height": 96}
+    }
+  ],
+  "review_clip_start_time_s": 2.0,
+  "review_clip_end_time_s": 4.0
+}
+```
+
+The frame images must be generated from backend crop/track data with the same
+identity evidence as the review clip. If the frame sequence cannot be generated,
+the UI must show an explicit error instead of a black or empty player.
+
+Review results are limited to:
+
+```text
+same_drop
+different_drop
+```
+
+All crossings must be reviewed as `same_drop` before a q record can become
+`accepted`. Any `different_drop` result permanently blocks that record from
+inversion unless the user reselects and retracks.
+
+The main record review video must be generated from backend track rows and must
+show the teammate overlay style: green circle plus `target`, yellow circle plus
+`missing`, and a blue trajectory line. The frontend must not draw or infer
+target/missing/trajectory positions that are absent from the backend record.
+
+For packaged desktop review, each record should also expose whole-frame
+`track_review_frames` so the renderer can show the full tracking process without
+depending on MP4 codec support:
+
+```json
+{
+  "track_review_frames": [
+    {
+      "frame_index": 92,
+      "time_s": 3.067,
+      "image_path": ".../track_review_frames/frame_0004.jpg",
+      "image_url": "file:///.../track_review_frames/frame_0004.jpg",
+      "width": 1920,
+      "height": 1080
+    }
+  ]
+}
+```
+
+These frames are full original-video frames with the backend-drawn target,
+missing, trajectory line, pixel axes, and current frame/time text. The frontend
+plays the frames as evidence and must not rescale separate overlays onto the
+video.
+
+### Normal Physical Parameters
+
+Balance voltage is required for each measurement. The following parameters
+default from config and may be overridden in a collapsed advanced panel for the
+current measurement only:
+
+- plate distance
+- grid measurement distance
+- air viscosity or temperature-derived viscosity settings
+- pressure in `kPa`
+- oil density
+- Cunningham correction constant
+- uncertainty settings for the current q estimate
+
+Normal records must store the effective parameters actually used. Parameter
+overrides are not global config changes unless a future explicit "save as
+default" action is added.
+
+Normal default physics parameters are backend-owned:
+
+```json
+{
+  "gravity_m_s2": 9.79,
+  "air_viscosity_Pa_s": 1.83e-5,
+  "pressure_kPa": 101.325,
+  "cunningham_b_kPa_m": 8.226e-6
+}
+```
+
+The frontend must display values returned by `normal.initialize` and must send
+only fields the user actually changed. It must not maintain another set of
+silent physical defaults. Legacy `pressure_Pa` or `cunningham_b_Pa_m` inputs may
+be accepted at worker boundaries only for conversion to the Normal kPa
+contract; new records should persist `pressure_kPa` and
+`cunningham_b_kPa_m`.
+
+For Normal v1, q uncertainty is limited to the random velocity-fit contribution
+unless a source is explicitly documented in config. The velocity fit uses
+linear regression on `y(t)`:
+
+```text
+sigma_s^2 = SSR / (N - 2) / sum((t_i - mean(t))^2)
+sigma_v = scale_y_m_per_px * sigma_s
+```
+
+`sigma_q_C` is then propagated through the nonlinear `q(v)` relation using the
+local logarithmic sensitivity. The old empirical RMSE/R2 expression and a
+q-level `5%` floor must not be used for `sigma_q_C`. If a finite positive
+`sigma_v` or propagated `sigma_q_C` cannot be computed, the record is
+diagnostic and ineligible for inversion. Inversion may still add its own
+`sigma_floor_C` to prevent infinite weights; that floor is not written back to
+the q record.
+
+### Normal Inversion And Visualization
+
+After at least three accepted q records exist, `normal.runInversion` runs the
+Normal-only weighted integer residual grid search. It uses each record's
+`q_C` and `sigma_q_C`, applies `sigma_eff_i^2 = sigma_q_i^2 + sigma_floor^2`,
+assigns integer multiples, re-estimates `e` with fixed integer assignments,
+iterates until the assignment vector stabilizes or reaches the iteration cap,
+deduplicates identical assignment vectors, reports sorted candidate solutions,
+and exposes chart data showing:
+
+- observed q values with uncertainty
+- nearest `n * e_hat` levels
+- residuals normalized by `sigma_q_C`
+- quantized alignment diagnostics
+
+Normal inversion is a teaching and evidence tool. With exactly three records it
+must be labeled exploratory. Until a real continuous baseline is defined and
+fitted, Normal must not output `quantized_favored`, `continuous_favored`, or any
+model-win claim. The UI may show residual and alignment plots only.
+
+### Normal Inversion Result Page
+
+`normal.runInversion` is not complete from a user-experience perspective until
+the renderer navigates to a dedicated Normal inversion result stage. The result
+stage must display the returned `e_hat_C`, `sigma_e_C`, used q count, `status`,
+`flags`, `weighted_rms`, `chi2`, search interval, candidate solutions, integer
+assignments, and residual rows. It must render chart data from
+`plots_data`/`charts` directly in the Normal UI:
+
+- observed `q_i` with `sigma_q_i` uncertainty
+- nearest `n_i * e_hat` levels
+- normalized residuals by accepted record
+- sorted local candidate solutions and convergence/boundary flags
+
+If the result is `insufficient_eligible_records`, the dedicated stage should
+show the blocker and the current accepted count instead of a blank panel. Normal
+must not reuse Experimental result components in a way that calls Experimental
+business logic or implies a continuous-model comparison that was not fitted.
+
+For a successful inversion, the payload also includes:
+
+```json
+{
+  "reference_comparison": {
+    "reference_e_C": 1.602176634e-19,
+    "reference_name": "SI defining constant",
+    "relative_uncertainty_percent": 1.42,
+    "percent_error_vs_reference": 9.50
+  }
+}
+```
+
+`relative_uncertainty_percent` is `100 * sigma_e_C / e_hat_C`.
+`percent_error_vs_reference` is
+`100 * abs(e_hat_C - reference_e_C) / reference_e_C`. These are reporting
+diagnostics only. The fixed reference value must not enter the blind search,
+candidate ordering, assignment iteration, or reliability decision.
+
+All renderer-facing scientific notation must use typographic powers such as
+`1.602 × 10⁻¹⁹ C`. The UI must not display raw `e` notation. Machine JSON and
+CSV retain numeric SI values and may naturally serialize using exponent
+notation.
+
+### Normal q Calculation Trace
+
+A valid Normal q result includes a renderer-neutral `calculation_trace`.
+It records the actual backend inputs and intermediate values used by the
+calculation:
+
+```json
+{
+  "calculation_trace": {
+    "model": "balance_voltage_zero_v_fall",
+    "fit": {
+      "slope_px_s": 12.4,
+      "slope_sigma_px_s": 0.3,
+      "scale_y_m_per_px": 0.000012,
+      "velocity_m_s": 0.0001488,
+      "sigma_v_m_s": 0.0000036
+    },
+    "physics": {
+      "balance_voltage_V": 297.0,
+      "cunningham_length_m": 8.12e-8,
+      "radius_m": 1.09e-6,
+      "eta_eff_Pa_s": 1.70e-5,
+      "q_velocity_sensitivity": 1.55
+    },
+    "result": {
+      "q_C": 8.77e-19,
+      "sigma_q_C": 1.72e-20
+    }
+  }
+}
+```
+
+The Stage 5 formula flow consumes this trace. The frontend may render formulas
+and format units, but it must not reconstruct authoritative physics results
+from partial client state.
+
+The underlying backend entry point remains the Python API:
 
 ```python
 from millikan_ai.api import AnalysisRequest, ManualPlatformInput, analyze_video

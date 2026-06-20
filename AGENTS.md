@@ -2,20 +2,37 @@
 
 ## Project Context
 
-This project analyzes Millikan oil drop experiment videos. The current backend is a Python package with a CLI MVP that should remain suitable for later PySide6/Qt desktop integration.
+This project analyzes Millikan oil drop experiment videos. The current desktop direction is an Electron + React frontend talking to a project-local Python worker. The product direction is split into two explicit modes:
+
+- `Normal`: the mainline workflow. It is a human-in-the-loop balance-voltage + `0 V` falling measurement mode. The app assists with video inspection, `0 V` interval suggestions, grid detection, single-drop local tracking, crossing review, q calculation, session records, and blind elementary-charge inversion.
+- `Experimental`: the existing automatic multi-drop / multi-platform backend and UI path. It is kept as an experimental half-finished route and must not drive Normal design decisions.
+
+For the physics-themed experiment, the AI value proposition is intelligent assistance and blind inversion with inspectable evidence, not an unreviewed fully automatic answer.
 
 ## Module Boundaries
 
 - `src/millikan_ai/video/`: OpenCV video metadata, frame sampling, and diagnostic frames.
-- `src/millikan_ai/api.py`: public backend API for CLI and future PySide6/Qt frontend integration.
+- `src/millikan_ai/api.py`: public backend API for CLI and the existing Experimental/current backend integration.
 - `src/millikan_ai/calibration/`: screen/ROI/grid calibration and physical scale estimation.
 - `src/millikan_ai/tracking/`: Trackpy-based local single-drop tracking, static/grid-calibration mask handling, adaptive multi-drop seed scheduling, segment cutoffs, deduplication, and overlays. Older Kalman/LK fusion helpers may remain as tested utilities but are not the main tracking backend.
 - `src/millikan_ai/quality/`: deterministic runtime quality adapter; training remains under `training_quality_filter/`.
 - `src/millikan_ai/segments/`: voltage platform segmentation and terminal velocity fitting.
 - `src/millikan_ai/physics/`: physics-based single-drop charge inversion.
 - `src/millikan_ai/elementary/`: non-ML elementary charge estimation from computed drop results.
+- `src/millikan_ai/normal/`: Normal-mode backend. This module owns the balance-voltage + `0 V` falling workflow, copied/reimplemented single-drop local tracking, Normal-only q records, transient per-launch Normal sessions, crossing-review artifacts, and Normal-only weighted integer residual inversion.
 - `src/millikan_ai/downstream.py`: standalone scientific downstream API for already accepted trajectories, voltage platforms, calibration scale, and physical config. It must not require a video path, tracker, candidate generation, or overlays.
 - `training_quality_filter/`: future ML/unsupervised trajectory quality filtering subsystem. Do not implement ML filtering in the main backend.
+
+## Normal / Experimental Separation
+
+- Normal and Experimental must stay separated in UI state, worker operations, backend modules, session/output contracts, and tests.
+- Normal must not import Experimental business logic from `millikan_ai.api`, `pipeline`, `tracking`, `segments`, `physics`, `elementary`, or `downstream` when that logic encodes the multi-drop / multi-platform route. If Normal needs similar behavior, reimplement or copy the minimum algorithm into `millikan_ai.normal` with Normal names and Normal tests.
+- Shared low-level, side-effect-free utilities may be used only when they are not Experimental business workflow code, such as basic video metadata reading, JSON helpers, or simple physical constants. When in doubt, duplicate the small code path inside `millikan_ai.normal`.
+- Worker operation names must make the separation visible. Use `normal.*` for Normal and keep existing `analysis.*`, `platform.*`, and `downstream.*` operations for Experimental/current backend behavior.
+- Frontend routes/components must make the separation visible. The startup screen can choose `Normal` or `Experimental`; after selection, the workflows should not share mutable state or silently hand off results to each other.
+- v3 Normal branches are failed worktrees. They may be consulted only for visual inspiration and failure evidence, not used as an implementation blueprint.
+- Normal state transitions are part of the contract. Frontend `video_imported` is local UI state after pure inspect. Backend `active_video.state` is limited to video-level states `video_prepared`, `boundary_confirmed`, `target_selected`, and `tracking`; it must never be set to a record status. Record `status` owns post-tracking states `pending_crossing_review`, `pending_user_confirmation`, `accepted`, `diagnostic`, `rejected_crossing_identity`, and `rejected_by_user`. Worker ops must enforce predecessor states, not rely only on disabled frontend buttons.
+- `normal.inspectVideo` must stay pure: return metadata and a playable URL only. It must not create or mutate a session and must not run `0 V`, grid, tracking, or q calculation. `normal.prepareVideo` starts the expensive preparation after the user clicks start and emits Normal-only progress events.
 
 ## Raw Data
 
@@ -37,6 +54,31 @@ All project dependencies must stay inside the project-local `.venv/`. Do not ins
 ## Current Implementation Rules
 
 - All thresholds and physical constants should come from `configs/default.yaml`.
+- Before implementing a Normal/Experimental contract change, update `AGENTS.md`, `docs/frontend_backend_interface.md`, and the relevant design docs first. Code should then implement the documented contract rather than inventing a new one mid-edit.
+- Normal UI uses seconds for all user-facing time controls. Frame indices may be stored internally and in artifacts, but users adjust `0V_start_s` and `0V_end_s` with coarse `±1 s` and fine `±0.1 s` controls.
+- Normal video import must support both file dialog selection and drag-and-drop. After import, the UI must display fps, frame count, resolution, and duration.
+- Normal measures one user-selected droplet at a time. It must copy/reimplement the teammate local Trackpy single-drop algorithm from `C:\Users\Teddy\Desktop\追踪`; do not directly import that external project.
+- Normal automatically detects horizontal grid lines and treats the region from the second line to the penultimate line as the effective measurement region.
+- Normal crossing review must create clickable crossing events when tracking passes through or is interrupted near grid lines. The UI should show a local magnified review around roughly one second before and after the event, clipped to available video bounds. Do not show an empty or unplayable video control as if it were valid evidence; if packaged Chromium cannot reliably decode the generated clip, expose backend-generated review frames and play them in the renderer.
+- Normal sessions are transient per application launch. `normal.initialize` without an explicit `session_root` must create a fresh session and must not reload old `runs/normal_session` records. Within one launch, a session may accumulate q records across multiple videos. Long-term retention happens only through explicit export, and the Electron shell must clean implicit transient session roots on application exit. At least three user-kept valid q records are required before Normal blind inversion.
+- After a user accepts a Normal q record, the UI must offer a clear "next droplet" action. Choosing the same video must call a Normal worker operation that resets `active_video.state` to `boundary_confirmed` while preserving the confirmed boundary and video context; do not only change the frontend stage. Choosing a different video clears `active_video` and returns to the empty import state while preserving accepted records in the current transient session for cross-video inversion.
+- Normal record review must show a renderer-playable whole-trajectory view. The backend should generate full-frame review images from the original video with target/missing labels, the trajectory line, frame/time, and pixel axes drawn in video pixel coordinates. The frontend may play those frames but must not redraw or infer track coordinates.
+- Normal blind inversion must have its own final results stage/page after `normal.runInversion`. Do not leave the user on the per-drop measurement panel with only a toast or a few inline fields. The page must show `e_hat_C`, `sigma_e_C`, used q count, status, flags, sorted candidate solutions, integer assignments, per-drop residuals, and charted quantized-alignment diagnostics from the Normal inversion payload. It must not call Experimental elementary-estimator UI/business logic, and it must not claim a quantized/continuous model winner while the Normal continuous baseline is not fitted.
+- Normal inversion must return a backend-computed `reference_comparison` using the exact SI defining constant `1.602176634e-19 C`. It includes relative uncertainty and absolute percentage error versus that reference. These display diagnostics must never influence the blind search, candidate ranking, integer assignments, or reliability flags.
+- User-visible scientific notation across Normal and Experimental must use readable typography such as `1.602 × 10⁻¹⁹ C`; do not expose JavaScript/Python `1.602e-19` strings in UI labels, tables, charts, or Markdown reports. Charge and charge-uncertainty displays should use the shared `10⁻¹⁹ C` scale unless a different unit is explicitly required. Machine JSON/CSV values remain numeric SI values.
+- Normal Stage 5 must expose an inspectable q-calculation evidence flow below the track review. Formula values must come from the backend record's fit/q calculation trace. The renderer may format and arrange those values but must not independently recompute radius, effective viscosity, q, or sigma_q.
+- Normal Stage 6 has one canonical result summary in the main content area. The inspector is for convergence, search-boundary, flags, scientific limitations, export, and navigation; it must not duplicate the main `e_hat_C`/`sigma_e_C` result card.
+- Normal rejected/diagnostic records remain visible in the current session as adjustment evidence. A user "return/adjust" action must not simply hide or discard the record; it must restore the relevant boundary/target/voltage/parameter inputs so the user can micro-adjust and retrack, producing a new linked record.
+- Normal target selection time must be constrained to the user-confirmed `0V_start_s ± 0.5 s`, not anywhere in the video and not relative to the auto suggestion after the user edits it. The backend must reject target times outside this window, and the frontend must clamp second-based controls to the same window.
+- Normal target selection preview is the main video player itself, paused at `selection_time_s`. Do not add a separate screenshot preview as a substitute. The frame displayed in the main player, the frontend `selectionTime`, and the backend `target_frame` must describe the same frame.
+- After `normal.confirmBoundary`, the frontend must reset `selectionTime` to the backend-confirmed `zero_v_start_s` and recompute the target-selection window from that confirmed boundary. User edits to `0V_start_s`/`0V_end_s` must discard any stale `selection_window` inherited from an earlier boundary.
+- `normal.confirmBoundary` is a second-based user-confirmation API. If a payload contains both seconds and stale frame indices, the seconds are authoritative and the backend must recompute frame indices from them.
+- Normal return/adjust must restore the exact user-confirmed boundary snapshot from the relevant in-progress state or record. It must not fall back to the original automatic suggestion, and it must not use `active_video.adjustment` for a different record id.
+- Normal stages must be reversible. A user can return to the previous stage and continue from the last user-confirmed state. When an upstream state changes, strongly dependent downstream state must be cleared or regenerated: boundary changes invalidate target/tracking/review/q candidate state; target/time/box changes invalidate tracking/review/q candidate state. Existing records remain immutable evidence unless the user explicitly excludes them.
+- In Normal, balance voltage is required. Other physical parameters should default from config and be editable in a collapsed advanced panel; overrides apply only to the current measurement record unless the user explicitly changes saved defaults.
+- Normal physical pressure is `pressure_kPa` in the Normal contract. Do not expose or persist new Normal records with `pressure_Pa`; convert legacy overrides only at the boundary. Normal q uncertainty must come from linear-regression slope uncertainty and q(v) propagation. Do not use the old RMSE/R2 empirical formula or a q-level 5% floor for `sigma_q_C`.
+- Normal must use its own weighted integer residual grid-search inversion over q records with uncertainties. Do not call the Experimental elementary estimator as a shortcut.
+- Normal inversion must include fixed-integer weighted re-estimation of `e`, assignment-stability iteration, sorted candidate solutions, boundary/convergence flags, and residual details. Without a fitted continuous baseline, do not output `quantized_favored`, `continuous_favored`, or any model-win claim.
 - Current `develop`/`main` does not run voltage OCR. It may auto-detect voltage-platform boundaries from visual display changes, but voltage values remain user/API supplied. OCR experiment code is preserved on `feature/ocr-current-archive`; do not re-enable OCR on mainline without an explicit new plan.
 - Auto platform detection uses the user-provided expected platform count as a validation constraint. Rejected suggestions, short platforms, or count mismatches must fall back to manual boundary input rather than silently entering q calculation.
 - If ROI detection or tracking confidence is low, write explicit flags and allow manual/config-driven correction.
