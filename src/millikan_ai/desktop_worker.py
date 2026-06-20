@@ -44,6 +44,17 @@ Json = dict[str, Any]
 _MISSING = object()
 
 
+def _configure_utf8_stdio() -> None:
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="strict")
+
+
+_configure_utf8_stdio()
+
+
 def _camel_case(key: str) -> str:
     head, *tail = key.split("_")
     return head + "".join(part[:1].upper() + part[1:] for part in tail)

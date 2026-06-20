@@ -34,6 +34,8 @@ const result = spawnSync(python, args, {
   stdio: "inherit",
   env: {
     ...process.env,
+    PYTHONUTF8: "1",
+    PYTHONIOENCODING: "utf-8",
     PYTHONPATH: [path.join(projectRoot, "src"), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter)
   }
 });

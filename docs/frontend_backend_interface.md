@@ -28,7 +28,7 @@ of the public desktop contract, not an implementation detail:
 
 Automated regression coverage must include a deliberately split Chinese UTF-8
 byte sequence, worker progress/error round trips, and packaged-worker output.
-The release verification also scans tracked text and exported reports for `�`
+The release verification also scans tracked text and exported reports for `U+FFFD`
 and common mojibake sequences.
 
 Supported worker operations:

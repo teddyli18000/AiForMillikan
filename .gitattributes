@@ -1,0 +1,32 @@
+* text=auto
+
+*.css text eol=lf
+*.html text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.jsx text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf
+*.py text eol=lf
+*.toml text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.txt text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.avi binary
+*.exe binary
+*.gif binary
+*.jpg binary
+*.jpeg binary
+*.m4v binary
+*.mkv binary
+*.mov binary
+*.mp4 binary
+*.png binary
+*.webp binary

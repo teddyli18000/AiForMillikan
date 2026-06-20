@@ -82,6 +82,35 @@ def _send_worker(message: dict) -> list[dict]:
     return [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
 
 
+def test_worker_forces_utf8_stdio_even_when_parent_requests_legacy_codepage():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path.cwd() / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONIOENCODING"] = "cp1252"
+    expected = "正在处理：σ = 10⁻¹⁹ C"
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from millikan_ai.desktop_worker import _write_line;"
+                f"_write_line({{'label': {expected!r}}})"
+            ),
+        ],
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
+    assert proc.stdout.decode("utf-8").strip() == json.dumps(
+        {"label": expected},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert b"\xef\xbf\xbd" not in proc.stdout
+
+
 def test_desktop_worker_inspects_video(tmp_path: Path):
     video = tmp_path / "synthetic.mp4"
     _make_synthetic_video(video)
