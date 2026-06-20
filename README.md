@@ -15,8 +15,10 @@ droplet, asks the experimenter to review ambiguous crossings, calculates a
 single-drop charge with an explicit uncertainty trace, and performs a blind
 integer-residual search after at least three accepted measurements.
 
-It is designed as an assistant, not an automatic authority. User confirmation
+It is designed as an assistant in normal mode, and an automatic reasearcher in experimental mode. User confirmation
 remains part of the scientific record.
+
+We recommend using the normal mode. We are working hard to improve the accuracy of the experimental mode.
 
 ![Millikan AI mode selection](docs/assets/readme/mode-selection.png)
 
