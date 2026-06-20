@@ -51,6 +51,12 @@ The Release includes:
 Verify the EXE against the checksum before running it. The executable is not
 code-signed, so Windows SmartScreen may display an unrecognized-app warning.
 
+SHA256:
+
+```text
+d60cfa6590ba93b4cddb1a26e152ce77d09c8e8540bf5bac3a3ac6f2c832682b
+```
+
 ## Scientific boundaries
 
 - Balance is user-confirmed; the program does not automatically prove the
