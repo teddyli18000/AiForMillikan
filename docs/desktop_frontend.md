@@ -52,6 +52,12 @@ In development the main process starts the project-local Python worker from
 `.venv\Scripts\python` and sets `PYTHONPATH` to the repository `src` directory.
 No global Python installation is required by the app logic.
 
+The main process also owns the worker text boundary. Requests and responses are
+UTF-8 JSON Lines. Worker launch sets `PYTHONUTF8=1` and
+`PYTHONIOENCODING=utf-8`; stdout and stderr are decoded incrementally so a
+Chinese character split across pipe chunks remains intact. Do not replace the
+streaming decoder with per-chunk `String(buffer)` conversion.
+
 ## Build And Package
 
 Build renderer and Electron TypeScript:
@@ -75,6 +81,26 @@ npm run package
 `worker:build` uses PyInstaller from the project `.venv` and writes a onefile
 `dist-worker\millikan-desktop-worker.exe`. `electron-builder` copies that file
 into the portable app resources under `worker\`.
+
+For a formal release, verify the packaged worker directly with Chinese progress
+and error payloads, then launch the portable EXE and inspect the Normal workflow
+and exported Markdown. A successful source-level test alone is not sufficient.
+
+## Documentation And Release Layout
+
+Version 1.0 documentation is split by audience:
+
+- `docs/technical/`: architecture, state/worker contracts, tracking geometry,
+  UTF-8 packaging, and reproducible validation.
+- `docs/academic/`: the balance-fall method, q calculation, uncertainty
+  propagation, blind inversion, and scientific limitations.
+- `docs/archive/`: superseded designs and historical research notes. These
+  files remain evidence of the project history but are not current contracts.
+
+The root English README is a product showcase and operation guide rather than a
+copy of these implementation documents. Formal Windows releases include the
+portable EXE, a SHA256 file, release notes, and an explicit unsigned-app
+SmartScreen warning.
 
 ## Test Commands
 

@@ -3,6 +3,7 @@ import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import readline from "node:readline";
+import { createUtf8WorkerEnv, Utf8StreamDecoder } from "./utf8StreamDecoder";
 
 type WorkerMessage = {
   id: string;
@@ -64,12 +65,20 @@ export class WorkerClient {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     });
+    this.child.stdout.setEncoding("utf8");
     const reader = readline.createInterface({ input: this.child.stdout });
     reader.on("line", (line) => this.handleLine(line));
+    const stderrDecoder = new Utf8StreamDecoder();
     this.child.stderr.on("data", (chunk) => {
-      this.stderrBuffer.push(String(chunk));
+      this.stderrBuffer.push(stderrDecoder.write(chunk as Buffer));
       if (this.stderrBuffer.length > 80) {
         this.stderrBuffer.shift();
+      }
+    });
+    this.child.stderr.on("end", () => {
+      const tail = stderrDecoder.end();
+      if (tail) {
+        this.stderrBuffer.push(tail);
       }
     });
     this.child.on("exit", (code, signal) => {
@@ -116,7 +125,7 @@ function resolveWorkerLaunch(): { command: string; args: string[]; cwd: string; 
       command: executable,
       args: [],
       cwd: path.dirname(executable),
-      env: process.env
+      env: createUtf8WorkerEnv(process.env)
     };
   }
   const projectRoot = findProjectRoot();
@@ -126,7 +135,7 @@ function resolveWorkerLaunch(): { command: string; args: string[]; cwd: string; 
     command: python,
     args: ["-m", "millikan_ai.desktop_worker"],
     cwd: projectRoot,
-    env: { ...process.env, PYTHONPATH: pythonPath }
+    env: createUtf8WorkerEnv({ ...process.env, PYTHONPATH: pythonPath })
   };
 }
 

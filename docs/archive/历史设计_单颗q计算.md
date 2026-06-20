@@ -1,5 +1,9 @@
 # 密立根油滴 AI+ 项目底层算法说明：从实验视频到单颗油滴电荷量 $q_i$
 
+> 历史文档：本文保留项目早期的完整推导、Experimental 路线和 Normal 方案演进。
+> 它不再作为 Millikan AI 1.0 的唯一学术说明。当前方法请阅读
+> `docs/academic/charge-measurement.md` 与 `docs/academic/uncertainty.md`。
+
 > 本文档只讨论“如何从实验视频计算每一颗油滴的电荷量 $q_i$ 及其不确定度 $\sigma_{q_i}$”。  
 > 暂不涉及后续的基本电荷 $e$ 盲反演、整数倍聚类和量子化统计验证。
 

@@ -1,6 +1,6 @@
 [project]
 name = "millikan-ai"
-version = "0.1.0"
+version = "1.0.0"
 description = "Non-ML backend and CLI for Millikan oil drop experiment analysis"
 requires-python = ">=3.11"
 dependencies = [

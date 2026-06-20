@@ -10,6 +10,27 @@ public APIs described below. In development Electron starts
 `.venv\Scripts\python -m millikan_ai.desktop_worker`; production packages a
 PyInstaller onefile worker beside the Electron app.
 
+### Worker Text Encoding
+
+The JSON Lines transport is UTF-8 without BOM in both directions. This is part
+of the public desktop contract, not an implementation detail:
+
+- Electron writes each request as one UTF-8 JSON object followed by `\n`.
+- The Python worker configures `stdin`, `stdout`, and `stderr` as UTF-8 and
+  writes one UTF-8 JSON response or progress event per line.
+- Electron launches both development and packaged workers with
+  `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8`.
+- Node decodes stdout and stderr with a streaming UTF-8 decoder. It must not
+  call `String(chunk)` independently for arbitrary pipe chunks because a
+  multibyte character may be split between chunks.
+- Renderer text and exported Markdown must preserve Chinese labels, paths,
+  mathematical symbols, and superscripts without replacement characters.
+
+Automated regression coverage must include a deliberately split Chinese UTF-8
+byte sequence, worker progress/error round trips, and packaged-worker output.
+The release verification also scans tracked text and exported reports for `U+FFFD`
+and common mojibake sequences.
+
 Supported worker operations:
 
 - `video.inspect`: inspect video metadata and optional diagnostic frame data.
