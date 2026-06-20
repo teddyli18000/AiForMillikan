@@ -11,7 +11,7 @@ def test_encoding_scan_rejects_invalid_utf8_and_mojibake(tmp_path: Path):
     valid.write_text("正在处理：σ = 10⁻¹⁹ C", encoding="utf-8")
     invalid.write_bytes(b"\xff\xfe")
     replacement.write_text("broken " + chr(0xFFFD), encoding="utf-8")
-    mojibake.write_text("姝ｅ湪閲囨牱", encoding="utf-8")
+    mojibake.write_text("\u59dd\uff45\u6e6a\u95b2\u56e8\u726c", encoding="utf-8")
 
     issues = scan_paths([valid, invalid, replacement, mojibake])
 

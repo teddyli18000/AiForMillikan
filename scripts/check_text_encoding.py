@@ -27,7 +27,14 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 TEXT_NAMES = {".editorconfig", ".gitattributes", ".gitignore"}
-MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "姝ｅ湪", "鏄剧ず鍖哄煙", "閲囨牱")
+MOJIBAKE_MARKERS = (
+    "\u00c3",
+    "\u00c2",
+    "\u00e2\u20ac",
+    "\u59dd\uff45\u6e6a",
+    "\u93c4\u5267\u305a\u9356\u54c4\u7159",
+    "\u95b2\u56e8\u726c",
+)
 
 
 @dataclass(frozen=True)
