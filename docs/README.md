@@ -23,6 +23,8 @@
 ## 版本与历史
 
 - [版本修复记录](版本修复记录.md)：Normal `0.1.1` 至 `1.0.0` 的 contract 演进。
+- [Millikan AI 1.0 Release Notes](release-notes-v1.0.0.md)：正式版亮点、
+  使用方式、系统要求、科学边界和校验说明。
 - [真实视频 smoke 记录](raw_video_smoke.md)：历史 raw-video 行为记录。
 - [archive](archive/)：早期长文、失败路线和未交付研究设想。仅用于追溯，不代表 1.0 当前实现。
 
