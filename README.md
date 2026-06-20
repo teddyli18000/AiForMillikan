@@ -1,6 +1,7 @@
 # Millikan AI
 
 **A human-in-the-loop desktop instrument for the Millikan oil-drop experiment.**
+
 **Presented by X**
 
 [![Release](https://img.shields.io/github/v/release/teddyli18000/AiForMillikan?style=flat-square&label=release)](https://github.com/teddyli18000/AiForMillikan/releases/latest)
