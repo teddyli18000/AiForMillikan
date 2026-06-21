@@ -2,7 +2,7 @@
 
 **A human-in-the-loop desktop instrument for the Millikan oil-drop experiment.**
 
-**Presented by X**
+**Presented by Xinchen Lee & Minghao Yao**
 
 [![Release](https://img.shields.io/github/v/release/teddyli18000/AiForMillikan?style=flat-square&label=release)](https://github.com/teddyli18000/AiForMillikan/releases/latest)
 [![Windows](https://img.shields.io/badge/platform-Windows-2563eb?style=flat-square)](https://github.com/teddyli18000/AiForMillikan/releases/latest)
@@ -145,7 +145,7 @@ do not install them into a global Python or base Conda environment.
 - [Xinchen Lee](https://github.com/teddyli18000) — product concept, workflow and
   system architecture, desktop application, scientific integration, and release
   engineering.
-- [teammate](https://github.com/teddyli18000/AiForMillikan/graphs/contributors) —
+- [Minghao Yao](https://github.com/teddyli18000/AiForMillikan/graphs/contributors) —
   experimental data and video collection, plus the local Trackpy tracking
   prototype used to validate the main single-droplet tracking direction.
 
