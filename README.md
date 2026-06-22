@@ -191,3 +191,7 @@ state, tracking, encoding, packaging, and validation details.
 
 The formal Windows build, checksum, release notes, and future sample-video
 assets are published on [GitHub Releases](https://github.com/teddyli18000/AiForMillikan/releases).
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
