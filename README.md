@@ -26,8 +26,7 @@ We recommend using the normal mode. We are working hard to improve the accuracy 
 
 - **Download:** [Millikan AI 1.0 for Windows](https://github.com/teddyli18000/AiForMillikan/releases/latest)
 - **Verify:** the release includes `Millikan-AI-Portable-1.0.0.exe.sha256`
-- **Test video:** [open the Releases page](https://github.com/teddyli18000/AiForMillikan/releases)
-  <!-- Replace this link with the dedicated test-video Release after it is published. -->
+- **Test video:** [open the Releases page](https://github.com/teddyli18000/AiForMillikan/releases/tag/videos) or [attached to each version](https://github.com/teddyli18000/AiForMillikan/releases/latest)
 - **Documentation:** [technical and academic documentation](docs/README.md)
 
 The portable EXE is currently unsigned. Windows SmartScreen may therefore ask
