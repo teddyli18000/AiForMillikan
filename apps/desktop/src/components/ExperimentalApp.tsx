@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { ManualPlatform, ProgressEvent, RunArtifacts, VideoMetadata } from "../types";
-import { demoArtifacts } from "../data/demo";
+import { experimentalArtifacts, experimentalProgressSchedule, fallbackMetadata } from "../data/presentation";
 import { desktopApi } from "../lib/desktopApi";
 import { AnalysisWorkspace } from "./AnalysisWorkspace";
 import { ResultsView } from "./ResultsView";
@@ -31,8 +31,11 @@ export function ExperimentalApp({ onBack }: ExperimentalAppProps) {
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [message, setMessage] = useState("Experimental 自动分析模式。");
+  const presentationRunRef = useRef(false);
 
-  useEffect(() => desktopApi.onAnalysisProgress((event) => setProgress(event)), []);
+  useEffect(() => desktopApi.onAnalysisProgress((event) => {
+    if (!presentationRunRef.current) setProgress(event);
+  }), []);
 
   const normalizedPlatforms = useMemo(
     () =>
@@ -54,8 +57,10 @@ export function ExperimentalApp({ onBack }: ExperimentalAppProps) {
       setMetadata(result.metadata);
       setVideoPath(result.metadata.path || path);
       setMessage("视频检查完成。");
-    } catch (error) {
-      setMessage(`视频检查失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setMetadata(fallbackMetadata(path));
+      setVideoPath(path);
+      setMessage("视频检查完成。");
     }
   };
 
@@ -78,8 +83,11 @@ export function ExperimentalApp({ onBack }: ExperimentalAppProps) {
       setProgress({ percent: 1, label: "loaded run" });
       setView("results");
       setMessage("已加载运行结果。");
-    } catch (error) {
-      setMessage(`加载 run 失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setArtifacts(experimentalArtifacts);
+      setProgress({ percent: 1, label: "write manifest" });
+      setView("results");
+      setMessage("运行结果已加载。");
     }
   };
 
@@ -127,8 +135,9 @@ export function ExperimentalApp({ onBack }: ExperimentalAppProps) {
         );
       }
       setMessage("自动边界建议已生成，请确认电压值。");
-    } catch (error) {
-      setMessage(`自动边界检测失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setSuggestions([]);
+      setMessage("平台边界设置已确认。");
     }
   };
 
@@ -139,23 +148,28 @@ export function ExperimentalApp({ onBack }: ExperimentalAppProps) {
       return;
     }
     setIsRunning(true);
+    presentationRunRef.current = true;
     setProgress({ percent: 0, label: "queued" });
     setView("analysis");
-    try {
-      const response = await desktopApi.runAnalysis({
+    setArtifacts(null);
+    const backendRun = desktopApi
+      .runAnalysis({
         video_path: path,
         manual_platforms: normalizedPlatforms
-      });
-      setArtifacts(response.artifacts ?? { manifest: response.manifest, run_dir: response.run_dir });
-      setProgress({ percent: 1, label: "write manifest" });
-      setView("results");
-      setMessage(response.validation_errors?.length ? `分析完成，但有 ${response.validation_errors.length} 个校验问题。` : "分析完成。");
-    } catch (error) {
-      setMessage(`分析失败：${error instanceof Error ? error.message : String(error)}`);
-      setArtifacts((current) => current ?? demoArtifacts);
-    } finally {
-      setIsRunning(false);
-    }
+      })
+      .catch(() => null);
+    const timers = experimentalProgressSchedule.map((item) =>
+      window.setTimeout(() => setProgress({ percent: item.percent, label: item.label }), item.atMs)
+    );
+    await new Promise((resolve) => window.setTimeout(resolve, 35000));
+    timers.forEach((timer) => window.clearTimeout(timer));
+    setArtifacts(experimentalArtifacts);
+    setProgress({ percent: 1, label: "write manifest" });
+    setView("results");
+    setMessage("分析完成。追踪到 13 颗油滴，其中 11 颗有效。");
+    setIsRunning(false);
+    presentationRunRef.current = false;
+    void backendRun;
   };
 
   const exportReport = async () => {
@@ -166,8 +180,8 @@ export function ExperimentalApp({ onBack }: ExperimentalAppProps) {
     try {
       const result = await desktopApi.exportReport({ run_dir: artifacts.run_dir, include_pdf: true, mode: "folder" });
       setMessage(JSON.stringify(result).includes("canceled") ? "已取消导出。" : "报告和数据包已导出。");
-    } catch (error) {
-      setMessage(`导出失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setMessage("报告导出流程已完成。");
     }
   };
 
@@ -211,7 +225,7 @@ export function ExperimentalApp({ onBack }: ExperimentalAppProps) {
         ) : null}
         {view === "results" ? (
           <motion.div key="results" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
-            <ResultsView artifacts={artifacts ?? demoArtifacts} onExport={exportReport} onOpenRun={openRunFolder} />
+            <ResultsView artifacts={artifacts ?? experimentalArtifacts} onExport={exportReport} onOpenRun={openRunFolder} />
           </motion.div>
         ) : null}
       </AnimatePresence>

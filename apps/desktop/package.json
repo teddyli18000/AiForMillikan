@@ -1,6 +1,6 @@
 {
   "name": "millikan-ai-desktop",
-  "version": "1.0.0",
+  "version": "1.0.0-pre",
   "private": true,
   "main": "dist-electron/main.js",
   "description": "Portable Electron desktop frontend for Millikan AI",
@@ -58,10 +58,10 @@
       ]
     },
     "portable": {
-      "artifactName": "Millikan-AI-Portable-${version}.exe"
+      "artifactName": "Millikan-AI-v1.pre.exe"
     },
     "directories": {
-      "output": "release"
+      "output": "release-v1.pre"
     }
   }
 }

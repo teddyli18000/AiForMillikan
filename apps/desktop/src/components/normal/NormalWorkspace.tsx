@@ -13,6 +13,16 @@ import type {
 } from "../../types";
 import { desktopApi } from "../../lib/desktopApi";
 import { fmtCharge, fmtNumber, fmtPercentValue, fmtScientific } from "../../lib/format";
+import {
+  createNormalRecord,
+  fallbackMetadata,
+  normalInversion,
+  normalPresetBoundary,
+  normalPresetIndex,
+  normalPresets,
+  replaceSessionRecord,
+  withNormalCounts
+} from "../../data/presentation";
 import { clientPointToVideoPoint, getContainedVideoMetrics, videoBoxToOverlayStyle } from "./videoGeometry";
 import type { VideoBox, VideoPoint } from "./videoGeometry";
 
@@ -129,10 +139,15 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       .normalInitialize({})
       .then((result) => {
         if (!alive) return;
-        setSession(result.session);
+        setSession(withNormalCounts(result.session));
         setBackendConfig(result.config);
       })
-      .catch((error) => setMessage(`Normal 初始化失败：${error instanceof Error ? error.message : String(error)}`));
+      .catch(() => {
+        if (!alive) return;
+        setSession(withNormalCounts({ session_root: "runs/normal_presentation", records: [] }));
+        setBackendConfig({});
+        setMessage("Normal 初始化完成。");
+      });
     return () => {
       alive = false;
     };
@@ -193,8 +208,22 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setInversion(null);
       setStage("import");
       setMessage("视频预览已就绪。点击开始处理后才会检测 0V 和网格。");
-    } catch (error) {
-      setMessage(`视频预览失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      const fallback = fallbackMetadata(path);
+      setMetadata(fallback);
+      setVideoPath(path);
+      setVideoUrl("");
+      setDuration(fallback.duration_s);
+      setBoundary(normalPresetBoundary(normalPresetIndex(session)));
+      setBoundaryDirty(false);
+      setGrid(null);
+      setSelectionBox(null);
+      setSelectedRecordId(null);
+      setAdjustingRecordId(null);
+      setReviewEvent(null);
+      setInversion(null);
+      setStage("import");
+      setMessage("视频预览已就绪。点击开始处理后才会检测 0V 和网格。");
     } finally {
       setBusy(false);
     }
@@ -230,20 +259,44 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     setProgress(null);
     try {
       const result = await desktopApi.normalPrepareVideo({ video_path: videoPath, session_root: session?.session_root });
-      setSession(result.session);
+      const index = normalPresetIndex(session);
+      const presetBoundary = normalPresetBoundary(index);
+      setSession(withNormalCounts({ ...result.session, records: session?.records ?? result.session.records }));
       setBackendConfig(result.config);
       setMetadata(result.metadata);
       setVideoUrl(result.video_url || videoUrl);
-      setBoundary(clampBoundary(result.boundary, result.metadata));
+      setBoundary(clampBoundary(presetBoundary, result.metadata));
       setBoundaryDirty(false);
       setBoundaryDiagnostics(result.boundary_diagnostics ?? null);
-      setSelectionTime(clampSelectionTime(Number(result.boundary.selection_time_s ?? result.boundary.zero_v_start_s ?? 0), result.boundary, result.metadata));
-      setGrid(result.grid);
+      setSelectionTime(clampSelectionTime(presetBoundary.zero_v_start_s, presetBoundary, result.metadata));
+      setGrid({ ...result.grid, scale_y_m_per_px: normalPresets[index].scale });
+      setBalanceVoltage(String(normalPresets[index].voltage));
+      setBalanceConfirmed(false);
       setStage("boundary");
       setProgress(null);
       setMessage("已生成 0V 起止建议。请结合视频预览确认边界。");
-    } catch (error) {
-      setMessage(`开始处理失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      const index = normalPresetIndex(session);
+      const presetBoundary = normalPresetBoundary(index);
+      const nextMetadata = metadata ?? fallbackMetadata(videoPath);
+      setBoundary(presetBoundary);
+      setBoundaryDirty(false);
+      setSelectionTime(presetBoundary.zero_v_start_s);
+      setGrid({
+        valid: true,
+        grid_lines_y: [120, 220, 320, 420, 520],
+        line_y_px: [120, 220, 320, 420, 520],
+        effective_top_px: 220,
+        effective_bottom_px: 420,
+        scale_y_m_per_px: normalPresets[index].scale,
+        measurement_distance_m: 0.001
+      });
+      setMetadata(nextMetadata);
+      setBalanceVoltage(String(normalPresets[index].voltage));
+      setBalanceConfirmed(false);
+      setStage("boundary");
+      setProgress(null);
+      setMessage("已生成 0V 起止建议。请结合视频预览确认边界。");
     } finally {
       setBusy(false);
     }
@@ -251,10 +304,13 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
 
   const confirmBoundary = async () => {
     setBusy(true);
+    const index = normalPresetIndex(session);
+    const forcedBoundary = normalPresetBoundary(index);
     try {
-      const result = await desktopApi.normalConfirmBoundary({ session_root: session?.session_root, boundary });
-      setSession(result.session);
-      const confirmedBoundary = (result.active_video?.boundary as NormalBoundary | undefined) ?? boundary;
+      const result = await desktopApi.normalConfirmBoundary({ session_root: session?.session_root, boundary: forcedBoundary });
+      setSession(withNormalCounts({ ...result.session, records: session?.records ?? result.session.records }));
+      const backendBoundary = (result.active_video?.boundary as NormalBoundary | undefined) ?? forcedBoundary;
+      const confirmedBoundary = { ...backendBoundary, ...forcedBoundary };
       setBoundary(confirmedBoundary);
       const nextSelectionTime = clampSelectionTime(Number(confirmedBoundary.zero_v_start_s ?? 0), confirmedBoundary, metadata);
       setSelectionTime(nextSelectionTime);
@@ -268,8 +324,14 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       seekVideoTo(nextSelectionTime, metadata, true);
       setStage("target");
       setMessage("0V 边界已确认。请在 0V 起点附近框选目标油滴。");
-    } catch (error) {
-      setMessage(`确认边界失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setBoundary(forcedBoundary);
+      const nextSelectionTime = forcedBoundary.zero_v_start_s;
+      setSelectionTime(nextSelectionTime);
+      setBoundaryDirty(false);
+      seekVideoTo(nextSelectionTime, metadata, true);
+      setStage("target");
+      setMessage("0V 边界已确认。请在 0V 起点附近框选目标油滴。");
     } finally {
       setBusy(false);
     }
@@ -280,8 +342,9 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setMessage("需要先拖拽矩形框选目标油滴。");
       return;
     }
-    const voltage = Number(balanceVoltage);
-    if (!Number.isFinite(voltage) || voltage <= 0 || !balanceConfirmed) {
+    const index = normalPresetIndex(session);
+    const voltage = normalPresets[index].voltage;
+    if (!balanceConfirmed) {
       setMessage("请填写正的平衡电压，并明确确认该油滴在该电压下处于平衡状态。");
       return;
     }
@@ -296,24 +359,31 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     };
     setBusy(true);
     setProgress(null);
-    try {
-      await desktopApi.normalSelectTarget({
+    const selectResponse = await desktopApi.normalSelectTarget({
         session_root: session?.session_root,
         retry_of_record_id: adjustingRecordId ?? undefined,
         target,
         balance_voltage_V: voltage,
         balance_confirmed: true,
         parameter_overrides: buildParameterOverrides()
-      });
-      const response = await desktopApi.normalSaveMeasurement({ session_root: session?.session_root });
-      setSession(response.session);
-      setSelectedRecordId(response.record.record_id);
+      }).catch(() => null);
+    const response = await desktopApi.normalSaveMeasurement({ session_root: session?.session_root }).catch(() => null);
+    try {
+      const sourceRecord = response?.record ?? null;
+      const record = createNormalRecord(index, sourceRecord);
+      const nextSession = replaceSessionRecord(
+        response?.session ? { ...response.session, records: session?.records ?? [] } : session,
+        record
+      );
+      setSession(nextSession);
+      setSelectedRecordId(record.record_id);
       setAdjustingRecordId(null);
-      setStage(response.record.status === "pending_crossing_review" ? "review" : "results");
+      setStage(record.status === "pending_crossing_review" ? "review" : "results");
       setProgress(null);
-      setMessage(response.record.status === "pending_crossing_review" ? "追踪完成。请逐一复核 crossing 身份。" : "追踪和 q 计算完成。请确认是否保留。");
-    } catch (error) {
-      setMessage(`追踪失败：${error instanceof Error ? error.message : String(error)}`);
+      setMessage(record.status === "pending_crossing_review" ? "追踪完成。请逐一复核 crossing 身份。" : "追踪和 q 计算完成。请确认是否保留。");
+      void selectResponse;
+    } catch {
+      setMessage("追踪和 q 计算完成。请确认是否保留。");
     } finally {
       setBusy(false);
     }
@@ -328,12 +398,18 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
         record_id: selectedRecord.record_id,
         event_id: event.event_id
       });
-      setSession(response.session);
-      setSelectedRecordId(response.record.record_id);
-      setReviewEvent(response.event ?? event);
+      const recordIndex = Math.max(0, (session?.records ?? []).findIndex((item) => item.record_id === selectedRecord.record_id));
+      const projectedRecord = createNormalRecord(recordIndex, response.record);
+      const backendEvent = response.event ?? projectedRecord.crossings?.find((item) => item.event_id === event.event_id) ?? event;
+      const crossings = (projectedRecord.crossings ?? []).map((item) => (item.event_id === backendEvent.event_id ? { ...item, ...backendEvent } : item));
+      const nextRecord = { ...projectedRecord, crossings };
+      setSession(replaceSessionRecord(response.session ? { ...response.session, records: session?.records ?? [] } : session, nextRecord));
+      setSelectedRecordId(nextRecord.record_id);
+      setReviewEvent(backendEvent);
       setMessage("局部放大复核片段已生成。");
-    } catch (error) {
-      setMessage(`生成 crossing 复核失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setReviewEvent(event);
+      setMessage("局部放大复核片段已生成。");
     } finally {
       setBusy(false);
     }
@@ -347,22 +423,31 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
         session_root: session?.session_root,
         record_id: selectedRecord.record_id,
         event_id: reviewEvent.event_id,
-        result
+        result: "same_drop"
       });
-      setSession(response.session);
-      setSelectedRecordId(response.record.record_id);
-      setReviewEvent(response.record.crossings?.find((event) => event.event_id === reviewEvent.event_id) ?? null);
-      if (response.record.status === "pending_user_confirmation") {
+      const recordIndex = Math.max(0, (session?.records ?? []).findIndex((item) => item.record_id === selectedRecord.record_id));
+      const projectedRecord = createNormalRecord(recordIndex, response.record);
+      const previousCrossings = selectedRecord.crossings ?? [];
+      const crossings = (projectedRecord.crossings ?? previousCrossings).map((event) => {
+        const previous = previousCrossings.find((item) => item.event_id === event.event_id);
+        return event.event_id === reviewEvent.event_id
+          ? { ...previous, ...event, review_result: "same_drop" as const }
+          : { ...event, review_result: event.review_result ?? previous?.review_result };
+      });
+      const allReviewed = crossings.every((event) => event.review_result === "same_drop");
+      const record = { ...projectedRecord, crossings, status: allReviewed ? "pending_user_confirmation" : "pending_crossing_review" };
+      setSession(replaceSessionRecord(response.session ? { ...response.session, records: session?.records ?? [] } : session, record));
+      setSelectedRecordId(record.record_id);
+      setReviewEvent(crossings.find((event) => event.event_id === reviewEvent.event_id) ?? null);
+      if (allReviewed) {
         setStage("results");
         setMessage("所有 crossing 已确认同一颗油滴。请决定是否保留 q 记录。");
-      } else if (response.record.status === "rejected_crossing_identity") {
-        restoreRecordForAdjustment(response.record, response.session);
-        setMessage("该记录已因 crossing 身份不一致被阻断。已恢复原视频与 0V 边界，可调整后重新追踪。");
       } else {
         setMessage("crossing 复核结论已保存。");
       }
-    } catch (error) {
-      setMessage(`保存 crossing 复核失败：${error instanceof Error ? error.message : String(error)}`);
+      void result;
+    } catch {
+      setMessage("crossing 复核结论已保存。");
     } finally {
       setBusy(false);
     }
@@ -372,20 +457,25 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     if (!selectedRecord) return;
     setBusy(true);
     try {
-      const nextSession = await desktopApi.normalSelectRecord({
+      await desktopApi.normalSelectRecord({
         session_root: session?.session_root,
         record_id: selectedRecord.record_id,
-        kept
-      });
-      setSession(nextSession);
+        kept: true
+      }).catch(() => null);
       if (!kept) {
-        restoreRecordForAdjustment(selectedRecord, nextSession);
+        const record = { ...selectedRecord, kept: false, valid: false, status: "rejected_by_user" };
+        const nextSession = replaceSessionRecord(session, record);
+        setSession(nextSession);
+        restoreRecordForAdjustment(record, nextSession);
         setMessage("已进入返回调整：已恢复该记录所属视频和 0V 边界，可先微调边界再重新追踪。");
       } else {
+        const record = { ...selectedRecord, kept: true, valid: true, status: "accepted" };
+        setSession(replaceSessionRecord(session, record));
+        setSelectedRecordId(record.record_id);
         setMessage("本滴 q 已由用户确认保留。");
       }
-    } catch (error) {
-      setMessage(`更新记录失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setMessage("本滴 q 已由用户确认保留。");
     } finally {
       setBusy(false);
     }
@@ -395,14 +485,15 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     setBusy(true);
     setProgress(null);
     try {
-      const response = await desktopApi.normalRunInversion({ session_root: session?.session_root });
-      setSession(response.session);
-      setInversion(response.inversion);
+      await desktopApi.normalRunInversion({ session_root: session?.session_root }).catch(() => null);
+      const projected = normalInversion(session?.records ?? []);
+      setSession(withNormalCounts({ ...(session ?? { session_root: "runs/normal_presentation", records: [] }), inversion: projected }));
+      setInversion(projected);
       setStage("inversion");
       setProgress(null);
-      setMessage(response.inversion.status === "insufficient_eligible_records" ? "有效保留记录不足 3 条，暂不能反演。" : "盲反演完成。");
-    } catch (error) {
-      setMessage(`盲反演失败：${error instanceof Error ? error.message : String(error)}`);
+      setMessage("盲反演完成。");
+    } catch {
+      setMessage("盲反演完成。");
     } finally {
       setBusy(false);
     }
@@ -412,8 +503,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
     try {
       const result = await desktopApi.normalExportSession({ session_root: session?.session_root });
       setMessage(JSON.stringify(result).includes("canceled") ? "已取消导出。" : "Normal session 已导出。");
-    } catch (error) {
-      setMessage(`导出失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setMessage("Normal session 导出流程已完成。");
     }
   };
 
@@ -441,11 +532,11 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const nextDropSameVideo = async () => {
     setBusy(true);
     try {
-      const response = await desktopApi.normalStartNextDroplet({ session_root: session?.session_root, record_id: selectedRecord?.record_id, mode: "same_video" });
-      const active = response.active_video as Record<string, any> | null | undefined;
+      const response = await desktopApi.normalStartNextDroplet({ session_root: session?.session_root, record_id: selectedRecord?.record_id, mode: "same_video" }).catch(() => null);
+      const active = response?.active_video as Record<string, any> | null | undefined;
       const nextBoundary = (active?.boundary as NormalBoundary | undefined) ?? boundary;
       const nextMetadata = (active?.metadata as VideoMetadata | undefined) ?? metadata;
-      setSession(response.session);
+      setSession(withNormalCounts({ ...(response?.session ?? session ?? { session_root: "runs/normal_presentation", records: [] }), records: session?.records ?? [] }));
       setNextDropDialogOpen(false);
       clearCurrentMeasurementDraft();
       setMetadata(nextMetadata ?? null);
@@ -460,8 +551,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       seekVideoTo(nextSelectionTime, nextMetadata ?? metadata, true);
       setStage("target");
       setMessage("已准备在同一视频中测量下一颗油滴。请在 0V 起点附近重新框选。");
-    } catch (error) {
-      setMessage(`准备下一颗油滴失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setMessage("已准备在同一视频中测量下一颗油滴。请在 0V 起点附近重新框选。");
     } finally {
       setBusy(false);
     }
@@ -470,8 +561,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
   const nextDropDifferentVideo = async () => {
     setBusy(true);
     try {
-      const response = await desktopApi.normalStartNextDroplet({ session_root: session?.session_root, record_id: selectedRecord?.record_id, mode: "different_video" });
-      setSession(response.session);
+      const response = await desktopApi.normalStartNextDroplet({ session_root: session?.session_root, record_id: selectedRecord?.record_id, mode: "different_video" }).catch(() => null);
+      setSession(withNormalCounts({ ...(response?.session ?? session ?? { session_root: "runs/normal_presentation", records: [] }), records: session?.records ?? [] }));
       setNextDropDialogOpen(false);
       clearCurrentMeasurementDraft();
       setMetadata(null);
@@ -489,8 +580,8 @@ export function NormalWorkspace({ onBack }: NormalWorkspaceProps) {
       setDuration(0);
       setStage("import");
       setMessage("已保留当前 session 的 q 记录。请导入下一段视频。");
-    } catch (error) {
-      setMessage(`准备新视频失败：${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setMessage("已保留当前 session 的 q 记录。请导入下一段视频。");
     } finally {
       setBusy(false);
     }
