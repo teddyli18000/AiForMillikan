@@ -70,16 +70,7 @@ jobs:
       - name: Verify packaged worker reads bundled config
         working-directory: experimental
         shell: pwsh
-        run: |
-          $exe = "apps\desktop\dist-worker\millikan-experimental-worker.exe"
-          $runDir = Join-Path $env:RUNNER_TEMP "empty_run"
-          New-Item -ItemType Directory -Force $runDir | Out-Null
-          $payload = @{ id = "probe"; op = "analysis.validate"; payload = @{ run_dir = $runDir } } | ConvertTo-Json -Depth 5 -Compress
-          $text = ($payload | & $exe | Out-String)
-          Write-Host $text
-          if ($text -notmatch '"type":"result"') {
-            throw "packaged worker could not resolve configs/default.yaml"
-          }
+        run: .\scripts\probe_packaged_worker.ps1
 
       - name: Package portable EXE
         working-directory: experimental/apps/desktop
