@@ -1,0 +1,88 @@
+name: Experimental Release
+
+on:
+  push:
+    tags:
+      - "experimental-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: experimental/pyproject.toml
+
+      - name: Install Python dependencies
+        working-directory: experimental
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python -m pip install --upgrade pip
+          .venv\Scripts\python -m pip install -e ".[dev]"
+
+      - name: Python tests
+        working-directory: experimental
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: .venv\Scripts\python -m pytest tests -q
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: experimental/apps/desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: experimental/apps/desktop
+        run: npm ci
+
+      - name: Frontend tests
+        working-directory: experimental/apps/desktop
+        run: npm test
+
+      - name: Build renderer and Electron main
+        working-directory: experimental/apps/desktop
+        run: npm run build
+
+      - name: Build Python worker
+        working-directory: experimental/apps/desktop
+        env:
+          MILLIKAN_PYTHON: ${{ github.workspace }}\experimental\.venv\Scripts\python.exe
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: npm run worker:build
+
+      - name: Package portable EXE
+        working-directory: experimental/apps/desktop
+        run: npx electron-builder --win portable --publish never
+
+      - name: Generate SHA256 checksum
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem experimental/apps/desktop/release/*.exe | Select-Object -First 1
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe.FullName).Hash.ToLower()
+          "$hash  $($exe.Name)" | Out-File -Encoding utf8 -FilePath "$($exe.FullName).sha256"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Millikan AI Experimental ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            experimental/apps/desktop/release/*.exe
+            experimental/apps/desktop/release/*.sha256
