@@ -46,5 +46,15 @@ operations.
 
 ## Storage
 
-Every analysis writes a run directory. `runs/` is ignored by Git. Users export a
-package through `report.export`, optionally as a ZIP or PDF.
+Every analysis writes a run directory. The packaged app passes
+`MILLIKAN_RUN_ROOT` to the worker, pointing at Electron's `userData/runs`
+directory (`%APPDATA%\millikan-ai-experimental-desktop\runs` on Windows). The
+worker also falls back to `%LOCALAPPDATA%\MillikanAI\Experimental\runs` when it
+is started directly from a packaged build. Development runs use
+`experimental/runs`. `load_config` applies the environment override to
+`project.run_root`, so manual configs, analysis outputs, and downstream
+artifacts all land in the same persistent root.
+
+The "open run" dialog starts at that root, so earlier runs remain accessible
+after the portable app is restarted. Users export a package through
+`report.export`, optionally as a ZIP or PDF.

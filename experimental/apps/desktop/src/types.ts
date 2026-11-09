@@ -24,18 +24,6 @@ export type ProgressEvent = {
   label: string;
 };
 
-export type NormalProgressEvent = {
-  request_id: string;
-  operation: string;
-  stage: string;
-  label: string;
-  current?: number | null;
-  total?: number | null;
-  unit?: string | null;
-  fraction?: number | null;
-  indeterminate: boolean;
-};
-
 export type StatusMap = {
   video_readable?: boolean;
   valid_for_q?: boolean;

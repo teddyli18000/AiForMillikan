@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,13 @@ def load_config(path: str | Path) -> dict[str, Any]:
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         raise ValueError(f"Config must be a mapping: {config_path}")
+    run_root = os.environ.get("MILLIKAN_RUN_ROOT")
+    if run_root:
+        project = data.get("project")
+        if not isinstance(project, dict):
+            project = {}
+            data["project"] = project
+        project["run_root"] = run_root
     return data
 
 

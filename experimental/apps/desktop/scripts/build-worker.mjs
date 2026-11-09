@@ -26,6 +26,8 @@ const args = [
   path.join(desktopRoot, "build-worker"),
   "--paths",
   path.join(projectRoot, "src"),
+  "--add-data",
+  `${path.join(projectRoot, "configs", "default.yaml")}${path.delimiter}configs`,
   path.join(projectRoot, "src", "millikan_ai", "desktop_worker.py")
 ];
 

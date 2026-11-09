@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { WorkerClient } from "./workerClient";
@@ -81,9 +82,11 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("dialog:openRun", async () => {
+    const runRoot = path.join(app.getPath("userData"), "runs");
     const options = {
       title: "选择 run 目录",
-      properties: ["openDirectory"]
+      properties: ["openDirectory"],
+      defaultPath: fsSync.existsSync(runRoot) ? runRoot : undefined
     } as Electron.OpenDialogOptions;
     const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
     return result.canceled ? null : result.filePaths[0];

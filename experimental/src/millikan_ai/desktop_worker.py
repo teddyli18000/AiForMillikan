@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import shutil
 import sys
 import traceback
@@ -39,6 +40,17 @@ def _configure_utf8_stdio() -> None:
 
 
 _configure_utf8_stdio()
+
+
+def _configure_packaged_run_root() -> None:
+    if not getattr(sys, "frozen", False) or os.environ.get("MILLIKAN_RUN_ROOT"):
+        return
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+    os.environ["MILLIKAN_RUN_ROOT"] = str(base / "MillikanAI" / "Experimental" / "runs")
+
+
+_configure_packaged_run_root()
 
 
 def _camel_case(key: str) -> str:
@@ -182,13 +194,15 @@ def _op_video_inspect(payload: Json, _request_id: str) -> Json:
 
 
 def _resolve_default_config() -> str:
+    bundle_root = getattr(sys, "_MEIPASS", None)
     candidates = [
+        Path(bundle_root) / "configs" / "default.yaml" if bundle_root else None,
         Path.cwd() / "configs" / "default.yaml",
         Path(sys.executable).resolve().parent / "configs" / "default.yaml",
         Path(sys.executable).resolve().parent.parent / "configs" / "default.yaml",
     ]
     for candidate in candidates:
-        if candidate.exists():
+        if candidate is not None and candidate.exists():
             return str(candidate)
     return "configs/default.yaml"
 

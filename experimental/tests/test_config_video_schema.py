@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from millikan_ai import desktop_worker
 from millikan_ai.config import load_config
 from millikan_ai.outputs.schemas import PLATFORMS_COLUMNS, validate_columns
 from millikan_ai.video.reader import inspect_video
@@ -44,6 +45,23 @@ def test_default_config_loads():
 def test_default_config_is_manual_platform_first_without_ocr():
     config = load_config("configs/default.yaml")
     assert "ocr" not in config
+
+
+def test_run_root_environment_override(tmp_path: Path, monkeypatch):
+    run_root = tmp_path / "experimental_runs"
+    monkeypatch.setenv("MILLIKAN_RUN_ROOT", str(run_root))
+    config = load_config("configs/default.yaml")
+    assert config["project"]["run_root"] == str(run_root)
+
+
+def test_worker_resolves_config_from_pyinstaller_bundle(tmp_path: Path, monkeypatch):
+    bundle = tmp_path / "bundle"
+    config_dir = bundle / "configs"
+    config_dir.mkdir(parents=True)
+    bundled = config_dir / "default.yaml"
+    bundled.write_text("project:\n  run_root: runs\n", encoding="utf-8")
+    monkeypatch.setattr(desktop_worker.sys, "_MEIPASS", str(bundle), raising=False)
+    assert desktop_worker._resolve_default_config() == str(bundled)
 
 
 def test_raw_video_inspect_reads_metadata():

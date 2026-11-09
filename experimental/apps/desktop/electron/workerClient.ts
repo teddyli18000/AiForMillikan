@@ -121,21 +121,23 @@ export class WorkerClient {
 function resolveWorkerLaunch(): { command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } {
   if (app.isPackaged) {
     const executable = path.join(process.resourcesPath, "worker", "millikan-experimental-worker.exe");
+    const runRoot = path.join(app.getPath("userData"), "runs");
     return {
       command: executable,
       args: [],
       cwd: path.dirname(executable),
-      env: createUtf8WorkerEnv(process.env)
+      env: createUtf8WorkerEnv({ ...process.env, MILLIKAN_RUN_ROOT: runRoot })
     };
   }
   const projectRoot = findProjectRoot();
   const python = process.env.MILLIKAN_PYTHON || findPython(projectRoot);
   const pythonPath = [path.join(projectRoot, "src"), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter);
+  const runRoot = process.env.MILLIKAN_RUN_ROOT || path.join(projectRoot, "runs");
   return {
     command: python,
     args: ["-m", "millikan_ai.desktop_worker"],
     cwd: projectRoot,
-    env: createUtf8WorkerEnv({ ...process.env, PYTHONPATH: pythonPath })
+    env: createUtf8WorkerEnv({ ...process.env, PYTHONPATH: pythonPath, MILLIKAN_RUN_ROOT: runRoot })
   };
 }
 

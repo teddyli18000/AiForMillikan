@@ -31,6 +31,20 @@ The main process starts `experimental\.venv\Scripts\python -m
 millikan_ai.desktop_worker` and sets `PYTHONPATH` to `experimental\src`.
 Override the interpreter with `MILLIKAN_PYTHON`.
 
+## Run directory
+
+The worker writes analysis results under `MILLIKAN_RUN_ROOT`:
+
+- development: `experimental\runs`
+- packaged: Electron `userData\runs`
+  (`%APPDATA%\millikan-ai-experimental-desktop\runs`)
+- packaged worker started directly: `%LOCALAPPDATA%\MillikanAI\Experimental\runs`
+
+`config.load_config` applies this override to `project.run_root`, so manual
+platform configs and run outputs stay together. `configs/default.yaml` is
+embedded in the worker with PyInstaller `--add-data`, so the portable EXE does
+not depend on a `configs/` folder next to it.
+
 ## Build and package
 
 ```powershell

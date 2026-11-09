@@ -64,6 +64,18 @@ from `normal/`, and its worker must not expose any `normal.*` operation.
 - Update `docs/frontend_backend_interface.md` whenever an artifact or panel
   contract changes.
 
+## Runtime Paths
+
+- The packaged worker embeds `configs/default.yaml` through PyInstaller
+  `--add-data` and resolves it from `sys._MEIPASS`. Do not rely on a `configs/`
+  folder placed next to the EXE.
+- Packaged runs write under `MILLIKAN_RUN_ROOT`: Electron `userData/runs` when
+  launched by the app, or `%LOCALAPPDATA%\MillikanAI\Experimental\runs` when the
+  worker starts directly. `config.load_config` applies this override to
+  `project.run_root`.
+- Never write analysis output into `resources/worker` or another portable
+  unpack directory.
+
 ## Commands
 
 ```powershell
