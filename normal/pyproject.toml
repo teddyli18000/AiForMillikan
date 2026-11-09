@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "millikan-ai-normal"
+version = "0.9.0"
+description = "Normal Millikan workflow backend: balance-voltage plus 0 V single-drop measurement"
+requires-python = ">=3.11"
+dependencies = [
+  "opencv-python",
+  "numpy",
+  "pandas",
+  "trackpy",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pyinstaller",
+]
+
+[project.scripts]
+millikan-normal-worker = "millikan_ai.desktop_worker:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
