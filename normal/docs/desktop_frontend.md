@@ -43,7 +43,11 @@ npm run package
   builds `dist-renderer`.
 - `npm run worker:build` runs PyInstaller and writes
   `dist-worker\millikan-normal-worker.exe`.
-- `npm run package` produces `release\Millikan-AI-Normal-Portable-0.9.0.exe`.
+- `npm run package` produces `release\密立根油滴实验-0.9.0.exe`.
+
+## 界面文案
+
+产品显示名称为“密立根油滴实验”。界面和导出报告使用中文，保留物理符号与标准单位；内部 Normal 名称、IPC 和数据字段不变。流程栏只显示步骤名，处理进度仅在任务执行时显示。计算过程保留，界面不展示前后端实现说明。
 
 ## UI contracts
 

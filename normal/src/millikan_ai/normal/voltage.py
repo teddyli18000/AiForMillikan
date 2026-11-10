@@ -64,7 +64,7 @@ def sample_visual_changes(video_path: str | Path, cfg: dict[str, Any], progress_
     stride = max(1, int(vcfg.get("sample_stride_frames", 5)))
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise RuntimeError(f"cannot open video: {video_path}")
+        raise RuntimeError(f"无法打开视频：{video_path}")
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     previous = None

@@ -13,7 +13,7 @@ function createDemoApi(): DesktopApi {
   const demoTrackFrame =
     "data:image/svg+xml;utf8," +
     encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#101820"/><path d="M90 88h110" stroke="#35c9ff" stroke-width="5"/><path d="M90 88v110" stroke="#35c9ff" stroke-width="5"/><text x="210" y="98" font-family="Arial" font-size="32" fill="#35c9ff">+X</text><text x="58" y="230" font-family="Arial" font-size="32" fill="#35c9ff">+Y</text><path d="M570 180 C560 260 590 330 575 430 C565 500 592 560 580 640" stroke="#2563eb" stroke-width="5" fill="none"/><circle cx="580" cy="640" r="18" fill="none" stroke="#22c55e" stroke-width="7"/><text x="606" y="632" font-family="Arial" font-size="32" fill="#22c55e">target</text><text x="36" y="684" font-family="Arial" font-size="28" fill="#ffffff">frame 96  t=3.20s</text></svg>`
+      `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#101820"/><path d="M90 88h110" stroke="#35c9ff" stroke-width="5"/><path d="M90 88v110" stroke="#35c9ff" stroke-width="5"/><text x="210" y="98" font-family="Arial" font-size="32" fill="#35c9ff">+X</text><text x="58" y="230" font-family="Arial" font-size="32" fill="#35c9ff">+Y</text><path d="M570 180 C560 260 590 330 575 430 C565 500 592 560 580 640" stroke="#2563eb" stroke-width="5" fill="none"/><circle cx="580" cy="640" r="18" fill="none" stroke="#22c55e" stroke-width="7"/><text x="606" y="632" font-family="Arial" font-size="32" fill="#22c55e">目标</text><text x="36" y="684" font-family="Arial" font-size="28" fill="#ffffff">3.20 s</text></svg>`
     );
   const demoNormalSession = (): NormalSession => ({
     session_root: "runs/normal_demo/session",
@@ -300,7 +300,7 @@ function createDemoApi(): DesktopApi {
       const demoFrame =
         "data:image/svg+xml;utf8," +
         encodeURIComponent(
-          `<svg xmlns="http://www.w3.org/2000/svg" width="288" height="288" viewBox="0 0 288 288"><rect width="288" height="288" fill="#101820"/><path d="M144 34v220" stroke="#2563eb" stroke-width="3" fill="none"/><circle cx="144" cy="190" r="18" fill="none" stroke="#22c55e" stroke-width="6"/><text x="166" y="184" font-family="Arial" font-size="24" fill="#22c55e">target</text></svg>`
+          `<svg xmlns="http://www.w3.org/2000/svg" width="288" height="288" viewBox="0 0 288 288"><rect width="288" height="288" fill="#101820"/><path d="M144 34v220" stroke="#2563eb" stroke-width="3" fill="none"/><circle cx="144" cy="190" r="18" fill="none" stroke="#22c55e" stroke-width="6"/><text x="166" y="184" font-family="Arial" font-size="24" fill="#22c55e">目标</text></svg>`
         );
       const review_frames = Array.from({ length: 8 }, (_, frameIndex) => ({
         frame_index: 52 + frameIndex,

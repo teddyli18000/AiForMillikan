@@ -45,6 +45,9 @@ this project's `src/` contains only `millikan_ai/__init__.py`,
 
 ## Physics and UI Rules
 
+- Product-facing name: 密立根油滴实验. UI and exported reports use Chinese,
+  retaining scientific symbols and standard units; internal Normal names stay stable.
+
 - Balance voltage is required. Other physical parameters default from
   `millikan_ai/normal/config.py` and are editable in a collapsed advanced panel.
 - Pressure is `pressure_kPa` in the Normal contract. Do not persist new

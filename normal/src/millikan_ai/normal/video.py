@@ -34,12 +34,12 @@ def inspect_video(video_path: str | Path) -> dict[str, Any]:
 def read_frame(video_path: str | Path, frame_index: int):
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise RuntimeError(f"cannot open video: {video_path}")
+        raise RuntimeError(f"无法打开视频：{video_path}")
     cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(frame_index)))
     ok, frame = cap.read()
     cap.release()
     if not ok:
-        raise RuntimeError(f"cannot read frame {frame_index}: {video_path}")
+        raise RuntimeError(f"无法读取视频第 {frame_index} 帧：{video_path}")
     return frame
 
 

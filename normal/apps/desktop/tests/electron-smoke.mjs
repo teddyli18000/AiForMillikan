@@ -4,7 +4,7 @@ import process from "node:process";
 import { _electron as electron } from "playwright-core";
 
 const appRoot = path.resolve(import.meta.dirname, "..");
-const executable = path.join(appRoot, "release", "win-unpacked", "Millikan AI Normal.exe");
+const executable = path.join(appRoot, "release", "win-unpacked", "密立根油滴实验.exe");
 if (!fs.existsSync(executable)) {
   throw new Error(`packaged app not found: ${executable}. Run "npx electron-builder --win dir" first.`);
 }

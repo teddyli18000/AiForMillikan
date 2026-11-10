@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -10,6 +12,22 @@ import cv2
 import numpy as np
 import pandas as pd
 import trackpy as tp
+from PIL import Image, ImageDraw, ImageFont
+
+_REVIEW_FONT_PATH = Path(os.environ["SystemRoot"]) / "Fonts" / "msyh.ttc"
+
+
+@lru_cache(maxsize=4)
+def _review_font(size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(str(_REVIEW_FONT_PATH), size)
+
+
+def _draw_review_label(draw: ImageDraw.ImageDraw, frame_size: tuple[int, int], label: str, position: tuple[int, int], color: tuple[int, int, int], size: int, stroke_width: int = 2) -> None:
+    font = _review_font(size)
+    bounds = draw.textbbox((0, 0), label, font=font, stroke_width=stroke_width)
+    x = max(2 - bounds[0], min(position[0], frame_size[0] - bounds[2] - 2))
+    y = max(2 - bounds[1], min(position[1], frame_size[1] - bounds[3] - 2))
+    draw.text((x, y), label, fill=color, font=font, stroke_width=stroke_width, stroke_fill=(16, 24, 32))
 
 
 @dataclass(frozen=True)
@@ -278,12 +296,12 @@ def visualization_layers(track: pd.DataFrame, crossings: list[dict[str, Any]], r
 def make_overlay_video(video_path: str, track: pd.DataFrame, out_path: Path, start_frame: int, end_frame: int, grid: dict[str, Any]) -> None:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise RuntimeError(f"cannot open video: {video_path}")
+        raise RuntimeError(f"无法打开视频：{video_path}")
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     ok, first = cap.read()
     if not ok:
-        raise RuntimeError("cannot read overlay first frame")
+        raise RuntimeError("无法读取轨迹复核视频的首帧。")
     h, w = first.shape[:2]
     out_path.parent.mkdir(parents=True, exist_ok=True)
     writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
@@ -304,7 +322,7 @@ def make_overlay_video(video_path: str, track: pd.DataFrame, out_path: Path, sta
 def make_track_review_frames(video_path: str, track: pd.DataFrame, out_dir: Path, start_frame: int, end_frame: int, grid: dict[str, Any]) -> list[dict[str, Any]]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise RuntimeError(f"cannot open video: {video_path}")
+        raise RuntimeError(f"无法打开视频：{video_path}")
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     by_frame = {int(row.source_frame): row for row in track.itertuples()}
     points: list[tuple[int, int]] = []
@@ -320,7 +338,7 @@ def make_track_review_frames(video_path: str, track: pd.DataFrame, out_dir: Path
         image_path = out_dir / f"frame_{len(frames):04d}.jpg"
         if not cv2.imwrite(str(image_path), frame):
             cap.release()
-            raise RuntimeError(f"cannot write track review frame: {image_path}")
+            raise RuntimeError(f"无法保存轨迹复核画面：{image_path}")
         height, width = frame.shape[:2]
         frames.append({"frame_index": frame_idx, "time_s": frame_idx / fps if fps > 0 else 0.0, "image_path": str(image_path), "width": width, "height": height})
     cap.release()
@@ -330,11 +348,11 @@ def make_track_review_frames(video_path: str, track: pd.DataFrame, out_dir: Path
 
 def _draw_track_review_overlay(frame, row, points: list[tuple[int, int]], grid: dict[str, Any], frame_idx: int, fps: float, include_axes: bool) -> None:
     height, width = frame.shape[:2]
+    labels: list[tuple[str, tuple[int, int], tuple[int, int, int], int]] = []
     if include_axes:
         cv2.arrowedLine(frame, (28, 32), (118, 32), (53, 201, 255), 2, tipLength=0.18)
         cv2.arrowedLine(frame, (28, 32), (28, 122), (53, 201, 255), 2, tipLength=0.18)
-        cv2.putText(frame, "+X", (124, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (53, 201, 255), 2, cv2.LINE_AA)
-        cv2.putText(frame, "+Y", (12, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (53, 201, 255), 2, cv2.LINE_AA)
+        labels.extend([("水平方向", (124, 22), (255, 201, 53), 18), ("竖直向下", (38, 104), (255, 201, 53), 18)])
         for y in grid.get("grid_lines_y", []) or []:
             if _is_finite_number(y):
                 y_i = int(round(float(y)))
@@ -355,27 +373,35 @@ def _draw_track_review_overlay(frame, row, points: list[tuple[int, int]], grid: 
         if _is_finite_number(x) and _is_finite_number(y):
             origin = (int(round(float(x))), int(round(float(y))))
             color = (0, 255, 0) if detected else (0, 255, 255)
-            label = "target" if detected else "missing"
+            label = "目标油滴" if detected else "未检出"
             if str(row.state) in {"tracking", "reacquired"}:
                 points.append(origin)
             for a, b in zip(points[:-1], points[1:]):
                 cv2.line(frame, a, b, (255, 0, 0), 2)
             cv2.circle(frame, origin, 7, color, 2)
-            cv2.putText(frame, label, (origin[0] + 10, max(20, origin[1] - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
-            cv2.putText(frame, f"({origin[0]}, {origin[1]})", (origin[0] + 10, min(height - 12, origin[1] + 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+            labels.append((label, (origin[0] + 10, max(20, origin[1] - 24)), (color[2], color[1], color[0]), 20))
+            labels.append((f"({origin[0]}, {origin[1]})", (origin[0] + 10, min(height - 22, origin[1] + 8)), (color[2], color[1], color[0]), 15))
     else:
         for a, b in zip(points[:-1], points[1:]):
             cv2.line(frame, a, b, (255, 0, 0), 2)
 
     if include_axes:
-        label = f"frame {frame_idx}  t={frame_idx / fps:.2f}s" if fps > 0 else f"frame {frame_idx}"
-        cv2.putText(frame, label, (28, height - 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+        label = f"第 {frame_idx} 帧  时间 {frame_idx / fps:.2f} 秒" if fps > 0 else f"第 {frame_idx} 帧"
+        labels.append((label, (28, height - 36), (255, 255, 255), 20))
+
+    if labels:
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(rgb)
+        draw = ImageDraw.Draw(image)
+        for label, position, color, size in labels:
+            _draw_review_label(draw, image.size, label, position, color, size)
+        frame[:] = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
 
 
 def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: Path, track_rows: list[dict[str, Any]] | None = None, crop_size: int = 96, scale: int = 3) -> dict[str, Any]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise RuntimeError(f"cannot open video: {video_path}")
+        raise RuntimeError(f"无法打开视频：{video_path}")
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     start_frame = max(0, int(round(float(event.get("review_start_time_s", 0.0)) * fps)))
@@ -389,7 +415,7 @@ def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: 
     ok, first = cap.read()
     if not ok:
         cap.release()
-        raise RuntimeError("cannot read crossing review first frame")
+        raise RuntimeError("无法读取身份复核片段的首帧。")
     height, width = first.shape[:2]
     x0 = max(0, min(width - 1, int(round(center_x - half))))
     y0 = max(0, min(height - 1, int(round(center_y - half))))
@@ -423,23 +449,27 @@ def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: 
             local_x = int(round(float(rx) - x0))
             local_y = int(round(float(ry) - y0))
             color = (0, 255, 0) if detected else (0, 255, 255)
-            label = "target" if detected else "missing"
+            label = "目标" if detected else "未检出"
             if detected:
                 trail.append((local_x, local_y))
         else:
             local_x = int(round(center_x - x0))
             local_y = int(round(center_y - y0))
             color = (0, 255, 255)
-            label = "missing"
+            label = "未检出"
         for a, b in zip(trail[:-1], trail[1:]):
             cv2.line(crop, a, b, (255, 0, 0), 1)
         cv2.circle(crop, (local_x, local_y), 8, color, 2)
-        cv2.putText(crop, label, (local_x + 10, max(14, local_y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+        rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(rgb_crop)
+        draw = ImageDraw.Draw(image)
+        _draw_review_label(draw, image.size, label, (local_x + 10, max(4, local_y - 18)), (color[2], color[1], color[0]), 14, stroke_width=1)
+        crop[:] = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
         rendered = cv2.resize(crop, out_size, interpolation=cv2.INTER_NEAREST)
         writer.write(rendered)
         image_path = frames_dir / f"frame_{len(review_frames):04d}.jpg"
         if not cv2.imwrite(str(image_path), rendered):
-            raise RuntimeError(f"cannot write crossing review frame: {image_path}")
+            raise RuntimeError(f"无法保存身份复核画面：{image_path}")
         review_frames.append(
             {
                 "frame_index": frame_idx,
@@ -483,7 +513,7 @@ def _mark_fit_window(track: pd.DataFrame, zero_start: int, zero_end: int, grid: 
 def _read_frames(video_path: str, start: int, end: int, progress_callback: ProgressCallback | None = None) -> tuple[list, float]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise RuntimeError(f"cannot open video: {video_path}")
+        raise RuntimeError(f"无法打开视频：{video_path}")
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     cap.set(cv2.CAP_PROP_POS_FRAMES, start)
     frames = []
@@ -497,7 +527,7 @@ def _read_frames(video_path: str, start: int, end: int, progress_callback: Progr
             progress_callback("read_tracking_frames", "正在读取追踪帧", len(frames), total, "frames")
     cap.release()
     if not frames:
-        raise RuntimeError("no tracking frames")
+        raise RuntimeError("未能读取用于追踪油滴的视频画面。")
     return frames, fps
 
 

@@ -22,7 +22,7 @@ function createWindow(): void {
     minHeight: Math.min(700, height),
     center: true,
     show: false,
-    title: "Millikan AI Normal",
+    title: "密立根油滴实验",
     backgroundColor: "#f7f9fc",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 18, y: 18 },
@@ -74,8 +74,8 @@ function registerIpc(): void {
       title: "选择实验视频",
       properties: ["openFile"],
       filters: [
-        { name: "Video", extensions: ["mp4", "mov", "avi", "mkv", "m4v"] },
-        { name: "All files", extensions: ["*"] }
+        { name: "视频", extensions: ["mp4", "mov", "avi", "mkv", "m4v"] },
+        { name: "所有文件", extensions: ["*"] }
       ]
     } as Electron.OpenDialogOptions;
     const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
@@ -145,7 +145,7 @@ function cleanupTransientNormalSessions(): void {
 
 async function exportNormalSession(payload: { session_root?: string }): Promise<unknown> {
   const options = {
-    title: "选择 Normal session 导出位置",
+    title: "选择报告导出位置",
     properties: ["openDirectory", "createDirectory"]
   } as Electron.OpenDialogOptions;
   const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
