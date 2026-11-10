@@ -606,7 +606,6 @@ export function NormalWorkspace() {
     }
     setBoundary(nextBoundary);
     setBoundaryDirty(false);
-    setBoundaryDiagnostics(null);
 
     const restoredSelectionTime = clampSelectionTime(Number(target?.target_time_s ?? nextBoundary.zero_v_start_s ?? 0), nextBoundary, nextMetadata ?? metadata);
     const restoredVoltage = adjustment.balance_voltage_V ?? record.balance_voltage_V;
