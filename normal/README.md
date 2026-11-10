@@ -1,46 +1,85 @@
-# 密立根油滴实验
+# Millikan AI Normal
 
-版本 0.9.0。基于平衡电压与零电压下落法，逐滴测量电荷，并从多次测量中估计元电荷。
+**Version 0.9.0** — the mainline human-in-the-loop measurement app for the
+Millikan oil-drop experiment.
 
-## 使用流程
+Normal follows the traditional balance-voltage plus `0 V` falling method and
+keeps every consequential decision visible. The app suggests where to look,
+tracks one selected droplet, asks the experimenter to review ambiguous grid
+crossings, calculates a single-drop charge with an explicit uncertainty trace,
+and performs a blind integer-residual search after at least three accepted
+measurements.
 
-1. 导入实验视频，检查画面。
-2. 确认零电压区间，可按 1 秒或 0.1 秒微调起止时间。
-3. 在零电压起点附近框选油滴，填写平衡电压并确认油滴近似静止。
-4. 检查轨迹，逐一复核经过网格线的片段是否为同一颗油滴。
-5. 查看电荷、标准不确定度和计算过程，确认保留或返回调整。
-6. 保留至少三条有效记录后，估计元电荷。
-7. 关闭软件前导出报告；未导出的记录不会留到下次启动。
+The AI value proposition is intelligent assistance with inspectable evidence,
+not an unreviewed automatic answer.
 
-导出内容包括中文实验报告、测量数据和复核材料。原始 JSON、CSV 保留数值与字段名称，便于后续分析。
+![q calculation evidence](../media/screenshots/q-calculation.png)
 
-## 计算说明
+## Workflow
 
-电荷不确定度由速度拟合斜率的不确定度传播得到，未计入仪器与物性参数误差。元电荷通过带不确定度权重的整数倍残差搜索估计；标准值只用于结果对照，不参与搜索。
+1. Import a video by file dialog or drag-and-drop. The app shows fps, frame
+   count, resolution, and duration.
+2. Confirm the `0 V` falling interval with `±1 s` and `±0.1 s` controls.
+3. Select the target droplet inside `0V_start_s ± 0.5 s`.
+4. Track the droplet locally with Trackpy and review the full trajectory.
+5. Review every crossing event with backend-generated review frames.
+6. Accept or reject the q record and inspect the calculation chain.
+7. After three accepted q records, run the Normal blind inversion.
+8. Export the transient session before closing the app.
 
-## 开发与测试
+![tracking review](../media/screenshots/tracking-review.png)
+![inversion result](../media/screenshots/inversion-results.png)
 
-本应用位于 `normal/`，与 `experimental/` 分别维护。内部 Python 包、工作进程接口和数据字段沿用原名。
+## Layout
 
-本地 Python 测试可使用已有的 conda 环境：
-
-```powershell
-conda run -n millikan-ai-dev python -m pytest normal/tests -q
-cd normal/apps/desktop
-npm test
-npm run dev
+```
+normal/
+├── apps/desktop/           # Electron + React renderer and main process
+├── src/millikan_ai/        # Normal Python worker and millikan_ai.normal package
+├── tests/                  # Normal-only Python tests
+├── docs/                   # Normal contracts and physics notes
+├── pyproject.toml
+└── AGENTS.md
 ```
 
-Windows 构建与打包由 GitHub Actions 的 Normal CI 完成，覆盖 Python、前端、TypeScript、工作进程、便携版打包及 Electron IPC 检查。安装包名称为 `密立根油滴实验-0.9.0.exe`。发布标签仍使用 `normal-vX.Y.Z`。
+## Build and test
 
-## 技术文档
+```powershell
+cd normal
+python -m venv .venv
+.venv\Scripts\python -m pip install -e ".[dev]"
+.venv\Scripts\python -m pytest tests -q
 
-- [前后端接口](docs/frontend_backend_interface.md)
-- [测量流程](docs/technical/normal-workflow.md)
-- [追踪与复核](docs/technical/tracking-and-review.md)
-- [计算方法](docs/academic/)
-- [桌面应用开发](docs/desktop_frontend.md)
+cd apps\desktop
+npm ci
+npm test
+npm run build
+npm run worker:build
+npx electron-builder --win portable
+```
 
-## 许可
+The portable artifact is `Millikan-AI-Normal-Portable-0.9.0.exe`.
 
-MIT，见 [LICENSE](../LICENSE)。
+## Scientific boundaries
+
+- One droplet at a time. Multi-drop statistics are not a Normal feature.
+- q comes from the balance-voltage plus `0 V` falling method, with uncertainty
+  propagated from the linear-regression slope and q(v).
+- The blind inversion reports `e_hat_C`, `sigma_e_C`, candidate solutions,
+  integer assignments, and residuals. It does not claim a quantized model
+  winner while the continuous baseline is not fitted.
+- With fewer than three accepted q records the app reports insufficient
+  evidence instead of inventing an estimate.
+
+## Documentation
+
+- [Frontend/backend contract](docs/frontend_backend_interface.md)
+- [Normal workflow](docs/technical/normal-workflow.md)
+- [Tracking and review](docs/technical/tracking-and-review.md)
+- [Architecture](docs/technical/architecture.md)
+- [Academic notes](docs/academic/)
+- [Desktop build notes](docs/desktop_frontend.md)
+
+## License
+
+MIT. See [../LICENSE](../LICENSE).
