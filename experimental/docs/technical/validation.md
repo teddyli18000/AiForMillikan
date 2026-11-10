@@ -34,6 +34,32 @@ The slow synthetic estimator harness is:
 .venv\Scripts\python scripts\validate_estimator_simulation.py
 ```
 
+## Packaged acceptance in CI
+
+CI builds the PyInstaller worker and the Electron app, then runs:
+
+```powershell
+# from experimental/ (bundled-config probe)
+pwsh -NoProfile -File scripts\probe_packaged_worker.ps1
+
+# from experimental/ (end-to-end)
+.venv\Scripts\python scripts\probe_packaged_worker.py --worker apps\desktop\dist-worker\millikan-experimental-worker.exe
+
+# from experimental/apps/desktop/ after electron-builder --win dir
+node tests\electron-smoke.mjs
+```
+
+The end-to-end probe runs the packaged worker over
+`../media/videos/2u.mp4` with a temporary fast config:
+`video.inspect → analysis.run → analysis.loadRun → report.export`, then reloads
+the same persistent run from a fresh worker process. It checks success payloads,
+`run_manifest.json`, report/export files, and the persistent run path. It does
+not check q or e accuracy.
+
+`electron-smoke.mjs` launches the packaged application with Playwright, waits
+for the analysis workspace, and calls `inspectVideo` through the real
+preload/IPC path.
+
 ## Media
 
 Smoke videos live in `../media/videos/`. Tests resolve them by walking up to the

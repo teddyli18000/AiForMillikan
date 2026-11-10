@@ -5,7 +5,8 @@ if (-not (Test-Path $exe)) {
     throw "packaged worker not found: $exe"
 }
 
-$runDir = Join-Path $env:RUNNER_TEMP "empty_run"
+$tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
+$runDir = Join-Path $tempRoot "empty_run"
 New-Item -ItemType Directory -Force $runDir | Out-Null
 
 $payload = @{

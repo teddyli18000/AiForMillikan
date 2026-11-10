@@ -67,15 +67,27 @@ this project's `src/` contains only `millikan_ai/__init__.py`,
 - Stage 6 has one canonical result card in the main content area; the inspector
   must not duplicate it.
 
+## Packaged Acceptance
+
+- `scripts/probe_packaged_worker.py` must pass against the packaged worker. It
+  drives the full Normal sequence on a synthetic video and checks exported
+  artifacts, not physical accuracy.
+- `apps/desktop/tests/electron-smoke.mjs` must pass against `release/win-unpacked`.
+  It is the only check that exercises the real preload/IPC path; React tests use
+  the demo API and do not replace it.
+- Do not remove these checks from CI. They are the release acceptance loop.
+
 ## Commands
 
 ```powershell
 cd normal
 .venv\Scripts\python -m pytest tests -q
+.venv\Scripts\python scripts\probe_packaged_worker.py --worker apps\desktop\dist-worker\millikan-normal-worker.exe
 cd apps\desktop
 npm test
 npm run build
 npm run worker:build
+node tests\electron-smoke.mjs
 ```
 
 ## Encoding

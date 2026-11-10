@@ -76,11 +76,25 @@ from `normal/`, and its worker must not expose any `normal.*` operation.
 - Never write analysis output into `resources/worker` or another portable
   unpack directory.
 
+## Packaged Acceptance
+
+- `scripts/probe_packaged_worker.ps1` must pass: it proves the packaged worker
+  resolves the embedded `configs/default.yaml`.
+- `scripts/probe_packaged_worker.py` must pass against the packaged worker with
+  `media/videos/2u.mp4`: `video.inspect → analysis.run → analysis.loadRun →
+  report.export`, then reload from a fresh process. It checks success payloads,
+  manifest, report/export files, and the persistent run root, not q/e accuracy.
+- `apps/desktop/tests/electron-smoke.mjs` must pass against `release/win-unpacked`.
+  It is the only check that exercises the real preload/IPC path; React tests use
+  the demo API and do not replace it.
+- Do not remove these checks from CI. They are the release acceptance loop.
+
 ## Commands
 
 ```powershell
 cd experimental
 .venv\Scripts\python -m pytest tests -q
+.venv\Scripts\python scripts\probe_packaged_worker.py --worker apps\desktop\dist-worker\millikan-experimental-worker.exe
 .venv\Scripts\python run_millikan.py
 .venv\Scripts\python -m millikan_ai.cli inspect ..\media\videos\2u.mp4
 .venv\Scripts\python -m millikan_ai.cli analyze --video ..\media\videos\2u.mp4 --config configs\default.yaml --auto-platform-count 3 --platform-value 0 --platform-value 175 --platform-value 239

@@ -11,7 +11,7 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
@@ -67,9 +67,26 @@ jobs:
           PYTHONIOENCODING: "utf-8"
         run: npm run worker:build
 
+      - name: Packaged worker end-to-end
+        working-directory: normal
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: .venv\Scripts\python scripts\probe_packaged_worker.py --worker apps\desktop\dist-worker\millikan-normal-worker.exe
+
       - name: Package portable EXE
         working-directory: normal/apps/desktop
         run: npx electron-builder --win portable --publish never
+
+      - name: Prepare packaged app directory
+        working-directory: normal/apps/desktop
+        run: npx electron-builder --win dir --publish never
+
+      - name: Electron IPC smoke
+        working-directory: normal/apps/desktop
+        env:
+          MILLIKAN_SMOKE_VIDEO: ${{ github.workspace }}\media\videos\2u.mp4
+        run: node tests/electron-smoke.mjs
 
       - name: Generate SHA256 checksum
         shell: pwsh
