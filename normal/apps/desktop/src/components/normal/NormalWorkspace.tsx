@@ -1230,10 +1230,10 @@ function ReviewPanel(props: {
         </button>
       </div>
       <div className="normal-crossing-list">
-        {crossings.map((event) => (
+        {crossings.map((event, index) => (
           <button key={event.event_id} className={props.reviewEvent?.event_id === event.event_id ? "active" : ""} onClick={() => props.onPrepareReview(event)}>
             <Scissors size={14} />
-            <span>{event.event_id}</span>
+            <span>过线片段 {index + 1}</span>
             <small>{formatFixed(event.start_time_s ?? event.time_s, 2)}s · {event.review_result === "same_drop" ? "同一颗油滴" : event.review_result === "different_drop" ? "油滴不一致" : "待复核"}</small>
           </button>
         ))}
@@ -1324,9 +1324,9 @@ function ResultsPanel(props: {
         <div className="normal-drop-hint">还没有本次测量记录。</div>
       )}
       <div className="normal-record-list">
-        {(props.session?.records ?? []).map((item) => (
+        {(props.session?.records ?? []).map((item, index) => (
           <button key={item.record_id} className={item.record_id === record?.record_id ? "active" : ""} onClick={() => props.onSelectRecord(item.record_id)}>
-            <span className="record-id">{item.record_id}</span>
+            <span className="record-id">测量 {index + 1}</span>
             <strong>{fmtCharge(item.q_C)}</strong>
             <small>{statusLabel(item.status)}</small>
           </button>
@@ -1599,7 +1599,7 @@ function NormalInversionDashboard({ inversion, records }: { inversion: NormalInv
           </section>
           <section className="normal-inversion-tables">
             <CandidateList candidates={candidates} />
-            <AssignmentTable assignments={assignments} />
+            <AssignmentTable assignments={assignments} records={records} />
           </section>
         </>
       )}
@@ -1736,7 +1736,7 @@ function CandidateList({ candidates }: { candidates: NonNullable<NormalInversion
   );
 }
 
-function AssignmentTable({ assignments }: { assignments: NonNullable<NormalInversionResult["assignments"]> }) {
+function AssignmentTable({ assignments, records }: { assignments: NonNullable<NormalInversionResult["assignments"]>; records: NormalRecord[] }) {
   return (
     <div className="normal-inversion-table-card">
       <div className="chart-heading">
@@ -1757,7 +1757,7 @@ function AssignmentTable({ assignments }: { assignments: NonNullable<NormalInver
           <tbody>
             {assignments.map((row, index) => (
               <tr key={row.record_id ?? index}>
-                <td>{String(row.record_id ?? index + 1)}</td>
+                <td>测量 {records.findIndex((record) => record.record_id === row.record_id) + 1}</td>
                 <td>{fmtCharge(row.q_C)}</td>
                 <td>{row.n ?? "-"}</td>
                 <td>{fmtCharge(row.nearest_quantized_charge_C)}</td>
@@ -1846,7 +1846,7 @@ function CrossingFramePlayer({ event }: { event: NormalCrossingEvent }) {
         />
         <span>{formatFixed(activeFrame.time_s, 2)} s</span>
       </div>
-      <small>{event.event_id} · {frameIndex + 1}/{frames.length}</small>
+      <small>第 {frameIndex + 1} / {frames.length} 帧</small>
     </div>
   );
 }

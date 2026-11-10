@@ -37,7 +37,7 @@ async function reachAcceptedNormalRecord() {
   await userEvent.type(screen.getByPlaceholderText("例如 239"), "239");
   await userEvent.click(screen.getByLabelText(/我确认该油滴/));
   await userEvent.click(screen.getByRole("button", { name: /确认框选并开始追踪/ }));
-  await userEvent.click(await screen.findByRole("button", { name: /C001/ }));
+  await userEvent.click(await screen.findByRole("button", { name: /过线片段 1/ }));
   expect(await screen.findByLabelText("过线片段播放器")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /同一颗油滴/ }));
   await userEvent.click(await screen.findByRole("button", { name: "确认保留" }));
@@ -127,7 +127,7 @@ describe("Millikan AI Normal desktop app", () => {
       fireEvent.mouseMove(overlay, { clientX: 220, clientY: 180 });
       fireEvent.mouseUp(overlay, { clientX: 220, clientY: 180 });
       await userEvent.click(screen.getByRole("button", { name: /确认框选并开始追踪/ }));
-      await userEvent.click(await screen.findByRole("button", { name: /C001/ }));
+      await userEvent.click(await screen.findByRole("button", { name: /过线片段 1/ }));
       expect(await screen.findByLabelText("过线片段播放器")).toBeInTheDocument();
     } finally {
       cleanupRect();
@@ -157,7 +157,7 @@ describe("Millikan AI Normal desktop app", () => {
       fireEvent.mouseMove(overlay, { clientX: x + 36, clientY: 170 });
       fireEvent.mouseUp(overlay, { clientX: x + 36, clientY: 170 });
       await userEvent.click(screen.getByRole("button", { name: /确认框选并开始追踪/ }));
-      await userEvent.click(await screen.findByRole("button", { name: /C001/ }));
+      await userEvent.click(await screen.findByRole("button", { name: /过线片段 1/ }));
       await userEvent.click(await screen.findByRole("button", { name: /同一颗油滴/ }));
       await userEvent.click(await screen.findByRole("button", { name: "确认保留" }));
       expect(await screen.findByRole("button", { name: /下一颗油滴/ })).toBeInTheDocument();
