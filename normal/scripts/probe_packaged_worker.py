@@ -29,7 +29,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 
 OVERRIDES: dict[str, Any] = {
-    "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 3},
+    "grid": {"measurement_distance_m": 0.0015, "mask_dilate_px": 1},
     "tracking": {"minmass": 20, "memory_frames": 4, "grid_occlusion_radius_px": 1},
     "fit": {"min_points": 8, "min_duration_s": 0.4, "min_displacement_px": 2.0, "min_r2": 0.2},
 }
@@ -41,7 +41,8 @@ def make_video(path: Path) -> None:
         frame = np.zeros((240, 320, 3), dtype=np.uint8)
         for y in [30, 70, 110, 150, 190]:
             cv2.line(frame, (24, y), (296, y), (190, 190, 190), 1)
-        cv2.circle(frame, (92, int(82 + index * 0.24)), 5, (255, 255, 255), -1)
+        # 0.5 px/frame from y=52 reaches the y=110 grid line inside the 0-3.8 s window.
+        cv2.circle(frame, (92, int(52 + index * 0.5)), 5, (255, 255, 255), -1)
         writer.write(frame)
     writer.release()
 
@@ -76,10 +77,10 @@ def target_payload(session_root: str) -> dict[str, Any]:
         "balance_voltage_V": 239.0,
         "balance_confirmed": True,
         "target": {
-            "target_frame": 3,
-            "target_time_s": 0.1,
-            "source_center": {"x": 92.0, "y": 83.0},
-            "source_video_box": {"x": 78.0, "y": 69.0, "width": 28.0, "height": 28.0},
+            "target_frame": 0,
+            "target_time_s": 0.0,
+            "source_center": {"x": 92.0, "y": 52.0},
+            "source_video_box": {"x": 78.0, "y": 38.0, "width": 28.0, "height": 28.0},
         },
         "parameter_overrides": OVERRIDES,
     }
@@ -116,6 +117,7 @@ def main() -> int:
         session_root_text = str(initialized["session_root"])
 
         accepted_records: list[dict[str, Any]] = []
+        reviewed_crossings = 0
         for index in range(3):
             prepared = worker_call(
                 command,
@@ -133,7 +135,7 @@ def main() -> int:
                 "normal.confirmBoundary",
                 {
                     "session_root": session_root_text,
-                    "boundary": {"zero_v_start_s": 0.1, "zero_v_end_s": 2.8, "source": "ci_probe"},
+                    "boundary": {"zero_v_start_s": 0.0, "zero_v_end_s": 3.8, "source": "ci_probe"},
                 },
                 args.timeout,
             )
@@ -149,7 +151,10 @@ def main() -> int:
             if record["q_C"] <= 0 or record["sigma_q_C"] <= 0:
                 raise SystemExit(f"record {record['record_id']} has no usable q")
 
-            for crossing in record.get("crossings", []):
+            crossings = record.get("crossings", [])
+            if not crossings:
+                raise SystemExit(f"record {record['record_id']} produced no crossing event")
+            for crossing in crossings:
                 review = worker_call(
                     command,
                     env,
@@ -175,6 +180,7 @@ def main() -> int:
                     },
                     args.timeout,
                 )
+                reviewed_crossings += 1
 
             accepted = worker_call(
                 command,
@@ -196,6 +202,9 @@ def main() -> int:
                     {"session_root": session_root_text, "record_id": record["record_id"], "mode": "same_video"},
                     args.timeout,
                 )
+
+        if reviewed_crossings < 3:
+            raise SystemExit(f"only {reviewed_crossings} crossing events were reviewed; expected at least one per record")
 
         inversion = worker_call(
             command,
