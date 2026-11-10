@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { _electron as electron } from "playwright";
+import { _electron as electron } from "playwright-core";
 
 const appRoot = path.resolve(import.meta.dirname, "..");
 const executable = path.join(appRoot, "release", "win-unpacked", "Millikan AI Experimental.exe");
