@@ -18,14 +18,37 @@ import type { VideoBox, VideoPoint } from "./videoGeometry";
 
 type StageId = "import" | "boundary" | "target" | "review" | "results" | "inversion";
 
-const stages: Array<{ id: StageId; title: string; detail: string }> = [
-  { id: "import", title: "导入与预览", detail: "inspect 只读元数据" },
-  { id: "boundary", title: "0V 边界确认", detail: "秒级微调起止" },
-  { id: "target", title: "框选目标油滴", detail: "平衡确认后追踪" },
-  { id: "review", title: "轨迹与 crossing", detail: "人工复核身份" },
-  { id: "results", title: "结果与 session", detail: "确认保留再反演" },
-  { id: "inversion", title: "盲反演结果", detail: "e 与量子化诊断" }
+const stages: Array<{ id: StageId; title: string }> = [
+  { id: "import", title: "导入视频" },
+  { id: "boundary", title: "确认零电压区间" },
+  { id: "target", title: "框选油滴" },
+  { id: "review", title: "复核轨迹" },
+  { id: "results", title: "测量结果" },
+  { id: "inversion", title: "元电荷估计" }
 ];
+
+const parameterLabels: Record<string, string> = {
+  plate_distance_m: "极板间距（m）",
+  air_viscosity_Pa_s: "空气黏度（Pa·s）",
+  pressure_kPa: "气压（kPa）",
+  oil_density_kg_m3: "油滴密度（kg/m³）",
+  cunningham_b_kPa_m: "滑移修正系数（kPa·m）",
+  gravity_m_s2: "重力加速度（m/s²）",
+  measurement_distance_m: "测量距离（m）"
+};
+
+const diagnosticLabels: Record<string, string> = {
+  zero_v_operation_not_detected: "未识别到零电压切换，请手动调整区间",
+  zero_v_end_needs_review: "请确认零电压结束时间",
+  insufficient_eligible_records: "有效记录不足三条",
+  weighted_residual_too_large: "拟合残差较大",
+  integer_assignments_nonprimitive: "整数分配存在公因数",
+  search_boundary_hit: "结果位于搜索边界",
+  integer_assignment_not_stable: "整数分配尚未稳定",
+  exploratory_small_sample: "样本较少，结果供参考"
+};
+
+const diagnosticLabel = (flag: string) => diagnosticLabels[flag] ?? "结果需复核";
 
 const physicsKeys = [
   "plate_distance_m",
@@ -47,14 +70,14 @@ const formatFixed = (value?: number | null, digits = 2) => {
 
 const statusLabel = (status?: string) => {
   const labels: Record<string, string> = {
-    pending_crossing_review: "待 crossing 复核",
+    pending_crossing_review: "待轨迹复核",
     pending_user_confirmation: "待用户确认",
     accepted: "已保留",
     diagnostic: "诊断",
-    rejected_crossing_identity: "crossing 否决",
-    rejected_by_user: "用户排除"
+    rejected_crossing_identity: "油滴不一致",
+    rejected_by_user: "已排除"
   };
-  return labels[status || ""] || status || "未开始";
+  return labels[status || ""] || "未开始";
 };
 
 function clampBoundary(boundary: NormalBoundary, metadata: VideoMetadata | null, options: { preserveSelectionWindow?: boolean } = {}): NormalBoundary {
@@ -98,7 +121,6 @@ export function NormalWorkspace() {
   const [videoUrl, setVideoUrl] = useState("");
   const [boundary, setBoundary] = useState<NormalBoundary>({ zero_v_start_s: 0, zero_v_end_s: 1, source: "manual_ui" });
   const [boundaryDirty, setBoundaryDirty] = useState(false);
-  const [boundaryDiagnostics, setBoundaryDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [grid, setGrid] = useState<NormalGrid | null>(null);
   const [selectionTime, setSelectionTime] = useState(0);
   const [selectionBox, setSelectionBox] = useState<VideoBox | null>(null);
@@ -113,7 +135,7 @@ export function NormalWorkspace() {
   const [inversion, setInversion] = useState<NormalInversionResult | null>(null);
   const [progress, setProgress] = useState<NormalProgressEvent | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("Normal：先导入视频，预览无误后再开始处理。");
+  const [message, setMessage] = useState("请选择实验视频。");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -128,7 +150,7 @@ export function NormalWorkspace() {
         setSession(result.session);
         setBackendConfig(result.config);
       })
-      .catch((error) => setMessage(`Normal 初始化失败：${error instanceof Error ? error.message : String(error)}`));
+      .catch((error) => setMessage(`初始化失败：${error instanceof Error ? error.message : String(error)}`));
     return () => {
       alive = false;
     };
@@ -173,6 +195,7 @@ export function NormalWorkspace() {
       return;
     }
     setBusy(true);
+    setProgress(null);
     try {
       const result = await desktopApi.normalInspectVideo({ video_path: path });
       setMetadata(result.metadata);
@@ -188,7 +211,7 @@ export function NormalWorkspace() {
       setReviewEvent(null);
       setInversion(null);
       setStage("import");
-      setMessage("视频预览已就绪。点击开始处理后才会检测 0V 和网格。");
+      setMessage("视频已载入，可开始处理。");
     } catch (error) {
       setMessage(`视频预览失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -232,12 +255,11 @@ export function NormalWorkspace() {
       setVideoUrl(result.video_url || videoUrl);
       setBoundary(clampBoundary(result.boundary, result.metadata));
       setBoundaryDirty(false);
-      setBoundaryDiagnostics(result.boundary_diagnostics ?? null);
       setSelectionTime(clampSelectionTime(Number(result.boundary.selection_time_s ?? result.boundary.zero_v_start_s ?? 0), result.boundary, result.metadata));
       setGrid(result.grid);
       setStage("boundary");
       setProgress(null);
-      setMessage("已生成 0V 起止建议。请结合视频预览确认边界。");
+      setMessage("请结合视频确认零电压区间。");
     } catch (error) {
       setMessage(`开始处理失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -247,6 +269,7 @@ export function NormalWorkspace() {
 
   const confirmBoundary = async () => {
     setBusy(true);
+    setProgress(null);
     try {
       const result = await desktopApi.normalConfirmBoundary({ session_root: session?.session_root, boundary });
       setSession(result.session);
@@ -263,7 +286,7 @@ export function NormalWorkspace() {
       setBoundaryDirty(false);
       seekVideoTo(nextSelectionTime, metadata, true);
       setStage("target");
-      setMessage("0V 边界已确认。请在 0V 起点附近框选目标油滴。");
+      setMessage("请在零电压起点附近框选油滴。");
     } catch (error) {
       setMessage(`确认边界失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -273,12 +296,12 @@ export function NormalWorkspace() {
 
   const selectTargetAndTrack = async () => {
     if (!selectionBox || !metadata) {
-      setMessage("需要先拖拽矩形框选目标油滴。");
+      setMessage("需要先拖拽矩形框选油滴。");
       return;
     }
     const voltage = Number(balanceVoltage);
     if (!Number.isFinite(voltage) || voltage <= 0 || !balanceConfirmed) {
-      setMessage("请填写正的平衡电压，并明确确认该油滴在该电压下处于平衡状态。");
+      setMessage("请输入正的平衡电压，并确认油滴已平衡。");
       return;
     }
     const safeSelectionTime = clampSelectionTime(selectionTime, boundary, metadata);
@@ -307,7 +330,7 @@ export function NormalWorkspace() {
       setAdjustingRecordId(null);
       setStage(response.record.status === "pending_crossing_review" ? "review" : "results");
       setProgress(null);
-      setMessage(response.record.status === "pending_crossing_review" ? "追踪完成。请逐一复核 crossing 身份。" : "追踪和 q 计算完成。请确认是否保留。");
+      setMessage(response.record.status === "pending_crossing_review" ? "追踪完成，请复核油滴经过网格线的片段。" : "测量完成，请确认是否保留。");
     } catch (error) {
       setMessage(`追踪失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -318,6 +341,7 @@ export function NormalWorkspace() {
   const prepareCrossingReview = async (event: NormalCrossingEvent) => {
     if (!selectedRecord) return;
     setBusy(true);
+    setProgress(null);
     try {
       const response = await desktopApi.normalPrepareCrossingReview({
         session_root: session?.session_root,
@@ -329,7 +353,7 @@ export function NormalWorkspace() {
       setReviewEvent(response.event ?? event);
       setMessage("局部放大复核片段已生成。");
     } catch (error) {
-      setMessage(`生成 crossing 复核失败：${error instanceof Error ? error.message : String(error)}`);
+      setMessage(`生成复核片段失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -338,6 +362,7 @@ export function NormalWorkspace() {
   const submitCrossingReview = async (result: "same_drop" | "different_drop") => {
     if (!selectedRecord || !reviewEvent) return;
     setBusy(true);
+    setProgress(null);
     try {
       const response = await desktopApi.normalReviewCrossing({
         session_root: session?.session_root,
@@ -350,15 +375,15 @@ export function NormalWorkspace() {
       setReviewEvent(response.record.crossings?.find((event) => event.event_id === reviewEvent.event_id) ?? null);
       if (response.record.status === "pending_user_confirmation") {
         setStage("results");
-        setMessage("所有 crossing 已确认同一颗油滴。请决定是否保留 q 记录。");
+        setMessage("复核完成，请确认是否保留测量结果。");
       } else if (response.record.status === "rejected_crossing_identity") {
         restoreRecordForAdjustment(response.record, response.session);
-        setMessage("该记录已因 crossing 身份不一致被阻断。已恢复原视频与 0V 边界，可调整后重新追踪。");
+        setMessage("油滴不一致，请调整后重新追踪。");
       } else {
-        setMessage("crossing 复核结论已保存。");
+        setMessage("复核结论已保存。");
       }
     } catch (error) {
-      setMessage(`保存 crossing 复核失败：${error instanceof Error ? error.message : String(error)}`);
+      setMessage(`保存复核结论失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -367,6 +392,7 @@ export function NormalWorkspace() {
   const acceptRecord = async (kept: boolean) => {
     if (!selectedRecord) return;
     setBusy(true);
+    setProgress(null);
     try {
       const nextSession = await desktopApi.normalSelectRecord({
         session_root: session?.session_root,
@@ -376,9 +402,9 @@ export function NormalWorkspace() {
       setSession(nextSession);
       if (!kept) {
         restoreRecordForAdjustment(selectedRecord, nextSession);
-        setMessage("已进入返回调整：已恢复该记录所属视频和 0V 边界，可先微调边界再重新追踪。");
+        setMessage("已恢复原视频，可调整区间后重新追踪。");
       } else {
-        setMessage("本滴 q 已由用户确认保留。");
+        setMessage("测量结果已保留。");
       }
     } catch (error) {
       setMessage(`更新记录失败：${error instanceof Error ? error.message : String(error)}`);
@@ -407,7 +433,7 @@ export function NormalWorkspace() {
   const exportSession = async () => {
     try {
       const result = await desktopApi.normalExportSession({ session_root: session?.session_root });
-      setMessage(JSON.stringify(result).includes("canceled") ? "已取消导出。" : "Normal session 已导出。");
+      setMessage((result as { canceled?: boolean }).canceled ? "已取消导出。" : "实验记录已导出。");
     } catch (error) {
       setMessage(`导出失败：${error instanceof Error ? error.message : String(error)}`);
     }
@@ -436,6 +462,7 @@ export function NormalWorkspace() {
 
   const nextDropSameVideo = async () => {
     setBusy(true);
+    setProgress(null);
     try {
       const response = await desktopApi.normalStartNextDroplet({ session_root: session?.session_root, record_id: selectedRecord?.record_id, mode: "same_video" });
       const active = response.active_video as Record<string, any> | null | undefined;
@@ -450,7 +477,6 @@ export function NormalWorkspace() {
       setGrid((active?.grid as NormalGrid | undefined) ?? grid);
       setBoundary(nextBoundary);
       setBoundaryDirty(false);
-      setBoundaryDiagnostics(null);
       const nextSelectionTime = clampSelectionTime(Number(nextBoundary.zero_v_start_s ?? selectionTime), nextBoundary, nextMetadata ?? metadata);
       setSelectionTime(nextSelectionTime);
       seekVideoTo(nextSelectionTime, nextMetadata ?? metadata, true);
@@ -465,6 +491,7 @@ export function NormalWorkspace() {
 
   const nextDropDifferentVideo = async () => {
     setBusy(true);
+    setProgress(null);
     try {
       const response = await desktopApi.normalStartNextDroplet({ session_root: session?.session_root, record_id: selectedRecord?.record_id, mode: "different_video" });
       setSession(response.session);
@@ -475,7 +502,6 @@ export function NormalWorkspace() {
       setVideoUrl("");
       setBoundary({ zero_v_start_s: 0, zero_v_end_s: 1, source: "manual_ui" });
       setBoundaryDirty(false);
-      setBoundaryDiagnostics(null);
       setGrid(null);
       setSelectionTime(0);
       setBalanceVoltage("");
@@ -484,7 +510,7 @@ export function NormalWorkspace() {
       setCurrentTime(0);
       setDuration(0);
       setStage("import");
-      setMessage("已保留当前 session 的 q 记录。请导入下一段视频。");
+      setMessage("测量记录已保留，请导入下一段视频。");
     } catch (error) {
       setMessage(`准备新视频失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -713,7 +739,7 @@ export function NormalWorkspace() {
     }
     setStage("boundary");
     setReviewEvent(null);
-    setMessage("已返回 0V 边界确认。会在上次确认基础上微调；确认修改后需重新框选并追踪。");
+    setMessage("已返回 确认零电压区间。会在上次确认基础上微调；确认修改后需重新框选并追踪。");
     jumpTo(boundary.zero_v_start_s);
   };
 
@@ -735,8 +761,8 @@ export function NormalWorkspace() {
     <div className="desktop-frame normal-workspace">
       <header className="normal-topbar">
         <div className="topbar__brand">
-          <strong>Millikan AI Normal</strong>
-          <span>平衡电压 + 0V 下落逐滴测量</span>
+          <strong>密立根油滴实验</strong>
+          <span>单滴电荷测量</span>
         </div>
         <div className="normal-topbar__actions">
           <button className="ghost-button" onClick={openVideo}>
@@ -745,11 +771,11 @@ export function NormalWorkspace() {
           </button>
           <button className="ghost-button" disabled={!session?.session_root} onClick={exportSession}>
             <Download size={16} />
-            导出 session
+            导出报告
           </button>
           <button className="primary-button small" disabled={busy || keptValidCount < 3} onClick={runInversion}>
             <Play size={16} />
-            盲反演
+            估计元电荷
           </button>
         </div>
       </header>
@@ -757,8 +783,7 @@ export function NormalWorkspace() {
       <main className="normal-flow">
         <aside className="normal-rail panel">
           <div className="section-heading">
-            <span>workflow</span>
-            <strong>Normal 状态机</strong>
+            <strong>测量流程</strong>
           </div>
           <div className="normal-stage-list">
             {stages.map((item, index) => (
@@ -770,7 +795,6 @@ export function NormalWorkspace() {
               >
                 <span>{index + 1}</span>
                 <strong>{item.title}</strong>
-                <small>{item.detail}</small>
               </button>
             ))}
           </div>
@@ -811,8 +835,8 @@ export function NormalWorkspace() {
                       onPlay={() => setIsPlaying(true)}
                       onPause={() => setIsPlaying(false)}
                     />
-                    {showingTrackOverlay ? <div className="normal-overlay-badge">backend overlay: target / missing / trajectory</div> : null}
-                    {stage === "target" ? <div className="normal-overlay-badge normal-overlay-badge--selection">selection frame {formatFixed(selectionTime, 2)} s</div> : null}
+                    {showingTrackOverlay ? <div className="normal-overlay-badge">轨迹回放</div> : null}
+                    {stage === "target" ? <div className="normal-overlay-badge normal-overlay-badge--selection">框选时刻 {formatFixed(selectionTime, 2)} s</div> : null}
                     <div ref={overlayRef} className="normal-video-overlay" onMouseDown={onSelectionDown} onMouseMove={onSelectionMove} onMouseUp={endSelection} onMouseLeave={endSelection}>
                       {boundary.zero_v_start_s <= (duration || 0) ? <span className="time-marker start" style={{ left: `${((boundary.zero_v_start_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
                       {boundary.zero_v_end_s <= (duration || 0) ? <span className="time-marker end" style={{ left: `${((boundary.zero_v_end_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
@@ -880,7 +904,6 @@ export function NormalWorkspace() {
             <BoundaryPanel
               boundary={boundary}
               metadata={metadata}
-              diagnostics={boundaryDiagnostics}
               grid={grid}
               onBoundary={setManualBoundary}
               onAdjust={adjustBoundary}
@@ -961,24 +984,20 @@ export function NormalWorkspace() {
       </main>
 
       <div className="normal-evidence-strip">
-        <InfoTile label="Session" value={session?.session_id ? String(session.session_id) : "new"} />
-        <InfoTile label="元数据" value={metadata ? `${metadata.width}x${metadata.height} / ${formatFixed(metadata.fps)} fps / ${formatFixed(metadata.duration_s)} s` : "未导入"} />
-        <InfoTile label="网格" value={grid ? `${gridLineCount} lines, ${fmtScientific(grid.scale_y_m_per_px, 2)} m/px` : "未检测"} />
+        <InfoTile label="视频" value={metadata ? `${metadata.width} × ${metadata.height} · ${formatFixed(metadata.duration_s)} s` : "未导入"} />
+        <InfoTile label="网格" value={grid ? `${gridLineCount} 条 · ${fmtScientific(grid.scale_y_m_per_px, 2)} m/px` : "未检测"} />
         <InfoTile label="有效区域" value={grid ? `${formatFixed(effectiveTopPx, 0)} px - ${formatFixed(effectiveBottomPx, 0)} px` : "未检测"} />
-        <InfoTile label="记录" value={`${session?.counts?.total ?? 0} total / ${keptValidCount} accepted`} />
+        <InfoTile label="记录" value={`共 ${session?.counts?.total ?? 0} 条，已保留 ${keptValidCount} 条`} />
       </div>
 
-      <div className="status-toast" role="status">
-        {busy ? progress?.label ?? "正在处理..." : message}
-      </div>
+      {!busy ? <div className="status-toast" role="status">{message}</div> : null}
       {nextDropDialogOpen ? (
         <div className="normal-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="next-drop-title">
           <div className="normal-modal">
             <div className="section-heading">
-              <span>next</span>
               <strong id="next-drop-title">下一颗油滴</strong>
             </div>
-            <p>是否继续使用当前视频？已确认保留的 q 记录会留在本次 session 中，用于后续盲反演。</p>
+            <p>是否继续使用当前视频？已保留的测量记录不会丢失。</p>
             <div className="panel-actions">
               <button className="primary-button" onClick={nextDropSameVideo}>
                 同一个视频
@@ -998,21 +1017,15 @@ export function NormalWorkspace() {
 }
 
 function ProgressBox({ progress, busy }: { progress: NormalProgressEvent | null; busy: boolean }) {
+  if (!busy) return null;
   const percent = typeof progress?.fraction === "number" ? Math.round(progress.fraction * 100) : null;
   return (
-    <div className="normal-progress-box">
-      <span>{busy ? "processing" : "idle"}</span>
-      <strong>{progress?.label ?? "等待操作"}</strong>
-      <div className="normal-progress-track">
+    <div className="normal-progress-box" role="status">
+      <strong>{progress?.label ?? "正在处理…"}</strong>
+      <div className="normal-progress-track" role="progressbar" aria-label="处理进度" aria-valuenow={percent ?? undefined} aria-valuemin={0} aria-valuemax={100}>
         <i style={{ width: percent === null ? "34%" : `${percent}%` }} className={percent === null ? "indeterminate" : ""} />
       </div>
-      <small>
-        {percent === null
-          ? progress?.indeterminate
-            ? "真实阶段，无可量化百分比"
-            : "-"
-          : `${percent}% · ${progress?.current ?? "-"} / ${progress?.total ?? "-"} ${progress?.unit ?? ""}`}
-      </small>
+      {percent !== null ? <small>{percent}%{progress?.current != null && progress?.total != null ? ` · ${progress.current} / ${progress.total}${progress.unit === "frames" ? " 帧" : ""}` : ""}</small> : null}
     </div>
   );
 }
@@ -1029,8 +1042,7 @@ function ImportPanel(props: {
   return (
     <div className="normal-panel-stack">
       <div className="section-heading">
-        <span>stage 1</span>
-        <strong>导入与视频预览</strong>
+        <strong>导入视频</strong>
       </div>
       <div className="normal-path-row">
         <input value={props.videoPath} onChange={(event) => props.onPath(event.target.value)} placeholder="拖入视频或粘贴绝对路径" />
@@ -1040,14 +1052,14 @@ function ImportPanel(props: {
         </button>
       </div>
       <div className="normal-meta-grid">
-        <InfoTile label="FPS" value={formatFixed(props.metadata?.fps)} />
+        <InfoTile label="帧率" value={formatFixed(props.metadata?.fps)} />
         <InfoTile label="帧数" value={formatFixed(props.metadata?.frame_count, 0)} />
         <InfoTile label="分辨率" value={props.metadata ? `${props.metadata.width} x ${props.metadata.height}` : "-"} />
         <InfoTile label="时长" value={`${formatFixed(props.metadata?.duration_s)} s`} />
       </div>
       <button className="ghost-button full" disabled={props.busy || !props.videoPath} onClick={props.onInspect}>
         <Video size={16} />
-        只预览 metadata
+        载入视频
       </button>
       <button className="primary-button full" disabled={props.busy || !props.metadata?.readable} onClick={props.onStart}>
         <Play size={16} />
@@ -1060,7 +1072,6 @@ function ImportPanel(props: {
 function BoundaryPanel(props: {
   boundary: NormalBoundary;
   metadata: VideoMetadata | null;
-  diagnostics: Record<string, unknown> | null;
   grid: NormalGrid | null;
   busy: boolean;
   onBoundary: (boundary: NormalBoundary) => void;
@@ -1071,12 +1082,11 @@ function BoundaryPanel(props: {
   return (
     <div className="normal-panel-stack">
       <div className="section-heading">
-        <span>stage 2</span>
-        <strong>0V 边界确认</strong>
+        <strong>确认零电压区间</strong>
       </div>
       {(["zero_v_start_s", "zero_v_end_s"] as const).map((field) => (
         <div className="normal-boundary-editor" key={field}>
-          <label>{field === "zero_v_start_s" ? "0V start (s)" : "0V end (s)"}</label>
+          <label>{field === "zero_v_start_s" ? "开始时间（秒）" : "结束时间（秒）"}</label>
           <div className="normal-step-row">
             <button onClick={() => props.onAdjust(field, -1)}>-1s</button>
             <button onClick={() => props.onAdjust(field, -0.1)}>-0.1s</button>
@@ -1092,16 +1102,10 @@ function BoundaryPanel(props: {
           </div>
         </div>
       ))}
+      {(props.boundary.flags ?? []).map((flag) => <div className="normal-drop-hint" key={flag}>{diagnosticLabel(flag)}</div>)}
       <div className="normal-diagnostic-box">
-        <strong>自动建议</strong>
-        <span>source: {props.boundary.source ?? "unknown"}</span>
-        <span>flags: {(props.boundary.flags ?? []).join(", ") || "none"}</span>
-        <span>operations: {Array.isArray(props.diagnostics?.operations) ? props.diagnostics?.operations.length : 0}</span>
-      </div>
-      <div className="normal-diagnostic-box">
-        <strong>网格</strong>
-        <span>valid: {String(props.grid?.valid ?? false)}</span>
-        <span>scale_y: {fmtScientific(props.grid?.scale_y_m_per_px, 2)} m/px</span>
+        <strong>{props.grid?.valid ? "网格已识别" : "网格识别失败"}</strong>
+        {props.grid?.valid ? <span>像素标尺：{fmtScientific(props.grid.scale_y_m_per_px, 2)} m/px</span> : <span>请检查视频是否清晰、网格是否完整。</span>}
       </div>
       <button className="primary-button full" disabled={props.busy || !props.grid?.valid} onClick={props.onConfirm}>
         <Check size={16} />
@@ -1134,15 +1138,14 @@ function TargetPanel(props: {
   return (
     <div className="normal-panel-stack">
       <div className="section-heading">
-        <span>stage 3</span>
-        <strong>框选目标油滴</strong>
+        <strong>框选油滴</strong>
       </div>
       <button className="ghost-button full" disabled={props.busy} onClick={props.onBackBoundary}>
         <ArrowLeft size={16} />
-        返回修改 0V 边界
+        修改零电压区间
       </button>
       <div className="normal-boundary-editor">
-        <label>selection time (s)</label>
+        <label>框选时刻（秒）</label>
         <small>允许范围：{formatFixed(props.selectionWindow.start_s, 2)} - {formatFixed(props.selectionWindow.end_s, 2)} s</small>
         <div className="normal-step-row compact">
           <button onClick={() => props.onAdjustSelection(-1)}>-1s</button>
@@ -1165,7 +1168,7 @@ function TargetPanel(props: {
       </div>
       <div className="normal-diagnostic-box">
         <strong>矩形框选</strong>
-        <span>{props.selectionBox ? `x=${formatFixed(props.selectionBox.x, 1)}, y=${formatFixed(props.selectionBox.y, 1)}, w=${formatFixed(props.selectionBox.width, 1)}, h=${formatFixed(props.selectionBox.height, 1)}` : "在视频画面上拖拽一个矩形包住油滴"}</span>
+        <span>{props.selectionBox ? "已框选，可拖动重新选择" : "在视频画面上拖拽一个矩形包住油滴"}</span>
       </div>
       <label className="normal-field">
         <span>平衡电压 V</span>
@@ -1173,19 +1176,19 @@ function TargetPanel(props: {
       </label>
       <label className="normal-checkline">
         <input type="checkbox" checked={props.balanceConfirmed} onChange={(event) => props.onBalanceConfirmed(event.target.checked)} />
-        <span>我确认该油滴在输入电压下处于平衡或近似静止状态</span>
+        <span>我确认该油滴在此电压下近似静止</span>
       </label>
       <button className="ghost-button full" onClick={() => props.onAdvancedOpen(!props.advancedOpen)}>
         <RotateCcw size={16} />
-        本次测量高级参数
+        实验参数
       </button>
       {props.advancedOpen ? (
         <div className="normal-param-grid">
           {props.parameterKeys.map((key) => (
             <label key={key}>
-              <span>{key}</span>
+              <span>{parameterLabels[key]}</span>
               <input value={props.configValue(key)} onChange={(event) => props.onOverride(key, event.target.value)} />
-              <small>{props.overrides[key] === undefined ? "backend default" : "override for this record"}</small>
+              {props.overrides[key] !== undefined ? <small>已修改</small> : null}
             </label>
           ))}
         </div>
@@ -1212,14 +1215,11 @@ function ReviewPanel(props: {
   return (
     <div className="normal-panel-stack">
       <div className="section-heading">
-        <span>stage 4</span>
-        <strong>轨迹与 crossing 复核</strong>
+        <strong>复核轨迹</strong>
       </div>
       <div className="normal-diagnostic-box">
         <strong>{statusLabel(props.record?.status)}</strong>
-        <span>crossings: {crossings.length}</span>
-        <span>未复核 crossing 会阻断用户确认。</span>
-        <span>主视频区显示 backend overlay MP4，target/missing/轨迹坐标来自后端 track。</span>
+        <span>待检查 {crossings.filter((event) => !event.review_result).length} 个过线片段</span>
       </div>
       <div className="panel-actions">
         <button className="ghost-button" disabled={props.busy} onClick={props.onBackTarget}>
@@ -1234,10 +1234,10 @@ function ReviewPanel(props: {
           <button key={event.event_id} className={props.reviewEvent?.event_id === event.event_id ? "active" : ""} onClick={() => props.onPrepareReview(event)}>
             <Scissors size={14} />
             <span>{event.event_id}</span>
-            <small>{formatFixed(event.start_time_s ?? event.time_s, 2)}s · {event.review_result ?? "unreviewed"}</small>
+            <small>{formatFixed(event.start_time_s ?? event.time_s, 2)}s · {event.review_result === "same_drop" ? "同一颗油滴" : event.review_result === "different_drop" ? "油滴不一致" : "待复核"}</small>
           </button>
         ))}
-        {crossings.length === 0 ? <span className="normal-drop-hint">本次追踪没有 crossing，可进入结果确认。</span> : null}
+        {crossings.length === 0 ? <span className="normal-drop-hint">没有需要复核的过线片段。</span> : null}
       </div>
       {props.reviewEvent ? (
         <div className="normal-review-clip">
@@ -1253,7 +1253,7 @@ function ReviewPanel(props: {
         </div>
       ) : null}
       <button className="ghost-button full" disabled={props.record?.status !== "pending_user_confirmation"} onClick={props.onContinue}>
-        去确认 q 结果
+        查看测量结果
       </button>
     </div>
   );
@@ -1275,14 +1275,12 @@ function ResultsPanel(props: {
   onNextDrop: () => void;
 }) {
   const record = props.selectedRecord;
-  const q = (record?.q as Record<string, any> | undefined) ?? {};
   const fit = (record?.fit as Record<string, any> | undefined) ?? {};
-  const uncertainty = q.uncertainty_budget as Record<string, any> | undefined;
+
   return (
     <div className="normal-panel-stack">
       <div className="section-heading">
-        <span>stage 5</span>
-        <strong>测量结果与 session</strong>
+        <strong>测量结果</strong>
       </div>
       {record ? (
         <>
@@ -1299,17 +1297,11 @@ function ResultsPanel(props: {
           </div>
           <div className="normal-diagnostic-box">
             <strong>不确定度来源</strong>
-            <span>included: {Array.isArray(uncertainty?.included) ? uncertainty.included.map((row: any) => row.component).join(", ") : "-"}</span>
-            <span>not included: {Array.isArray(uncertainty?.not_included) ? uncertainty.not_included.join(", ") : "-"}</span>
-          </div>
-          <div className="normal-diagnostic-box">
-            <strong>追踪复核视频</strong>
-            <span>{record.track_review_frames?.length ? "主视频区正在播放 backend 整帧轨迹复核。" : record.artifact_urls?.overlay_mp4 ? "主视频区正在播放 backend overlay MP4。" : "当前记录没有轨迹复核帧。"}</span>
-            <span>target/missing/trajectory/坐标轴由后端画在原始视频像素上，前端只播放帧，避免缩放错位。</span>
+            <span>由速度拟合误差传播，未计入仪器与物性参数误差。</span>
           </div>
           <div className="panel-actions">
             <button className="ghost-button" disabled={props.busy} onClick={props.onBackReview}>
-              返回复核/框选
+              返回复核
             </button>
             <button className="ghost-button" disabled={props.busy} onClick={props.onBackBoundary}>
               修改 0V
@@ -1324,7 +1316,7 @@ function ResultsPanel(props: {
               </button>
             ) : null}
             <button className="ghost-button" disabled={props.busy} onClick={props.onReject}>
-              返回调整/排除
+              排除并调整
             </button>
           </div>
         </>
@@ -1341,21 +1333,20 @@ function ResultsPanel(props: {
         ))}
       </div>
       <div className="normal-diagnostic-box">
-        <strong>盲反演</strong>
-        <span>{props.keptValidCount}/3 accepted q</span>
+        <strong>元电荷估计</strong>
+        <span>已保留 {props.keptValidCount} 条，至少需要 3 条</span>
         {props.inversion ? (
           <>
-            <span>status: {String(props.inversion.status ?? "-")}</span>
-            <span>e: {fmtCharge(props.inversion.e_hat_C)}</span>
-            <span>flags: {(props.inversion.flags ?? []).join(", ") || "none"}</span>
+            <span>{inversionStatusLabel(props.inversion.status)}</span>
+            <span>e：{fmtCharge(props.inversion.e_hat_C)}</span>
           </>
         ) : (
-          <span>没有真实连续模型时只展示量子化对齐诊断，不输出模型胜负。</span>
+          <span>使用已保留的电荷记录估计元电荷。</span>
         )}
       </div>
       <button className="primary-button full" disabled={props.busy || props.keptValidCount < 3} onClick={props.onRunInversion}>
         <Play size={16} />
-        运行 Normal 盲反演
+        估计元电荷
       </button>
     </div>
   );
@@ -1383,10 +1374,8 @@ function QCalculationFlow({ record }: { record: NormalRecord }) {
     <section className="normal-q-flow" aria-label="单滴 q 计算流程">
       <header className="normal-q-flow__heading">
         <div>
-          <span>从视频证据到单滴电荷</span>
-          <strong>本记录的 q 计算链</strong>
+          <strong>电荷计算过程</strong>
         </div>
-        <p>数值来自后端 record calculation trace；公式在此只做可审查展示。</p>
       </header>
       <div className="normal-q-flow__steps">
         <CalculationStep
@@ -1421,7 +1410,7 @@ function QCalculationFlow({ record }: { record: NormalRecord }) {
           tone="derived"
           icon={<Gauge size={18} />}
           label="物理推导"
-          title="Cunningham 半径"
+          title="滑移修正半径"
           formula={
             <FormulaLine>
               <i>r</i> =
@@ -1438,7 +1427,7 @@ function QCalculationFlow({ record }: { record: NormalRecord }) {
           tone="derived"
           icon={<Calculator size={18} />}
           label="物理推导"
-          title="有效黏度与 q"
+          title="有效黏度与电荷"
           formula={
             <FormulaLine>
               <i>q</i> =
@@ -1522,13 +1511,11 @@ function InversionPanel(props: {
   return (
     <div className="normal-panel-stack">
       <div className="section-heading">
-        <span>stage 6</span>
-        <strong>盲反演结果</strong>
+        <strong>元电荷估计</strong>
       </div>
       <div className="normal-diagnostic-box normal-inversion-inspector-lead">
         <strong>运行诊断</strong>
         <span className={`normal-inversion-status ${status === "reliable" ? "good" : status === "insufficient_eligible_records" ? "blocked" : "warn"}`}>{inversionStatusLabel(status)}</span>
-        <span>主结果、误差和百分比统一显示在中央结果页。</span>
       </div>
       <div className="normal-meta-grid">
         <InfoTile label="使用 q" value={String(props.inversion?.valid_q_count ?? props.inversion?.num_used ?? accepted)} />
@@ -1537,22 +1524,22 @@ function InversionPanel(props: {
         <InfoTile label="样本结论" value={status === "exploratory" ? "探索性" : status === "reliable" ? "候选可靠" : "需诊断"} />
       </div>
       <div className="normal-diagnostic-box">
-        <strong>科学边界</strong>
-        <span>{status === "insufficient_eligible_records" ? "有效保留 q 不足 3 条，不能给出 e 候选。" : "Normal v1 展示整数倍残差对齐诊断；没有拟合真实连续 baseline，因此不输出模型胜负。"}</span>
-        <span>flags: {flags.length ? flags.join(", ") : "none"}</span>
+        <strong>结果说明</strong>
+        <span>{status === "insufficient_eligible_records" ? "有效记录不足 3 条，暂不能估计元电荷。" : "整数倍拟合用于检查电荷对齐情况。"}</span>
+        {flags.map((flag) => <span key={flag}>{diagnosticLabel(flag)}</span>)}
       </div>
       <div className="normal-diagnostic-box">
         <strong>搜索设置</strong>
-        <span>interval: {fmtCharge(props.inversion?.search_interval_C?.[0])} - {fmtCharge(props.inversion?.search_interval_C?.[1])}</span>
-        <span>sigma floor: {fmtCharge(props.inversion?.sigma_floor_C)}</span>
+        <span>搜索范围：{fmtCharge(props.inversion?.search_interval_C?.[0])} - {fmtCharge(props.inversion?.search_interval_C?.[1])}</span>
+        <span>拟合不确定度下限：{fmtCharge(props.inversion?.sigma_floor_C)}</span>
       </div>
       <div className="panel-actions">
         <button className="ghost-button" disabled={props.busy} onClick={props.onBackResults}>
-          返回结果与 session
+          返回测量结果
         </button>
         <button className="ghost-button" disabled={props.busy} onClick={props.onExport}>
           <Download size={15} />
-          导出 session
+          导出报告
         </button>
         <button className="primary-button small" disabled={props.busy || accepted < 3} onClick={props.onRunInversion}>
           <Play size={15} />
@@ -1578,24 +1565,23 @@ function NormalInversionDashboard({ inversion, records }: { inversion: NormalInv
       <div className="normal-inversion-empty">
         <Sigma size={44} />
         <strong>等待盲反演</strong>
-        <span>至少三条用户确认保留的 q 记录后，运行 Normal 盲反演。</span>
+        <span>保留至少三条有效测量记录后，可估计元电荷。</span>
       </div>
     );
   }
   return (
-    <div className="normal-inversion-dashboard" aria-label="Normal 盲反演结果页">
+    <div className="normal-inversion-dashboard" aria-label="元电荷结果页">
       <section className="normal-inversion-hero">
         <div className="normal-inversion-primary">
           <span className={`normal-inversion-status ${status === "reliable" ? "good" : status === "insufficient_eligible_records" ? "blocked" : "warn"}`}>{inversionStatusLabel(status)}</span>
           <span className="normal-inversion-eyebrow">元电荷估计</span>
           <strong className="normal-inversion-value">{fmtCharge(inversion.e_hat_C, 5)}</strong>
-          <p>基于本次 session 中用户确认保留的 q，执行带不确定度权重的整数倍残差搜索。</p>
         </div>
         <div className="normal-inversion-kpis">
-          <KpiBox label="标准不确定度 σe" value={fmtCharge(inversion.sigma_e_C, 5)} detail="统一按 10⁻¹⁹ C 显示" />
+          <KpiBox label="标准不确定度 σe" value={fmtCharge(inversion.sigma_e_C, 5)} />
           <KpiBox label="相对不确定度" value={fmtPercentValue(comparison?.relative_uncertainty_percent, 3)} detail="σe / ê" />
-          <KpiBox label="相对标准值百分误差" value={fmtPercentValue(comparison?.percent_error_vs_reference, 3)} detail={`参考 ${fmtCharge(comparison?.reference_e_C, 9)}`} />
-          <KpiBox label="观测与拟合" value={`${inversion.valid_q_count ?? inversion.num_used ?? accepted.length} q · RMS ${formatFixed(inversion.weighted_rms, 3)}`} detail={`χ² ${formatFixed(inversion.chi2, 3)}`} />
+          <KpiBox label="与标准值的相对误差" value={fmtPercentValue(comparison?.percent_error_vs_reference, 3)} detail={`参考 ${fmtCharge(comparison?.reference_e_C, 9)}`} />
+          <KpiBox label="观测与拟合" value={`${inversion.valid_q_count ?? inversion.num_used ?? accepted.length} 条 · 均方根残差 ${formatFixed(inversion.weighted_rms, 3)}`} detail={`χ² ${formatFixed(inversion.chi2, 3)}`} />
         </div>
       </section>
 
@@ -1603,7 +1589,7 @@ function NormalInversionDashboard({ inversion, records }: { inversion: NormalInv
         <section className="normal-inversion-blocker">
           <BarChart3 size={30} />
           <strong>有效 q 记录不足</strong>
-          <span>当前 {inversion.valid_q_count ?? accepted.length} 条，至少需要 {inversion.min_required ?? 3} 条 accepted q 才能反演。</span>
+          <span>当前 {inversion.valid_q_count ?? accepted.length} 条，至少需要 {inversion.min_required ?? 3} 条有效记录才能估计元电荷。</span>
         </section>
       ) : (
         <>
@@ -1654,7 +1640,7 @@ function ChargeAlignmentChart({
     <div className="normal-chart-panel">
       <div className="chart-heading">
         <span>q 观测与整数倍对齐</span>
-        <small>误差条为 sigma_q；横线为 n * e_hat</small>
+        <small>误差条为 σq，横线为 nê</small>
       </div>
       <svg className="normal-chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="q 观测与整数倍对齐图">
         <line className="axis strong" x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} />
@@ -1683,7 +1669,7 @@ function ChargeAlignmentChart({
             </g>
           );
         })}
-        <text x={pad.left} y={height - 10}>accepted q index</text>
+        <text x={pad.left} y={height - 10}>测量序号</text>
         <text x={12} y={26}>C</text>
       </svg>
     </div>
@@ -1701,7 +1687,7 @@ function ResidualChart({ rows }: { rows: Array<{ residual_sigma?: number; n?: nu
     <div className="normal-chart-panel">
       <div className="chart-heading">
         <span>归一化残差</span>
-        <small>residual / sigma_eff，越接近 0 越对齐整数倍</small>
+        <small>残差除以有效不确定度，越接近 0 拟合越好</small>
       </div>
       <svg className="normal-chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="归一化残差图">
         <line className="axis strong" x1={pad.left} y1={height - pad.bottom} x2={width - pad.right} y2={height - pad.bottom} />
@@ -1740,9 +1726,9 @@ function CandidateList({ candidates }: { candidates: NonNullable<NormalInversion
           <div key={`${candidate.e_C ?? index}-${index}`}>
             <span>#{index + 1}</span>
             <strong>{fmtCharge(candidate.e_C)}</strong>
-            <small>RMS {formatFixed(candidate.weighted_rms, 3)} · chi² {formatFixed(candidate.chi2, 3)}</small>
+            <small>均方根残差 {formatFixed(candidate.weighted_rms, 3)} · χ² {formatFixed(candidate.chi2, 3)}</small>
             <em>{(candidate.integer_assignment ?? []).join(" : ") || "-"}</em>
-            <b>{candidate.converged ? "stable" : "unstable"}{candidate.boundary_hit ? " · boundary" : ""}</b>
+            <b>{candidate.converged ? "稳定" : "未稳定"}{candidate.boundary_hit ? " · 达到搜索边界" : ""}</b>
           </div>
         ))}
       </div>
@@ -1755,17 +1741,17 @@ function AssignmentTable({ assignments }: { assignments: NonNullable<NormalInver
     <div className="normal-inversion-table-card">
       <div className="chart-heading">
         <span>整数分配与残差</span>
-        <small>每颗 accepted q 对应一个 n_i</small>
+        <small>各条测量记录对应的电荷数</small>
       </div>
       <div className="table-wrap normal-inversion-table">
         <table>
           <thead>
             <tr>
-              <th>record</th>
+              <th>记录</th>
               <th>q / C</th>
               <th>n</th>
               <th>n e / C</th>
-              <th>residual σ</th>
+              <th>归一化残差</th>
             </tr>
           </thead>
           <tbody>
@@ -1808,7 +1794,7 @@ function inversionStatusLabel(status?: string) {
     ok: "探索性结果",
     not_run: "未运行"
   };
-  return labels[status || ""] ?? status ?? "未运行";
+  return labels[status || ""] ?? "未运行";
 }
 
 function CrossingFramePlayer({ event }: { event: NormalCrossingEvent }) {
@@ -1834,14 +1820,14 @@ function CrossingFramePlayer({ event }: { event: NormalCrossingEvent }) {
     return (
       <div className="normal-frame-player normal-frame-player--empty">
         <strong>复核帧不可用</strong>
-        <span>后端没有返回可播放的 review_frames，请重新生成 crossing 复核。</span>
+        <span>请重新生成过线复核片段。</span>
       </div>
     );
   }
 
   return (
-    <div className="normal-frame-player" aria-label="crossing 局部复核帧播放器">
-      <img src={activeFrame.image_url} alt={`${event.event_id} frame ${frameIndex + 1}`} />
+    <div className="normal-frame-player" aria-label="过线片段播放器">
+      <img src={activeFrame.image_url} alt={`过线片段第 ${frameIndex + 1} 帧`} />
       <div className="normal-frame-player__controls">
         <button className="icon-button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "暂停复核帧" : "播放复核帧"}>
           {playing ? <Pause size={15} /> : <Play size={15} />}
@@ -1887,14 +1873,14 @@ function TrackFramePlayer({ frames }: { frames: NonNullable<NormalRecord["track_
     return (
       <div className="normal-track-frame-player normal-frame-player--empty">
         <strong>轨迹复核帧不可用</strong>
-        <span>后端没有返回可播放的 track_review_frames。</span>
+        <span>请重新追踪以生成复核画面。</span>
       </div>
     );
   }
 
   return (
     <div className="normal-track-frame-player" aria-label="完整轨迹复核帧播放器">
-      <img src={activeFrame.image_url} alt={`track review frame ${frameIndex + 1}`} />
+      <img src={activeFrame.image_url} alt={`轨迹复核第 ${frameIndex + 1} 帧`} />
       <div className="normal-track-frame-player__controls">
         <button className="icon-button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "暂停完整轨迹" : "播放完整轨迹"}>
           {playing ? <Pause size={16} /> : <Play size={16} />}
@@ -1914,7 +1900,7 @@ function TrackFramePlayer({ frames }: { frames: NonNullable<NormalRecord["track_
         <span>{formatFixed(activeFrame.time_s, 2)} s</span>
       </div>
       <small>
-        frame {activeFrame.frame_index} · {frameIndex + 1}/{frames.length}
+        第 {frameIndex + 1} / {frames.length} 帧
       </small>
     </div>
   );

@@ -428,7 +428,7 @@ td {
 }
 .normal-flow {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 390px;
+  grid-template-columns: 220px minmax(0, 1fr) 360px;
   gap: 14px;
   align-items: start;
 }
@@ -440,10 +440,9 @@ td {
   gap: 10px;
 }
 .normal-stage {
-  min-height: 64px;
+  min-height: 48px;
   display: grid;
   grid-template-columns: 28px 1fr;
-  grid-template-rows: auto auto;
   gap: 3px 10px;
   align-items: center;
   padding: 10px;
@@ -454,7 +453,6 @@ td {
   background: rgba(255, 255, 255, 0.56);
 }
 .normal-stage span {
-  grid-row: 1 / 3;
   width: 28px;
   height: 28px;
   display: grid;
@@ -468,9 +466,6 @@ td {
 .normal-stage strong {
   color: #263241;
   font-size: 13px;
-}
-.normal-stage small {
-  font-size: 11px;
 }
 .normal-stage.active {
   color: #194d8f;
@@ -827,7 +822,6 @@ td {
 .normal-param-grid label {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 120px;
-  grid-template-rows: auto auto;
   gap: 3px 8px;
 }
 .normal-param-grid input {
@@ -1222,7 +1216,7 @@ td {
 }
 .normal-evidence-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-top: 14px;
 }

@@ -98,7 +98,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Millikan AI Normal ${{ github.ref_name }}
+          name: 密立根油滴实验 ${{ github.ref_name }}
           generate_release_notes: true
           files: |
             normal/apps/desktop/release/*.exe

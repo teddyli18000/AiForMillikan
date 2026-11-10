@@ -95,7 +95,7 @@ def build_grid_mask(gray: np.ndarray, lines_y: list[int], dilate_px: int = 5) ->
 def _sample_frames(video_path: str | Path, count: int, stride: int, start_frame: int, end_frame: int | None, progress_callback: ProgressCallback | None = None) -> list:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise RuntimeError(f"cannot open video: {video_path}")
+        raise RuntimeError(f"无法打开视频：{video_path}")
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     start = max(0, int(start_frame))
     end = min(frame_count - 1, int(end_frame) if end_frame is not None else frame_count - 1)
@@ -113,7 +113,7 @@ def _sample_frames(video_path: str | Path, count: int, stride: int, start_frame:
                 progress_callback("sample_grid_frames", "正在采样网格画面", len(frames), total, "frames")
     cap.release()
     if not frames:
-        raise RuntimeError("no grid sample frames")
+        raise RuntimeError("未能读取用于识别标尺的视频画面。")
     return frames
 
 

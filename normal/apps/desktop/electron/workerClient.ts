@@ -30,7 +30,7 @@ export class WorkerClient {
     this.ensureStarted();
     const child = this.child;
     if (!child) {
-      return Promise.reject(new Error("Worker process is unavailable."));
+      return Promise.reject(new Error("处理进程不可用。"));
     }
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
@@ -45,7 +45,7 @@ export class WorkerClient {
 
   dispose(): void {
     for (const pending of this.pending.values()) {
-      pending.reject(new Error("Worker process closed."));
+      pending.reject(new Error("处理进程已关闭。"));
     }
     this.pending.clear();
     if (this.child) {
@@ -83,7 +83,7 @@ export class WorkerClient {
     });
     this.child.on("exit", (code, signal) => {
       const detail = this.stderrBuffer.join("").trim();
-      const error = new Error(`Worker exited with code=${code} signal=${signal}${detail ? `\n${detail}` : ""}`);
+      const error = new Error(`处理进程已退出，退出码=${code}，信号=${signal}${detail ? `\n${detail}` : ""}`);
       for (const pending of this.pending.values()) {
         pending.reject(error);
       }
@@ -109,7 +109,7 @@ export class WorkerClient {
     }
     this.pending.delete(message.id);
     if (message.type === "error") {
-      const error = new Error(message.error?.message || "Unknown worker error");
+      const error = new Error(message.error?.message || "处理失败，原因未知");
       (error as Error & { traceback?: string }).traceback = message.error?.traceback;
       pending.reject(error);
       return;

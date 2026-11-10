@@ -69,7 +69,7 @@ def initialize_session(session_root: str | None = None, run_root: str | None = N
 def inspect_video_only(video_path: str) -> dict[str, Any]:
     metadata = inspect_video(video_path)
     if not metadata.get("readable"):
-        raise RuntimeError(f"video is not readable: {video_path}")
+        raise RuntimeError(f"无法读取视频：{video_path}")
     return {"video_path": video_path, "metadata": metadata, "video_url": file_url(video_path)}
 
 
@@ -88,7 +88,7 @@ def prepare_video(
     _emit(progress_callback, "inspect_metadata", "读取视频元数据", indeterminate=True)
     metadata = inspect_video(video_path)
     if not metadata.get("readable"):
-        raise RuntimeError(f"video is not readable: {video_path}")
+        raise RuntimeError(f"无法读取视频：{video_path}")
 
     boundary = suggest_zero_v_window(video_path, cfg, _stage_emitter(progress_callback))
     suggestion = boundary["suggestion"]
@@ -152,16 +152,16 @@ def select_target(payload: dict[str, Any], config_overrides: dict[str, Any] | No
     session = _read_json(session_path)
     active = _require_active_state(session, {"boundary_confirmed"})
     if not bool(payload.get("balance_confirmed")):
-        raise RuntimeError("balance_confirmed is required before target selection")
+        raise RuntimeError("请先确认油滴在所填电压下处于平衡状态。")
     voltage = float(payload.get("balance_voltage_V", math.nan))
     if not math.isfinite(voltage) or voltage <= 0:
-        raise RuntimeError("positive balance_voltage_V is required")
+        raise RuntimeError("平衡电压必须为正数。")
     target = _normalize_target(payload["target"], active["metadata"])
     boundary = active["boundary"]
     target_frame = int(target["target_frame"])
     window = boundary.get("selection_window") or _selection_window(boundary, active["metadata"], normal_config(config_overrides))
     if not (int(window["start_frame"]) <= target_frame <= int(window["end_frame"])):
-        raise RuntimeError("target frame must be inside the selection window near 0V start")
+        raise RuntimeError("所选画面超出零电压起点附近的允许范围，请调整时间。")
     overrides = payload.get("parameter_overrides") or {}
     target["selection_window"] = window
     active["target"] = target
@@ -284,7 +284,7 @@ def prepare_crossing_review(payload: dict[str, Any]) -> dict[str, Any]:
         event["review_frames_manifest_path"] = str(frames_manifest)
         event["review_frames"] = _review_frames_with_urls(frames if isinstance(frames, list) else [])
         if not event["review_frames"]:
-            raise RuntimeError(f"crossing review frames are empty: {frames_manifest}")
+            raise RuntimeError(f"未能生成身份复核画面：{frames_manifest}")
     session["updated_at"] = _now()
     _write_json(session_path, session)
     _write_json(record_dir / "record_manifest.json", record)
@@ -306,7 +306,7 @@ def _review_frames_with_urls(frames: list[dict[str, Any]]) -> list[dict[str, Any
 def review_crossing(payload: dict[str, Any]) -> dict[str, Any]:
     result = str(payload.get("result") or "")
     if result not in {"same_drop", "different_drop"}:
-        raise RuntimeError("crossing review result must be same_drop or different_drop")
+        raise RuntimeError("请选择身份复核结果。")
     init = initialize_session(payload.get("session_root"))
     session_path = Path(init["session_file"])
     session = _read_json(session_path)
@@ -339,7 +339,7 @@ def update_record_selection(session_root: str | None, record_id: str, kept: bool
             record["kept"] = True
             record["accepted_at"] = _now()
         else:
-            raise RuntimeError(f"record cannot be accepted from status={record.get('status')}")
+            raise RuntimeError("当前测量尚未完成复核，不能保留。")
     else:
         record["status"] = "rejected_by_user"
         record["kept"] = False
@@ -353,7 +353,7 @@ def update_record_selection(session_root: str | None, record_id: str, kept: bool
 def start_next_droplet(payload: dict[str, Any]) -> dict[str, Any]:
     mode = str(payload.get("mode") or "")
     if mode not in {"same_video", "different_video"}:
-        raise RuntimeError("mode must be same_video or different_video")
+        raise RuntimeError("请选择继续使用当前视频或更换视频。")
     init = initialize_session(payload.get("session_root"))
     session_path = Path(init["session_file"])
     session = _read_json(session_path)
@@ -373,7 +373,7 @@ def start_next_droplet(payload: dict[str, Any]) -> dict[str, Any]:
     boundary = (record or {}).get("time_window") or active.get("boundary")
     grid = (record or {}).get("grid") or active.get("grid")
     if not video_path or not isinstance(metadata, dict) or not isinstance(boundary, dict) or not isinstance(grid, dict):
-        raise RuntimeError("same_video next droplet requires an active or record video context")
+        raise RuntimeError("当前没有可继续测量的视频，请重新导入视频。")
     session["active_video"] = {
         "state": "boundary_confirmed",
         "path": video_path,
@@ -428,34 +428,55 @@ def export_session(session_root: str | None, export_root: str) -> dict[str, Any]
 
 
 def render_report(session: dict[str, Any]) -> str:
-    lines = ["# Millikan AI Normal Session Report", "", f"Session: `{session.get('session_id')}`", "", "| Record | Status | Kept | q | sigma_q | Video |", "| --- | --- | --- | ---: | ---: | --- |"]
-    for record in session.get("records", []):
+    lines = ["# 密立根油滴实验记录", "", "| 测量序号 | 结果 | 电荷 q | 不确定度 σq | 视频 |", "| ---: | --- | ---: | ---: | --- |"]
+    status_labels = {
+        "pending_crossing_review": "待复核",
+        "pending_user_confirmation": "待确认",
+        "accepted": "已保留",
+        "diagnostic": "仅供诊断",
+        "rejected_crossing_identity": "身份复核未通过",
+        "rejected_by_user": "已排除",
+    }
+    for index, record in enumerate(session.get("records", []), start=1):
         q = record.get("q", {})
-        lines.append(f"| {record.get('record_id')} | {record.get('status')} | {record.get('kept')} | {_format_charge(q.get('q_C'))} | {_format_charge(q.get('sigma_q_C'))} | {record.get('video_path', '')} |")
+        video_name = Path(str(record.get("video_path", ""))).name
+        lines.append(f"| {index} | {status_labels.get(record.get('status'), '待确认')} | {_format_charge(q.get('q_C'))} | {_format_charge(q.get('sigma_q_C'))} | {video_name} |")
+    if session.get("records"):
+        lines.extend(["", "σq 由速度拟合误差传播计算，未计仪器和物性参数误差。"])
     inversion = session.get("inversion")
     if inversion:
         comparison = inversion.get("reference_comparison") or {}
+        result_labels = {
+            "reliable": "可靠候选",
+            "exploratory": "样本较少",
+            "diagnostic": "需复核",
+            "insufficient_eligible_records": "记录不足",
+        }
+        flag_labels = {
+            "insufficient_eligible_records": "可用测量记录不足",
+            "weighted_residual_too_large": "电荷与整数倍的偏差较大",
+            "integer_assignments_nonprimitive": "整数分配存在公因数",
+            "search_boundary_hit": "估计值触及搜索范围边界",
+            "integer_assignment_not_stable": "整数分配尚未稳定",
+            "exploratory_small_sample": "样本较少，结果仅供参考",
+        }
         lines.extend(
             [
                 "",
-                "## Inversion",
+                "## 元电荷结果",
                 "",
-                f"- Status: `{inversion.get('status', '-')}`",
-                f"- e_hat: {_format_charge(inversion.get('e_hat_C'))}",
-                f"- sigma_e: {_format_charge(inversion.get('sigma_e_C'))}",
-                f"- Relative uncertainty: {_format_percent(comparison.get('relative_uncertainty_percent'))}",
-                f"- Error vs SI defining constant: {_format_percent(comparison.get('percent_error_vs_reference'))}",
-                f"- Reference: {_format_charge(comparison.get('reference_e_C'))}",
-                f"- Used q: {inversion.get('valid_q_count', inversion.get('num_used', '-'))}",
-                f"- Weighted RMS: {_format_decimal(inversion.get('weighted_rms'))}",
-                "",
-                "### Machine-readable inversion payload",
-                "",
-                "```json",
-                json.dumps(inversion, ensure_ascii=False, indent=2),
-                "```",
+                f"- 结果状态：{result_labels.get(inversion.get('status'), '未估计')}",
+                f"- 估计值：{_format_charge(inversion.get('e_hat_C'))}",
+                f"- 标准不确定度：{_format_charge(inversion.get('sigma_e_C'))}",
+                f"- 相对不确定度：{_format_percent(comparison.get('relative_uncertainty_percent'))}",
+                f"- 参与测量：{inversion.get('valid_q_count', inversion.get('num_used', '-'))} 次",
             ]
         )
+        lines.extend(f"- 诊断：{flag_labels.get(flag, flag)}" for flag in inversion.get("flags", []))
+        percent_error = comparison.get("percent_error_vs_reference")
+        if percent_error is not None:
+            reference = _format_charge(comparison.get("reference_e_C"))
+            lines.append(f"- 与标准值的相对误差：{_format_percent(percent_error)}（标准值 {reference}）")
     return "\n".join(lines) + "\n"
 
 
@@ -475,14 +496,6 @@ def _format_percent(value: Any) -> str:
     except (TypeError, ValueError):
         return "-"
     return f"{number:.3g}%" if math.isfinite(number) else "-"
-
-
-def _format_decimal(value: Any) -> str:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return "-"
-    return f"{number:.4g}" if math.isfinite(number) else "-"
 
 
 def _normalize_boundary(boundary: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
@@ -667,14 +680,14 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
 def _require_active_state(session: dict[str, Any], allowed: set[str]) -> dict[str, Any]:
     active = session.get("active_video")
     if not isinstance(active, dict):
-        raise RuntimeError("no active Normal video")
+        raise RuntimeError("当前没有可操作的视频，请先导入并处理视频。")
     state = str(active.get("state") or "")
     if state not in ACTIVE_VIDEO_STATES:
         if state in RECORD_STATES:
-            raise RuntimeError(f"record status cannot be used as active_video.state: {state}")
-        raise RuntimeError(f"unknown Normal active_video.state: {state}")
+            raise RuntimeError("测量状态不适用于当前操作，请返回测量流程继续。")
+        raise RuntimeError("测量状态无效，请重新导入视频。")
     if state not in allowed:
-        raise RuntimeError(f"invalid Normal state transition: state={state}, expected={sorted(allowed)}")
+        raise RuntimeError("当前步骤无法执行该操作，请按测量流程继续。")
     return active
 
 
@@ -682,14 +695,14 @@ def _find_record(session: dict[str, Any], record_id: str) -> dict[str, Any]:
     for record in session.get("records", []):
         if record.get("record_id") == record_id:
             return record
-    raise RuntimeError(f"record not found: {record_id}")
+    raise RuntimeError(f"未找到这条测量记录：{record_id}")
 
 
 def _find_crossing(record: dict[str, Any], event_id: str) -> dict[str, Any]:
     for event in record.get("crossing_events", []):
         if event.get("event_id") == event_id or event.get("id") == event_id:
             return event
-    raise RuntimeError(f"crossing event not found: {event_id}")
+    raise RuntimeError(f"未找到这段轨迹复核记录：{event_id}")
 
 
 def _all_crossings_reviewed_same(record: dict[str, Any]) -> bool:

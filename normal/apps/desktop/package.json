@@ -3,7 +3,7 @@
   "version": "0.9.0",
   "private": true,
   "main": "dist-electron/main.js",
-  "description": "Normal Millikan workflow desktop app: balance voltage plus 0 V single-drop measurement",
+  "description": "密立根油滴实验单滴电荷测量软件",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -p tsconfig.electron.json && tsc -p tsconfig.json && vite build",
@@ -37,7 +37,7 @@
   },
   "build": {
     "appId": "cn.millikan.ai.normal",
-    "productName": "Millikan AI Normal",
+    "productName": "密立根油滴实验",
     "asar": true,
     "files": [
       "dist-renderer/**/*",
@@ -59,7 +59,7 @@
       ]
     },
     "portable": {
-      "artifactName": "Millikan-AI-Normal-Portable-${version}.exe"
+      "artifactName": "密立根油滴实验-${version}.exe"
     },
     "directories": {
       "output": "release"
