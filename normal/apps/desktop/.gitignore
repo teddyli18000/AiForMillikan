@@ -1,0 +1,9 @@
+node_modules/
+dist-renderer/
+dist-electron/
+dist-worker/
+build-worker/
+release/
+coverage/
+.vite/
+*.log
