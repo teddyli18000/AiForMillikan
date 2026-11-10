@@ -110,7 +110,7 @@ def main() -> int:
             },
             args.timeout,
         )
-        run_dir = Path(analysis["run_dir"])
+        run_dir = Path(analysis["run_dir"]).resolve()
         if not run_dir.is_relative_to(run_root.resolve()):
             raise SystemExit(f"run directory escaped MILLIKAN_RUN_ROOT: {run_dir}")
         if not (run_dir / "run_manifest.json").exists():
@@ -123,7 +123,7 @@ def main() -> int:
             raise SystemExit("unexpected run manifest schema version")
 
         loaded = worker_call(command, env, "analysis.loadRun", {"run_dir": str(run_dir)}, args.timeout)
-        if Path(loaded["artifacts"]["run_dir"]) != run_dir:
+        if Path(loaded["artifacts"]["run_dir"]).resolve() != run_dir:
             raise SystemExit("analysis.loadRun returned a different run directory")
 
         exported = worker_call(
@@ -141,7 +141,7 @@ def main() -> int:
             raise SystemExit("report.export returned no files")
 
         reloaded = worker_call(command, env, "analysis.loadRun", {"run_dir": str(run_dir)}, args.timeout)
-        if Path(reloaded["artifacts"]["run_dir"]) != run_dir:
+        if Path(reloaded["artifacts"]["run_dir"]).resolve() != run_dir:
             raise SystemExit("a fresh worker process could not reload the persistent run")
 
         print(
