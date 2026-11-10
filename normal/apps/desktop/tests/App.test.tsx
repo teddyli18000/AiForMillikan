@@ -43,6 +43,7 @@ async function reachAcceptedNormalRecord() {
   await userEvent.click(await screen.findByRole("button", { name: "确认保留" }));
   expect(await screen.findByRole("button", { name: /下一颗油滴/ })).toBeInTheDocument();
   expect(await screen.findByLabelText("完整轨迹复核帧播放器")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "后退 1 秒" })).toBeNull();
   expect(await screen.findByLabelText("单滴 q 计算流程")).toBeInTheDocument();
   expect(screen.getByText("电荷计算过程")).toBeInTheDocument();
 
@@ -61,7 +62,8 @@ describe("Millikan AI Normal desktop app", () => {
     expect(screen.getAllByText("单滴电荷测量").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /开始处理/ })).toBeDisabled();
     expect(screen.getByText("密立根油滴实验")).toBeInTheDocument();
-    expect(screen.getByText("测量流程")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "测量流程" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /1\s*导入视频/ })).toHaveAttribute("aria-current", "step");
     expect(document.querySelector(".normal-progress-box")).toBeNull();
     expect(document.querySelectorAll(".normal-stage small")).toHaveLength(0);
     expect(document.body.textContent).not.toMatch(/Normal|workflow|idle|processing|metadata|session/i);

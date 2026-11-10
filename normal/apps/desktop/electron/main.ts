@@ -10,9 +10,8 @@ const transientNormalSessionRoots = new Set<string>();
 function createWindow(): void {
   const display = screen.getPrimaryDisplay();
   const workArea = display.workAreaSize;
-  const scaleFactor = Math.max(1, display.scaleFactor || 1);
-  const safeWidth = Math.floor(workArea.width / scaleFactor) - 48;
-  const safeHeight = Math.floor(workArea.height / scaleFactor) - 48;
+  const safeWidth = workArea.width - 48;
+  const safeHeight = workArea.height - 48;
   const width = Math.min(1480, Math.max(640, safeWidth));
   const height = Math.min(940, Math.max(520, safeHeight));
   mainWindow = new BrowserWindow({

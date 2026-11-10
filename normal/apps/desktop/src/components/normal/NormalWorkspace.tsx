@@ -135,7 +135,7 @@ export function NormalWorkspace() {
   const [inversion, setInversion] = useState<NormalInversionResult | null>(null);
   const [progress, setProgress] = useState<NormalProgressEvent | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("请选择实验视频。");
+  const [message, setMessage] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -184,6 +184,8 @@ export function NormalWorkspace() {
     selectedRecord?.artifact_urls?.overlay_mp4 ??
     selectedRecord?.artifact_urls?.single_droplet_overlay_mp4 ??
     "";
+  const playerStartS = stage === "target" ? selectionWindow.start_s : 0;
+  const playerEndS = stage === "target" ? selectionWindow.end_s : duration || metadata?.duration_s || 0;
   const selectedTrackFrames = selectedRecord?.track_review_frames ?? [];
   const showingTrackFrames = Boolean((stage === "review" || stage === "results") && selectedTrackFrames.length);
   const mainVideoUrl = showingTrackFrames ? "" : stage === "review" || stage === "results" ? selectedOverlayUrl || videoUrl : videoUrl;
@@ -330,7 +332,7 @@ export function NormalWorkspace() {
       setAdjustingRecordId(null);
       setStage(response.record.status === "pending_crossing_review" ? "review" : "results");
       setProgress(null);
-      setMessage(response.record.status === "pending_crossing_review" ? "追踪完成，请复核油滴经过网格线的片段。" : "测量完成，请确认是否保留。");
+      setMessage("");
     } catch (error) {
       setMessage(`追踪失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -351,7 +353,7 @@ export function NormalWorkspace() {
       setSession(response.session);
       setSelectedRecordId(response.record.record_id);
       setReviewEvent(response.event ?? event);
-      setMessage("局部放大复核片段已生成。");
+      setMessage("");
     } catch (error) {
       setMessage(`生成复核片段失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -375,7 +377,7 @@ export function NormalWorkspace() {
       setReviewEvent(response.record.crossings?.find((event) => event.event_id === reviewEvent.event_id) ?? null);
       if (response.record.status === "pending_user_confirmation") {
         setStage("results");
-        setMessage("复核完成，请确认是否保留测量结果。");
+        setMessage("");
       } else if (response.record.status === "rejected_crossing_identity") {
         restoreRecordForAdjustment(response.record, response.session);
         setMessage("油滴不一致，请调整后重新追踪。");
@@ -404,7 +406,7 @@ export function NormalWorkspace() {
         restoreRecordForAdjustment(selectedRecord, nextSession);
         setMessage("已恢复原视频，可调整区间后重新追踪。");
       } else {
-        setMessage("测量结果已保留。");
+        setMessage("");
       }
     } catch (error) {
       setMessage(`更新记录失败：${error instanceof Error ? error.message : String(error)}`);
@@ -422,7 +424,7 @@ export function NormalWorkspace() {
       setInversion(response.inversion);
       setStage("inversion");
       setProgress(null);
-      setMessage(response.inversion.status === "insufficient_eligible_records" ? "有效保留记录不足 3 条，暂不能反演。" : "盲反演完成。");
+      setMessage(response.inversion.status === "insufficient_eligible_records" ? "有效保留记录不足 3 条，暂不能反演。" : "");
     } catch (error) {
       setMessage(`盲反演失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -481,7 +483,7 @@ export function NormalWorkspace() {
       setSelectionTime(nextSelectionTime);
       seekVideoTo(nextSelectionTime, nextMetadata ?? metadata, true);
       setStage("target");
-      setMessage("已准备在同一视频中测量下一颗油滴。请在 0V 起点附近重新框选。");
+      setMessage("请重新框选下一颗油滴。");
     } catch (error) {
       setMessage(`准备下一颗油滴失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -772,16 +774,16 @@ export function NormalWorkspace() {
             <Download size={16} />
             导出报告
           </button>
-          <button className="primary-button small" disabled={busy || keptValidCount < 3} onClick={runInversion}>
+          <button className="primary-button small" disabled={busy || keptValidCount < 3} onClick={runInversion} title={keptValidCount < 3 ? "保留至少三条有效记录后，可估计元电荷" : "估计元电荷"}>
             <Play size={16} />
             估计元电荷
           </button>
         </div>
       </header>
 
-      <main className="normal-flow">
-        <aside className="normal-rail panel">
-          <div className="section-heading">
+      <main className={`normal-flow normal-flow--${stage}`}>
+        <nav className="normal-rail panel" aria-label="测量流程">
+          <div className="section-heading normal-rail-heading">
             <strong>测量流程</strong>
           </div>
           <div className="normal-stage-list">
@@ -789,6 +791,7 @@ export function NormalWorkspace() {
               <button
                 key={item.id}
                 className={item.id === stage ? "normal-stage active" : "normal-stage"}
+                aria-current={item.id === stage ? "step" : undefined}
                 onClick={() => setStage(item.id)}
                 disabled={item.id !== "results" && item.id !== stage && !(item.id === "inversion" && Boolean(inversion ?? session?.inversion))}
               >
@@ -797,15 +800,14 @@ export function NormalWorkspace() {
               </button>
             ))}
           </div>
-          <ProgressBox progress={progress} busy={busy} />
-        </aside>
+        </nav>
 
         <section className={stage === "inversion" ? "normal-video-panel panel normal-video-panel--inversion" : "normal-video-panel panel"} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
           {stage === "inversion" ? (
             <NormalInversionDashboard inversion={inversion ?? session?.inversion ?? null} records={session?.records ?? []} />
           ) : (
             <>
-              <div className="normal-video-shell">
+              <div className={showingTrackFrames ? "normal-video-shell normal-video-shell--review" : "normal-video-shell"}>
                 {showingTrackFrames ? (
                   <TrackFramePlayer frames={selectedTrackFrames} />
                 ) : mainVideoUrl ? (
@@ -836,11 +838,11 @@ export function NormalWorkspace() {
                     />
                     {showingTrackOverlay ? <div className="normal-overlay-badge">轨迹回放</div> : null}
                     {stage === "target" ? <div className="normal-overlay-badge normal-overlay-badge--selection">框选时刻 {formatFixed(selectionTime, 2)} s</div> : null}
-                    <div ref={overlayRef} className="normal-video-overlay" onMouseDown={onSelectionDown} onMouseMove={onSelectionMove} onMouseUp={endSelection} onMouseLeave={endSelection}>
-                      {boundary.zero_v_start_s <= (duration || 0) ? <span className="time-marker start" style={{ left: `${((boundary.zero_v_start_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
-                      {boundary.zero_v_end_s <= (duration || 0) ? <span className="time-marker end" style={{ left: `${((boundary.zero_v_end_s || 0) / Math.max(0.001, duration || metadata?.duration_s || 1)) * 100}%` }} /> : null}
-                      {selectionBox ? <span className="selection-box" style={videoBoxStyle(selectionBox)} /> : null}
-                    </div>
+                    {stage === "target" ? (
+                      <div ref={overlayRef} className="normal-video-overlay" onMouseDown={onSelectionDown} onMouseMove={onSelectionMove} onMouseUp={endSelection} onMouseLeave={endSelection}>
+                        {selectionBox ? <span className="selection-box" style={videoBoxStyle(selectionBox)} /> : null}
+                      </div>
+                    ) : null}
                   </>
                 ) : (
                   <div className="normal-video-placeholder">
@@ -849,7 +851,7 @@ export function NormalWorkspace() {
                   </div>
                 )}
               </div>
-              <div className="normal-player">
+              {!showingTrackFrames ? <div className="normal-player">
                 <button className="icon-button step-button step-button--coarse" onClick={() => playerJumpTo((stage === "target" ? selectionTime : currentTime) - 1)} disabled={!mainVideoUrl} aria-label="后退 1 秒" title="后退 1 秒">
                   <StepBack size={16} />
                   <span className="step-badge">1s</span>
@@ -869,25 +871,31 @@ export function NormalWorkspace() {
                   <StepForward size={16} />
                   <span className="step-badge">1s</span>
                 </button>
-                <input
-                  className="normal-scrubber"
-                  type="range"
-                  min={stage === "target" ? selectionWindow.start_s : 0}
-                  max={stage === "target" ? selectionWindow.end_s : duration || metadata?.duration_s || 0}
-                  step={0.01}
-                  value={stage === "target" ? selectionTime : currentTime}
-                  disabled={!mainVideoUrl}
-                  onChange={(event) => playerJumpTo(Number(event.target.value))}
-                  aria-label="视频进度"
-                />
+                <div className="normal-timeline">
+                  <input
+                    className="normal-scrubber"
+                    type="range"
+                    min={playerStartS}
+                    max={playerEndS}
+                    step={0.01}
+                    value={stage === "target" ? selectionTime : currentTime}
+                    disabled={!mainVideoUrl}
+                    onChange={(event) => playerJumpTo(Number(event.target.value))}
+                    aria-label="视频进度"
+                  />
+                  {(["zero_v_start_s", "zero_v_end_s"] as const).map((key) => boundary[key] >= playerStartS && boundary[key] <= playerEndS && playerEndS > playerStartS ? (
+                    <span key={key} className={`normal-timeline-marker ${key === "zero_v_end_s" ? "end" : "start"}`} style={{ left: `${(boundary[key] - playerStartS) / (playerEndS - playerStartS) * 100}%` }} />
+                  ) : null)}
+                </div>
                 <span>{formatFixed(currentTime, 2)} / {formatFixed(duration || metadata?.duration_s, 2)} s</span>
-              </div>
-              {stage === "results" && selectedRecord ? <QCalculationFlow record={selectedRecord} /> : null}
+              </div> : null}
             </>
           )}
         </section>
 
         <aside className="normal-inspector panel">
+          <ProgressBox progress={progress} busy={busy} />
+          {!busy && message ? <p className="normal-status" role="status">{message}</p> : null}
           {stage === "import" ? (
             <ImportPanel
               videoPath={videoPath}
@@ -954,13 +962,10 @@ export function NormalWorkspace() {
             <ResultsPanel
               session={session}
               selectedRecord={selectedRecord}
-              inversion={inversion ?? session?.inversion ?? null}
               canAcceptRecord={canAcceptRecord}
-              keptValidCount={keptValidCount}
               onSelectRecord={setSelectedRecordId}
               onAccept={() => acceptRecord(true)}
               onReject={() => acceptRecord(false)}
-              onRunInversion={runInversion}
               onBackReview={() => (selectedRecord?.status === "pending_crossing_review" ? restoreRecordContext(selectedRecord, session, "review", false) : backToTarget(selectedRecord))}
               onBackBoundary={() => backToBoundary(selectedRecord)}
               onNextDrop={() => setNextDropDialogOpen(true)}
@@ -980,6 +985,9 @@ export function NormalWorkspace() {
             />
           ) : null}
         </aside>
+        {stage === "results" && selectedRecord ? (
+          <section className="normal-calculation-panel panel"><QCalculationFlow record={selectedRecord} /></section>
+        ) : null}
       </main>
 
       <div className="normal-evidence-strip">
@@ -989,7 +997,6 @@ export function NormalWorkspace() {
         <InfoTile label="记录" value={`共 ${session?.counts?.total ?? 0} 条，已保留 ${keptValidCount} 条`} />
       </div>
 
-      {!busy ? <div className="status-toast" role="status">{message}</div> : null}
       {nextDropDialogOpen ? (
         <div className="normal-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="next-drop-title">
           <div className="normal-modal">
@@ -1085,7 +1092,10 @@ function BoundaryPanel(props: {
       </div>
       {(["zero_v_start_s", "zero_v_end_s"] as const).map((field) => (
         <div className="normal-boundary-editor" key={field}>
-          <label>{field === "zero_v_start_s" ? "开始时间（秒）" : "结束时间（秒）"}</label>
+          <div className="normal-boundary-heading">
+            <label>{field === "zero_v_start_s" ? "开始时间（秒）" : "结束时间（秒）"}</label>
+            <button className="normal-seek-button" onClick={() => props.onJump(props.boundary[field])}>定位画面</button>
+          </div>
           <div className="normal-step-row">
             <button onClick={() => props.onAdjust(field, -1)}>-1s</button>
             <button onClick={() => props.onAdjust(field, -0.1)}>-0.1s</button>
@@ -1097,7 +1107,6 @@ function BoundaryPanel(props: {
             />
             <button onClick={() => props.onAdjust(field, 0.1)}>+0.1s</button>
             <button onClick={() => props.onAdjust(field, 1)}>+1s</button>
-            <button onClick={() => props.onJump(props.boundary[field])}>跳转</button>
           </div>
         </div>
       ))}
@@ -1220,14 +1229,6 @@ function ReviewPanel(props: {
         <strong>{statusLabel(props.record?.status)}</strong>
         <span>待检查 {crossings.filter((event) => !event.review_result).length} 个过线片段</span>
       </div>
-      <div className="panel-actions">
-        <button className="ghost-button" disabled={props.busy} onClick={props.onBackTarget}>
-          返回框选
-        </button>
-        <button className="ghost-button" disabled={props.busy} onClick={props.onBackBoundary}>
-          修改 0V
-        </button>
-      </div>
       <div className="normal-crossing-list">
         {crossings.map((event, index) => (
           <button key={event.event_id} className={props.reviewEvent?.event_id === event.event_id ? "active" : ""} onClick={() => props.onPrepareReview(event)}>
@@ -1251,9 +1252,17 @@ function ReviewPanel(props: {
           </div>
         </div>
       ) : null}
-      <button className="ghost-button full" disabled={props.record?.status !== "pending_user_confirmation"} onClick={props.onContinue}>
-        查看测量结果
-      </button>
+      <div className="panel-actions normal-review-navigation">
+        <button className="ghost-button" disabled={props.busy} onClick={props.onBackTarget}>
+          返回框选
+        </button>
+        <button className="ghost-button" disabled={props.busy} onClick={props.onBackBoundary}>
+          修改 0V
+        </button>
+      </div>
+      {props.record?.status === "pending_user_confirmation" ? (
+        <button className="ghost-button full" onClick={props.onContinue}>查看测量结果</button>
+      ) : null}
     </div>
   );
 }
@@ -1261,14 +1270,11 @@ function ReviewPanel(props: {
 function ResultsPanel(props: {
   session: NormalSession | null;
   selectedRecord: NormalRecord | null;
-  inversion: NormalInversionResult | null;
   canAcceptRecord: boolean;
-  keptValidCount: number;
   busy: boolean;
   onSelectRecord: (id: string) => void;
   onAccept: () => void;
   onReject: () => void;
-  onRunInversion: () => void;
   onBackReview: () => void;
   onBackBoundary: () => void;
   onNextDrop: () => void;
@@ -1294,59 +1300,33 @@ function ResultsPanel(props: {
             <InfoTile label="R²" value={formatFixed(fit.r2 as number | undefined, 3)} />
             <InfoTile label="拟合点" value={String(fit.fit_point_count ?? "-")} />
           </div>
-          <div className="normal-diagnostic-box">
-            <strong>不确定度来源</strong>
-            <span>由速度拟合误差传播，未计入仪器与物性参数误差。</span>
-          </div>
-          <div className="panel-actions">
-            <button className="ghost-button" disabled={props.busy} onClick={props.onBackReview}>
-              返回复核
-            </button>
-            <button className="ghost-button" disabled={props.busy} onClick={props.onBackBoundary}>
-              修改 0V
-            </button>
-            <button className="primary-button small" disabled={props.busy || !props.canAcceptRecord} onClick={props.onAccept}>
-              <Save size={15} />
-              确认保留
-            </button>
+          <p className="normal-result-note">σq 由速度拟合误差传播，未计仪器与物性参数误差。</p>
+          <div className="panel-actions normal-result-actions">
             {record.status === "accepted" && record.kept ? (
-              <button className="primary-button small" disabled={props.busy} onClick={props.onNextDrop}>
-                下一颗油滴
-              </button>
-            ) : null}
-            <button className="ghost-button" disabled={props.busy} onClick={props.onReject}>
-              排除并调整
-            </button>
+              <button className="primary-button" disabled={props.busy} onClick={props.onNextDrop}>下一颗油滴</button>
+            ) : (
+              <button className="primary-button" disabled={props.busy || !props.canAcceptRecord} onClick={props.onAccept}><Save size={15} />确认保留</button>
+            )}
+            <button className="ghost-button" disabled={props.busy} onClick={props.onBackReview}>返回复核</button>
+            <button className="ghost-button" disabled={props.busy} onClick={props.onBackBoundary}>修改 0V</button>
+            <button className="ghost-button" disabled={props.busy} onClick={props.onReject}>排除并调整</button>
           </div>
         </>
       ) : (
         <div className="normal-drop-hint">还没有本次测量记录。</div>
       )}
-      <div className="normal-record-list">
-        {(props.session?.records ?? []).map((item, index) => (
-          <button key={item.record_id} className={item.record_id === record?.record_id ? "active" : ""} onClick={() => props.onSelectRecord(item.record_id)}>
-            <span className="record-id">测量 {index + 1}</span>
-            <strong>{fmtCharge(item.q_C)}</strong>
-            <small>{statusLabel(item.status)}</small>
-          </button>
-        ))}
-      </div>
-      <div className="normal-diagnostic-box">
-        <strong>元电荷估计</strong>
-        <span>已保留 {props.keptValidCount} 条，至少需要 3 条</span>
-        {props.inversion ? (
-          <>
-            <span>{inversionStatusLabel(props.inversion.status)}</span>
-            <span>e：{fmtCharge(props.inversion.e_hat_C)}</span>
-          </>
-        ) : (
-          <span>使用已保留的电荷记录估计元电荷。</span>
-        )}
-      </div>
-      <button className="primary-button full" disabled={props.busy || props.keptValidCount < 3} onClick={props.onRunInversion}>
-        <Play size={16} />
-        估计元电荷
-      </button>
+      <details className="normal-record-history">
+        <summary>测量记录（{props.session?.records.length ?? 0} 条）</summary>
+        <div className="normal-record-list">
+          {(props.session?.records ?? []).map((item, index) => (
+            <button key={item.record_id} className={item.record_id === record?.record_id ? "active" : ""} onClick={() => props.onSelectRecord(item.record_id)}>
+              <span className="record-id">测量 {index + 1}</span>
+              <strong>{fmtCharge(item.q_C)}</strong>
+              <small>{statusLabel(item.status)}</small>
+            </button>
+          ))}
+        </div>
+      </details>
     </div>
   );
 }
@@ -1504,50 +1484,24 @@ function InversionPanel(props: {
   onExport: () => void;
   onRunInversion: () => void;
 }) {
-  const status = props.inversion?.status ?? "not_run";
-  const flags = props.inversion?.flags ?? [];
   const accepted = props.session?.counts?.kept_valid ?? props.keptValidCount;
   return (
-    <div className="normal-panel-stack">
-      <div className="section-heading">
-        <strong>元电荷估计</strong>
-      </div>
-      <div className="normal-diagnostic-box normal-inversion-inspector-lead">
-        <strong>运行诊断</strong>
-        <span className={`normal-inversion-status ${status === "reliable" ? "good" : status === "insufficient_eligible_records" ? "blocked" : "warn"}`}>{inversionStatusLabel(status)}</span>
-      </div>
-      <div className="normal-meta-grid">
-        <InfoTile label="使用 q" value={String(props.inversion?.valid_q_count ?? props.inversion?.num_used ?? accepted)} />
-        <InfoTile label="收敛" value={props.inversion?.converged === false ? "未稳定" : props.inversion ? "稳定" : "-"} />
-        <InfoTile label="边界命中" value={props.inversion?.boundary_hit ? "是" : "否"} />
-        <InfoTile label="样本结论" value={status === "exploratory" ? "探索性" : status === "reliable" ? "候选可靠" : "需诊断"} />
-      </div>
-      <div className="normal-diagnostic-box">
-        <strong>结果说明</strong>
-        <span>{status === "insufficient_eligible_records" ? "有效记录不足 3 条，暂不能估计元电荷。" : "整数倍拟合用于检查电荷对齐情况。"}</span>
-        {flags.map((flag) => <span key={flag}>{diagnosticLabel(flag)}</span>)}
-      </div>
-      <div className="normal-diagnostic-box">
-        <strong>搜索设置</strong>
-        <span>搜索范围：{fmtCharge(props.inversion?.search_interval_C?.[0])} - {fmtCharge(props.inversion?.search_interval_C?.[1])}</span>
-        <span>拟合不确定度下限：{fmtCharge(props.inversion?.sigma_floor_C)}</span>
-      </div>
+    <div className="normal-inversion-tools">
       <div className="panel-actions">
-        <button className="ghost-button" disabled={props.busy} onClick={props.onBackResults}>
-          返回测量结果
-        </button>
-        <button className="ghost-button" disabled={props.busy} onClick={props.onExport}>
-          <Download size={15} />
-          导出报告
-        </button>
-        <button className="primary-button small" disabled={props.busy || accepted < 3} onClick={props.onRunInversion}>
-          <Play size={15} />
-          重新反演
-        </button>
+        <button className="ghost-button" disabled={props.busy} onClick={props.onBackResults}><ArrowLeft size={15} />返回测量结果</button>
+        <button className="ghost-button" disabled={props.busy} onClick={props.onExport}><Download size={15} />导出报告</button>
+        <button className="ghost-button" disabled={props.busy || accepted < 3} onClick={props.onRunInversion}>重新反演</button>
+        <button className="primary-button small" disabled={props.busy || !props.session?.records?.some((record) => record.status === "accepted" && record.kept)} onClick={props.onNextDrop}>下一颗油滴</button>
       </div>
-      <button className="primary-button full" disabled={props.busy || !props.session?.records?.some((record) => record.status === "accepted" && record.kept)} onClick={props.onNextDrop}>
-        下一颗油滴
-      </button>
+      <details className="normal-inversion-options">
+        <summary>搜索与诊断</summary>
+        <div className="normal-inversion-settings">
+          <span>搜索范围：{fmtCharge(props.inversion?.search_interval_C?.[0])} ～ {fmtCharge(props.inversion?.search_interval_C?.[1])}</span>
+          <span>拟合不确定度下限：{fmtCharge(props.inversion?.sigma_floor_C)}</span>
+          <span>整数分配：{props.inversion?.converged === false ? "未稳定" : "稳定"}</span>
+          {(props.inversion?.flags ?? []).map((flag) => <span key={flag}>{diagnosticLabel(flag)}</span>)}
+        </div>
+      </details>
     </div>
   );
 }
@@ -1597,8 +1551,8 @@ function NormalInversionDashboard({ inversion, records }: { inversion: NormalInv
             <ResidualChart rows={charts.residuals} />
           </section>
           <section className="normal-inversion-tables">
-            <CandidateList candidates={candidates} />
             <AssignmentTable assignments={assignments} records={records} />
+            <CandidateList candidates={candidates} />
           </section>
         </>
       )}
@@ -1664,11 +1618,11 @@ function ChargeAlignmentChart({
             <g key={`q-${index}`}>
               <line className="normal-error-bar" x1={cx} x2={cx} y1={y(q - sigma)} y2={y(q + sigma)} />
               <circle className="normal-q-dot" cx={cx} cy={cy} r="6" />
-              <text x={cx - 12} y={height - 18}>{index + 1}</text>
+              <text x={cx - 12} y={height - 26}>{index + 1}</text>
             </g>
           );
         })}
-        <text x={pad.left} y={height - 10}>测量序号</text>
+        <text x={width / 2} y={height - 4} textAnchor="middle">测量序号</text>
         <text x={12} y={26}>C</text>
       </svg>
     </div>
