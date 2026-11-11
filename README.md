@@ -5,7 +5,7 @@
 **Presented by Xinchen Lee & Minghao Yao**
 
 [![Release](https://img.shields.io/github/v/release/teddyli18000/AiForMillikan?style=flat-square&label=release)](https://github.com/teddyli18000/AiForMillikan/releases/latest)
-[![Windows](https://img.shields.io/badge/platform-Windows-2563eb?style=flat-square)](https://github.com/teddyli18000/AiForMillikan/releases/latest)
+[![Windows](https://img.shields.io/badge/platform-Windows-2563eb?style=flat-square)](https://github.com/teddyli18000/AiForMillikan/actions/runs/43032106593#artifacts)
 [![Electron](https://img.shields.io/badge/desktop-Electron-111827?style=flat-square)](normal/apps/desktop)
 [![Python](https://img.shields.io/badge/worker-Python-3776ab?style=flat-square)](normal/src/millikan_ai)
 
@@ -19,8 +19,7 @@ and estimating the elementary charge from accepted measurements.
 
 ## Get the app
 
-- **Download:** [Millikan AI 0.9.1 for Windows](https://github.com/teddyli18000/AiForMillikan/releases/tag/normal-v0.9.1)
-- **Verify:** use the `.sha256` file provided alongside the EXE.
+- **Download:** [Windows 0.9.2 build](https://github.com/teddyli18000/AiForMillikan/actions/runs/43032106593#artifacts) — download and unzip `millikan-ai-normal-portable` under Artifacts after the build passes.
 - **Test video:** [open the Releases page](https://github.com/teddyli18000/AiForMillikan/releases/tag/videos) or [attached to each version](https://github.com/teddyli18000/AiForMillikan/releases/latest)
 - **Documentation:** [Technical and academic documentation](normal/docs/README.md)
 
