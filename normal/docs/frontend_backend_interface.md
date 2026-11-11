@@ -60,6 +60,8 @@ preload 调用冒号分隔的 Electron channel；`electron/main.ts` 将其映射
 
 常用记录字段：`record_id`、`retry_of_record_id`、`video_path`、`balance_voltage_V`、`time_window`、`target`、`grid`、`tracking`、`crossing_events`、`fit`、`q`、`status`、`kept`。`q` 包含 `valid`、`q_C`、`sigma_q_C`、`radius_m`、`flags` 与 `calculation_trace`。worker 的公开记录还提供 `track_review_frames`、过线事件和证据路径。
 
+过线按油滴进入网格线附近、再离开的完整经过判定。同次经过中的遮挡和找回只生成一次复核；线附近的坐标抖动不重复计数。离开后再次过线及经过不同网格线分别记录，其他位置的身份丢失仍需复核。
+
 `normal.prepareCrossingReview` 按需生成并返回所选事件的复核帧和可播放 URL。`normal.reviewCrossing` 只接受 `same_drop` 或 `different_drop`：
 
 - 所有过线事件均复核为 `same_drop` 后，合格记录进入 `pending_user_confirmation`。

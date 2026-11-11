@@ -201,7 +201,6 @@ def is_position_near_grid(position, grid_mask, radius: int) -> bool:
 
 
 def crossing_events(track: pd.DataFrame, grid: dict[str, Any], fps: float) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
     runs: list[list[pd.Series]] = []
     current: list[pd.Series] = []
     for _, row in track.iterrows():
@@ -212,68 +211,78 @@ def crossing_events(track: pd.DataFrame, grid: dict[str, Any], fps: float) -> li
             current = []
     if current:
         runs.append(current)
-    for idx, run in enumerate(runs, start=1):
-        start_frame = int(run[0]["source_frame"])
-        end_frame = int(run[-1]["source_frame"])
-        points = [row for row in run if math.isfinite(float(row.get("x", math.nan))) and math.isfinite(float(row.get("y", math.nan)))]
-        center_x = float(points[-1]["x"]) if points else float(run[-1].get("pred_x", 0.0))
-        center_y = float(points[-1]["y"]) if points else float(run[-1].get("pred_y", 0.0))
-        event_id = f"crossing_{idx:03d}"
-        events.append(
-            {
-                "id": event_id,
-                "event_id": event_id,
-                "start_frame": start_frame,
-                "end_frame": end_frame,
-                "start_time_s": start_frame / fps,
-                "end_time_s": end_frame / fps,
-                "review_start_time_s": max(0.0, start_frame / fps - 1.0),
-                "review_end_time_s": end_frame / fps + 1.0,
-                "center_x_px": center_x,
-                "center_y_px": center_y,
-                "kind": "grid_crossing_or_reacquire",
-                "confirmed_same_drop": None,
-            }
-        )
-    grid_lines = [float(y) for y in (grid.get("grid_lines_y") or grid.get("line_y_px") or []) if _is_finite_number(y)]
-    detected = track[track["detected"].astype(bool)].copy() if not track.empty and "detected" in track else pd.DataFrame()
-    if len(detected) >= 2 and grid_lines:
-        prior = None
+
+    # Use the grid mask's clearance, rather than counting every sign change at
+    # the line centre. A visit ends only once the drop is clear of the line.
+    detected = track[track["detected"].astype(bool)] if not track.empty else track
+    encounters: list[tuple[pd.Series, pd.Series, float, bool]] = []
+    for line in grid.get("grid_lines_y") or grid.get("line_y_px") or []:
+        if not _is_finite_number(line):
+            continue
+        line = float(line)
+        anchor = None
+        near_line = False
+        first_near = None
         for _, row in detected.iterrows():
-            if prior is None:
-                prior = row
+            if abs(float(row["y"]) - line) <= GRID_MASK_DILATE_PX:
+                near_line = True
+                if first_near is None:
+                    first_near = row
                 continue
-            y0 = float(prior["y"])
-            y1 = float(row["y"])
-            if not math.isfinite(y0) or not math.isfinite(y1) or y0 == y1:
-                prior = row
-                continue
-            low, high = sorted((y0, y1))
-            crossed = [line for line in grid_lines if low <= line <= high]
-            for line in crossed:
-                start_frame = int(prior["source_frame"])
-                end_frame = int(row["source_frame"])
-                if any(abs(float(event["start_frame"]) - start_frame) <= 1 and abs(float(event["end_frame"]) - end_frame) <= 1 for event in events):
-                    continue
-                event_id = f"crossing_{len(events) + 1:03d}"
-                events.append(
-                    {
-                        "id": event_id,
-                        "event_id": event_id,
-                        "start_frame": start_frame,
-                        "end_frame": end_frame,
-                        "start_time_s": start_frame / fps,
-                        "end_time_s": end_frame / fps,
-                        "review_start_time_s": max(0.0, start_frame / fps - 1.0),
-                        "review_end_time_s": end_frame / fps + 1.0,
-                        "center_x_px": float(row["x"]),
-                        "center_y_px": float(line),
-                        "grid_line_y_px": float(line),
-                        "kind": "grid_line_crossing",
-                        "confirmed_same_drop": None,
-                    }
-                )
-            prior = row
+            crossed = anchor is not None and (float(anchor["y"]) - line) * (float(row["y"]) - line) < 0
+            if crossed or near_line:
+                start = anchor if anchor is not None else first_near
+                encounters.append((start, row, line, crossed))
+            anchor = row
+            near_line = False
+            first_near = None
+        if near_line:
+            start = anchor if anchor is not None else first_near
+            encounters.append((start, track.iloc[-1], line, False))
+
+    candidates: list[dict[str, Any]] = []
+    covered_runs: set[int] = set()
+    for start, end, line, crossed in encounters:
+        start_frame, end_frame = int(start["source_frame"]), int(end["source_frame"])
+        related = [i for i, run in enumerate(runs)
+                   if int(run[0]["source_frame"]) <= end_frame and int(run[-1]["source_frame"]) >= start_frame]
+        if not crossed and not related:
+            continue
+        covered_runs.update(related)
+        candidates.append({
+            "start_frame": min([start_frame] + [int(runs[i][0]["source_frame"]) for i in related]),
+            "end_frame": max([end_frame] + [int(runs[i][-1]["source_frame"]) for i in related]),
+            "center_x_px": float(end["x"]) if bool(end["detected"]) else float(end["pred_x"]),
+            "center_y_px": line,
+            "grid_line_y_px": line,
+            "kind": "grid_line_crossing" if crossed else "grid_crossing_or_reacquire",
+        })
+    # Loss of identity away from a known horizontal line still needs review.
+    for i, run in enumerate(runs):
+        if i in covered_runs:
+            continue
+        points = [row for row in run if math.isfinite(float(row["x"])) and math.isfinite(float(row["y"]))]
+        point = points[-1] if points else run[-1]
+        candidates.append({
+            "start_frame": int(run[0]["source_frame"]),
+            "end_frame": int(run[-1]["source_frame"]),
+            "center_x_px": float(point["x"]) if points else float(point["pred_x"]),
+            "center_y_px": float(point["y"]) if points else float(point["pred_y"]),
+            "kind": "grid_crossing_or_reacquire",
+        })
+
+    events = sorted(candidates, key=lambda event: (event["start_frame"], event["end_frame"]))
+    for idx, event in enumerate(events, start=1):
+        event_id = f"crossing_{idx:03d}"
+        event.update({
+            "id": event_id,
+            "event_id": event_id,
+            "start_time_s": event["start_frame"] / fps,
+            "end_time_s": event["end_frame"] / fps,
+            "review_start_time_s": max(0.0, event["start_frame"] / fps - 1.0),
+            "review_end_time_s": event["end_frame"] / fps + 1.0,
+            "confirmed_same_drop": None,
+        })
     return events
 
 

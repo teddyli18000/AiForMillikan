@@ -1,6 +1,6 @@
 # Millikan AI Normal
 
-**Version 0.9.2** — the mainline human-in-the-loop measurement app for the
+**Version 0.9.3** — the mainline human-in-the-loop measurement app for the
 Millikan oil-drop experiment.
 
 Normal follows the traditional balance-voltage plus `0 V` falling method and
@@ -58,7 +58,7 @@ npm run worker:build
 npx electron-builder --win portable
 ```
 
-The portable artifact is `密立根油滴实验-0.9.2.exe`.
+The portable artifact is `密立根油滴实验-0.9.3.exe`.
 
 ## Scientific boundaries
 
