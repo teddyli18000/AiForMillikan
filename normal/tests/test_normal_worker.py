@@ -408,6 +408,30 @@ def test_desktop_worker_normal_session_measurement_and_inversion(tmp_path: Path)
     assert next_new_video["type"] == "result"
     assert next_new_video["payload"]["active_video"] is None
     assert next_new_video["payload"]["session"]["counts"]["kept_valid"] == 3
+    assert next_new_video["payload"]["session"]["inversion"] == inverted["payload"]["inversion"]
+
+    excluded = _send_worker(
+        {
+            "id": "exclude-after-inversion",
+            "op": "normal.updateRecordSelection",
+            "payload": {"session_root": str(session_root), "record_id": record["record_id"], "kept": False},
+        }
+    )[-1]
+    assert excluded["type"] == "result"
+    assert excluded["payload"]["inversion"] is None
+    assert excluded["payload"]["counts"]["kept_valid"] == 2
+
+    recalculated = _send_worker(
+        {
+            "id": "recalculate-after-exclusion",
+            "op": "normal.runInversion",
+            "payload": {"session_root": str(session_root), "config_overrides": overrides},
+        }
+    )[-1]
+    assert recalculated["type"] == "result"
+    assert recalculated["payload"]["inversion"]["status"] == "insufficient_eligible_records"
+    assert recalculated["payload"]["inversion"]["valid_q_count"] == 2
+    assert recalculated["payload"]["session"]["inversion"] == recalculated["payload"]["inversion"]
 
 
 def test_normal_confirm_boundary_seconds_override_stale_frames_and_window(tmp_path: Path):
@@ -580,6 +604,16 @@ def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Pat
     assert min(frame["time_s"] for frame in event["review_frames"]) >= event["review_clip_start_time_s"]
     assert max(frame["time_s"] for frame in event["review_frames"]) <= event["review_clip_end_time_s"]
 
+    previous_inversion = _send_worker(
+        {
+            "id": "invert-before-crossing-rejection",
+            "op": "normal.runInversion",
+            "payload": {"session_root": str(session_root), "config_overrides": overrides},
+        }
+    )[-1]
+    assert previous_inversion["type"] == "result"
+    assert previous_inversion["payload"]["session"]["inversion"] is not None
+
     rejected = _send_worker(
         {
             "id": "reject-crossing-block",
@@ -599,6 +633,7 @@ def test_normal_different_crossing_blocks_acceptance_and_inversion(tmp_path: Pat
     assert rejected["payload"]["session"]["active_video"]["metadata"]["readable"] is True
     assert rejected["payload"]["session"]["active_video"]["boundary"] == record["time_window"]
     assert rejected["payload"]["session"]["active_video"]["adjustment"]["record_id"] == record["record_id"]
+    assert rejected["payload"]["session"]["inversion"] is None
 
     reconfirmed = _send_worker(
         {

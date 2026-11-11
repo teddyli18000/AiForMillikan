@@ -42,6 +42,8 @@ this project's `src/` contains only `millikan_ai/__init__.py`,
   an explicit `session_root` must create a fresh session. The Electron shell
   cleans implicit roots on exit; use export to retain a session.
 - At least three user-kept valid q records are required before blind inversion.
+- Updating record selection invalidates the saved inversion; the renderer and
+  export must use a newly computed result for the current kept records.
 - After acceptance, "next droplet" must call a worker operation: same video
   resets `active_video.state` to `boundary_confirmed`, different video clears
   `active_video` while keeping accepted records.

@@ -317,6 +317,7 @@ def review_crossing(payload: dict[str, Any]) -> dict[str, Any]:
     if result == "different_drop":
         record["status"] = "rejected_crossing_identity"
         record["kept"] = False
+        session["inversion"] = None
         _restore_active_for_adjustment(session, record)
     elif record.get("status") == "pending_crossing_review" and _all_crossings_reviewed_same(record):
         record["status"] = "pending_user_confirmation"
@@ -344,6 +345,7 @@ def update_record_selection(session_root: str | None, record_id: str, kept: bool
         record["status"] = "rejected_by_user"
         record["kept"] = False
         _restore_active_for_adjustment(session, record)
+    session["inversion"] = None
     session["updated_at"] = _now()
     _write_json(session_path, session)
     _write_json(Path(record["record_dir"]) / "record_manifest.json", record)

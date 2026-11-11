@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "../src/App";
 import { desktopApi } from "../src/lib/desktopApi";
@@ -286,8 +286,9 @@ describe("Millikan AI Normal desktop app", () => {
     }
   });
 
-  it("opens a dedicated Normal inversion result page after three accepted q records", async () => {
+  it("recalculates the inversion after excluding a measurement", async () => {
     const cleanupRect = await reachAcceptedNormalRecord();
+    const inversionApi = vi.spyOn(desktopApi, "normalRunInversion");
     async function acceptNextDroplet(x: number) {
       await userEvent.click(screen.getByRole("button", { name: /下一颗油滴/ }));
       await userEvent.click(await screen.findByRole("button", { name: /同一个视频/ }));
@@ -306,6 +307,7 @@ describe("Millikan AI Normal desktop app", () => {
     try {
       await acceptNextDroplet(180);
       await acceptNextDroplet(240);
+      await acceptNextDroplet(300);
       await userEvent.click(screen.getAllByRole("button", { name: "估计元电荷" }).at(-1)!);
       expect(await screen.findByLabelText("元电荷结果页")).toBeInTheDocument();
       expect(screen.getAllByText("元电荷估计").length).toBeGreaterThan(0);
@@ -318,7 +320,18 @@ describe("Millikan AI Normal desktop app", () => {
       expect(screen.queryByText(/模型胜出|quantized_favored|continuous_favored/)).toBeNull();
       expect(document.body.textContent).not.toMatch(/\d(?:\.\d+)?e[+-]\d+/i);
       expect(document.body.textContent).not.toMatch(/Normal|accepted|stable|boundary|baseline|flags|session|backend/i);
+
+      const firstInversion = await inversionApi.mock.results[0].value;
+      await userEvent.click(within(screen.getByRole("navigation", { name: "测量流程" })).getByRole("button", { name: /测量结果/ }));
+      await userEvent.click(screen.getByRole("button", { name: "排除并调整" }));
+      expect(await screen.findByRole("button", { name: "确认边界" })).toBeInTheDocument();
+      expect(within(screen.getByRole("navigation", { name: "测量流程" })).getByRole("button", { name: /元电荷估计/ })).toBeDisabled();
+      await userEvent.click(screen.getByRole("button", { name: "估计元电荷" }));
+      expect(await screen.findByLabelText("元电荷结果页")).toBeInTheDocument();
+      const recalculated = await inversionApi.mock.results[1].value;
+      expect(recalculated.inversion.valid_q_count).toBe(firstInversion.inversion.valid_q_count - 1);
     } finally {
+      inversionApi.mockRestore();
       cleanupRect();
     }
   });

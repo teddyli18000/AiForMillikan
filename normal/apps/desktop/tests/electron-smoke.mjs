@@ -106,6 +106,11 @@ try {
     assert.ok(fs.existsSync(path.join(destination, file)), `export missing ${file}`);
   }
   assert.match(fs.readFileSync(path.join(destination, "normal_session_report.md"), "utf8"), /密立根油滴实验记录/);
+  const excluded = await invoke("normalSelectRecord", { session_root, record_id: records[2], kept: false });
+  assert.equal(excluded.counts.kept_valid, 2);
+  assert.equal(excluded.inversion, null);
+  const recalculated = await invoke("normalRunInversion", { session_root, config_overrides: overrides });
+  assert.equal(recalculated.inversion.status, "insufficient_eligible_records");
 
   // Review rejection and explicit exclusion must preserve the accepted collection.
   const historical = await invoke("normalStartNextDroplet", { session_root, record_id: records[0], mode: "same_video" });
@@ -120,9 +125,8 @@ try {
     event_id: rejectedCandidate.record.crossings[0].event_id, result: "different_drop"
   });
   assert.equal(rejected.record.status, "rejected_crossing_identity");
+  assert.equal(rejected.session.inversion, null);
   await assert.rejects(() => invoke("normalSelectRecord", { session_root, record_id: rejectedCandidate.record.record_id, kept: true }), /不能保留/);
-  const excluded = await invoke("normalSelectRecord", { session_root, record_id: records[2], kept: false });
-  assert.equal(excluded.counts.kept_valid, 2);
   const changedVideo = await invoke("normalStartNextDroplet", { session_root, mode: "different_video" });
   assert.equal(changedVideo.active_video, null);
   assert.equal(changedVideo.session.counts.kept_valid, 2);

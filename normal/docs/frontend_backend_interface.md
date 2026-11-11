@@ -84,6 +84,8 @@ q 由平衡电压与零电压下落速度计算；`sigma_q_C` 由速度拟合误
 
 `reference_comparison` 用于结果展示，不参与候选搜索、排序或整数分配。Normal 当前没有连续基线模型，不得声称模型胜出。
 
+保留或排除记录、过线身份复核未通过后，清除已有反演结果；界面和导出报告须使用重新计算的结果。
+
 ## 导出
 
 `normal:exportSession` 先通过 Electron 目录选择器获取导出位置，再调用 worker 的 `normal.exportSession`。取消选择时 main 返回 `{ canceled: true }`；成功时返回 `{ canceled: false, destination, package }`，其中 `package` 是 worker 的结果。

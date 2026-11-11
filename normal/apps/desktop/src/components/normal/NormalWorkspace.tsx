@@ -383,6 +383,7 @@ export function NormalWorkspace() {
         setStage("results");
         setMessage("");
       } else if (response.record.status === "rejected_crossing_identity") {
+        setInversion(null);
         await restoreRecordForAdjustment(response.record, response.session);
         setMessage("油滴不一致，请调整后重新追踪。");
       } else {
@@ -406,6 +407,7 @@ export function NormalWorkspace() {
         kept
       });
       setSession(nextSession);
+      setInversion(null);
       if (!kept) {
         await restoreRecordForAdjustment(selectedRecord, nextSession);
         setMessage("已恢复原视频，可调整区间后重新追踪。");
