@@ -9,21 +9,41 @@ declare global {
 function createDemoApi(): DesktopApi {
   let normalProgressListeners: Array<(progress: NormalProgressEvent) => void> = [];
   let normalRecords: NormalRecord[] = [];
+  let demoBalanceVoltage = 239;
+  let demoTarget: Record<string, unknown> = {};
+  let demoParameterOverrides: Record<string, unknown> = {};
   const emitNormal = (progress: NormalProgressEvent) => normalProgressListeners.forEach((listener) => listener(progress));
   const demoTrackFrame =
     "data:image/svg+xml;utf8," +
     encodeURIComponent(
       `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#101820"/><path d="M90 88h110" stroke="#35c9ff" stroke-width="5"/><path d="M90 88v110" stroke="#35c9ff" stroke-width="5"/><text x="210" y="98" font-family="Arial" font-size="32" fill="#35c9ff">+X</text><text x="58" y="230" font-family="Arial" font-size="32" fill="#35c9ff">+Y</text><path d="M570 180 C560 260 590 330 575 430 C565 500 592 560 580 640" stroke="#2563eb" stroke-width="5" fill="none"/><circle cx="580" cy="640" r="18" fill="none" stroke="#22c55e" stroke-width="7"/><text x="606" y="632" font-family="Arial" font-size="32" fill="#22c55e">目标</text><text x="36" y="684" font-family="Arial" font-size="28" fill="#ffffff">3.20 s</text></svg>`
     );
-  const demoNormalSession = (): NormalSession => ({
+  const demoNormalSession = (activeVideo: Record<string, unknown> | null = null): NormalSession => ({
     session_root: "runs/normal_demo/session",
     records: normalRecords,
+    active_video: activeVideo,
     counts: {
       total: normalRecords.length,
       valid: normalRecords.filter((record) => record.valid).length,
       kept_valid: normalRecords.filter((record) => record.valid && record.kept).length
     },
     inversion: null
+  });
+  const demoAdjustmentVideo = (record: NormalRecord): Record<string, unknown> => ({
+    state: "boundary_confirmed",
+    path: record.video_path,
+    video_url: "demo-normal-video.mp4",
+    metadata: record.metadata,
+    boundary: record.time_window,
+    grid: record.grid,
+    adjustment_source_record_id: record.record_id,
+    adjustment: {
+      record_id: record.record_id,
+      target: record.target,
+      balance_voltage_V: record.balance_voltage_V,
+      balance_confirmed: true,
+      parameter_overrides: record.parameter_overrides ?? {}
+    }
   });
   const demoNormalInversion = () => {
     const accepted = normalRecords.filter((record) => record.valid && record.kept);
@@ -210,7 +230,12 @@ function createDemoApi(): DesktopApi {
         session: demoNormalSession()
       };
     },
-    normalSelectTarget: async () => ({ session_root: "runs/normal_demo/session", active_video: { state: "target_selected" }, session: demoNormalSession() }),
+    normalSelectTarget: async (payload) => {
+      demoBalanceVoltage = Number(payload.balance_voltage_V);
+      demoTarget = (payload.target as Record<string, unknown>) ?? {};
+      demoParameterOverrides = (payload.parameter_overrides as Record<string, unknown>) ?? {};
+      return { session_root: "runs/normal_demo/session", active_video: { state: "target_selected" }, session: demoNormalSession() };
+    },
     normalSaveMeasurement: async () => {
       emitNormal({
         request_id: "demo",
@@ -235,7 +260,20 @@ function createDemoApi(): DesktopApi {
         sigma_q_C: 0.09e-19,
         radius_m: 7.8e-7,
         fall_velocity_m_s: 2.4e-4,
-        balance_voltage_V: 239,
+        balance_voltage_V: demoBalanceVoltage,
+        target: demoTarget,
+        parameter_overrides: demoParameterOverrides,
+        metadata: { path: "media/videos/2u.mp4", readable: true, width: 1280, height: 720, fps: 30, frame_count: 900, duration_s: 30 },
+        grid: {
+          valid: true,
+          line_y_px: [120, 220, 320, 420, 520],
+          grid_lines_y: [120, 220, 320, 420, 520],
+          effective_top_px: 220,
+          effective_bottom_px: 420,
+          measurement_distance_m: 0.001,
+          scale_y_m_per_px: 5e-6,
+          flags: []
+        },
         time_window: { zero_v_start_s: 0.8, zero_v_end_s: 5.13 },
         fit: {
           slope_px_s: 48,
@@ -254,7 +292,7 @@ function createDemoApi(): DesktopApi {
           radius_m: 7.8e-7,
           eta_eff_Pa_s: 1.72e-5,
           velocity_m_s: 2.4e-4,
-          balance_voltage_V: 239,
+          balance_voltage_V: demoBalanceVoltage,
           calculation_trace: {
             model: "balance_voltage_zero_v_fall",
             fit: {
@@ -268,7 +306,7 @@ function createDemoApi(): DesktopApi {
               r2: 0.993
             },
             physics: {
-              balance_voltage_V: 239,
+              balance_voltage_V: demoBalanceVoltage,
               cunningham_length_m: 8.12e-8,
               radius_m: 7.8e-7,
               eta_eff_Pa_s: 1.72e-5,
@@ -318,50 +356,57 @@ function createDemoApi(): DesktopApi {
         return { ...record, crossings, status: payload.result === "different_drop" ? "rejected_crossing_identity" : "pending_user_confirmation" };
       });
       const record = normalRecords.find((item) => item.record_id === payload.record_id) ?? normalRecords[0];
-      return { session_root: "runs/normal_demo/session", record, session: demoNormalSession() };
+      const activeVideo = payload.result === "different_drop" && record ? demoAdjustmentVideo(record) : null;
+      return { session_root: "runs/normal_demo/session", record, session: demoNormalSession(activeVideo) };
     },
     normalSelectRecord: async (payload) => {
       normalRecords = normalRecords.map((record) => (record.record_id === payload.record_id ? { ...record, kept: payload.kept, valid: payload.kept, status: payload.kept ? "accepted" : "rejected_by_user" } : record));
-      return demoNormalSession();
+      const record = normalRecords.find((item) => item.record_id === payload.record_id);
+      return demoNormalSession(!payload.kept && record ? demoAdjustmentVideo(record) : null);
     },
-    normalStartNextDroplet: async (payload) => ({
-      session_root: "runs/normal_demo/session",
-      active_video:
-        payload.mode === "same_video"
-          ? {
-              state: "boundary_confirmed",
+    normalStartNextDroplet: async (payload) => {
+      const sourceRecord = normalRecords.find((record) => record.record_id === payload.record_id) ?? normalRecords.at(-1);
+      const activeVideo = payload.mode === "same_video"
+        ? {
+            state: "boundary_confirmed",
+            path: sourceRecord?.video_path ?? "media/videos/2u.mp4",
+            video_url: "demo-normal-video.mp4",
+            metadata: sourceRecord?.metadata ?? {
               path: "media/videos/2u.mp4",
-              video_url: "demo-normal-video.mp4",
-              metadata: {
-                path: "media/videos/2u.mp4",
-                readable: true,
-                width: 1280,
-                height: 720,
-                fps: 30,
-                frame_count: 900,
-                duration_s: 30
-              },
-              boundary: {
-                zero_v_start_s: 0.8,
-                zero_v_end_s: 5.13,
-                zero_v_start_frame: 24,
-                zero_v_end_frame: 154,
-                selection_window: { start_s: 0.3, end_s: 1.3, start_frame: 9, end_frame: 39, source: "normal_v1_default" }
-              },
-              grid: {
-                valid: true,
-                line_y_px: [120, 220, 320, 420, 520],
-                grid_lines_y: [120, 220, 320, 420, 520],
-                effective_top_px: 220,
-                effective_bottom_px: 420,
-                measurement_distance_m: 0.001,
-                scale_y_m_per_px: 5e-6,
-                flags: []
-              }
-            }
-          : null,
-      session: demoNormalSession()
-    }),
+              readable: true,
+              width: 1280,
+              height: 720,
+              fps: 30,
+              frame_count: 900,
+              duration_s: 30
+            },
+            boundary: sourceRecord?.time_window ?? {
+              zero_v_start_s: 0.8,
+              zero_v_end_s: 5.13,
+              zero_v_start_frame: 24,
+              zero_v_end_frame: 154,
+              selection_window: { start_s: 0.3, end_s: 1.3, start_frame: 9, end_frame: 39, source: "normal_v1_default" }
+            },
+            grid: sourceRecord?.grid ?? {
+              valid: true,
+              line_y_px: [120, 220, 320, 420, 520],
+              grid_lines_y: [120, 220, 320, 420, 520],
+              effective_top_px: 220,
+              effective_bottom_px: 420,
+              measurement_distance_m: 0.001,
+              scale_y_m_per_px: 5e-6,
+              flags: []
+            },
+            previous_balance_voltage_V: sourceRecord?.balance_voltage_V ?? demoBalanceVoltage,
+            previous_parameter_overrides: sourceRecord?.parameter_overrides ?? demoParameterOverrides
+          }
+        : null;
+      return {
+        session_root: "runs/normal_demo/session",
+        active_video: activeVideo,
+        session: demoNormalSession(activeVideo)
+      };
+    },
     normalRunInversion: async () => {
       const inversion = demoNormalInversion();
       return {

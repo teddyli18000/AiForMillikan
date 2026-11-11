@@ -208,6 +208,10 @@ export function NormalWorkspace() {
       setBoundaryDirty(false);
       setGrid(null);
       setSelectionBox(null);
+      setBalanceVoltage("");
+      setBalanceConfirmed(false);
+      setParameterOverrides({});
+      setCurrentTime(0);
       setSelectedRecordId(null);
       setAdjustingRecordId(null);
       setReviewEvent(null);
@@ -379,7 +383,7 @@ export function NormalWorkspace() {
         setStage("results");
         setMessage("");
       } else if (response.record.status === "rejected_crossing_identity") {
-        restoreRecordForAdjustment(response.record, response.session);
+        await restoreRecordForAdjustment(response.record, response.session);
         setMessage("油滴不一致，请调整后重新追踪。");
       } else {
         setMessage("复核结论已保存。");
@@ -403,7 +407,7 @@ export function NormalWorkspace() {
       });
       setSession(nextSession);
       if (!kept) {
-        restoreRecordForAdjustment(selectedRecord, nextSession);
+        await restoreRecordForAdjustment(selectedRecord, nextSession);
         setMessage("已恢复原视频，可调整区间后重新追踪。");
       } else {
         setMessage("");
@@ -470,6 +474,7 @@ export function NormalWorkspace() {
       const active = response.active_video as Record<string, any> | null | undefined;
       const nextBoundary = (active?.boundary as NormalBoundary | undefined) ?? boundary;
       const nextMetadata = (active?.metadata as VideoMetadata | undefined) ?? metadata;
+      const previousOverrides = (active?.previous_parameter_overrides ?? {}) as Record<string, unknown>;
       setSession(response.session);
       setNextDropDialogOpen(false);
       clearCurrentMeasurementDraft();
@@ -479,6 +484,18 @@ export function NormalWorkspace() {
       setGrid((active?.grid as NormalGrid | undefined) ?? grid);
       setBoundary(nextBoundary);
       setBoundaryDirty(false);
+      const previousVoltage = active?.previous_balance_voltage_V;
+      setBalanceVoltage(previousVoltage === undefined || previousVoltage === null ? "" : String(previousVoltage));
+      setBalanceConfirmed(false);
+      setParameterOverrides(
+        Object.fromEntries(
+          Object.entries(previousOverrides).flatMap(([group, value]) =>
+            value && typeof value === "object" && !Array.isArray(value)
+              ? Object.entries(value as Record<string, unknown>).map(([key, nested]) => [key, String(nested)])
+              : [[group, String(value)]]
+          )
+        )
+      );
       const nextSelectionTime = clampSelectionTime(Number(nextBoundary.zero_v_start_s ?? selectionTime), nextBoundary, nextMetadata ?? metadata);
       setSelectionTime(nextSelectionTime);
       seekVideoTo(nextSelectionTime, nextMetadata ?? metadata, true);
@@ -555,7 +572,7 @@ export function NormalWorkspace() {
     if (!video) return;
     if (stage === "target") {
       setSelectionFrameTime(video.currentTime || selectionTime, { clearDownstream: false });
-      setMessage("选滴阶段已锁定当前 selection frame；请用 ±1s、±0.1s 或进度条微调。");
+      setMessage("框选时刻已锁定，请用时间按钮或进度条微调。");
       return;
     }
     if (video.paused) {
@@ -578,20 +595,37 @@ export function NormalWorkspace() {
     setSelectionFrameTime(Number((selectionTime + delta).toFixed(3)));
   };
 
-  const restoreRecordContext = (record: NormalRecord, restoredSession: NormalSession | null | undefined, destination: StageId, markRetry: boolean) => {
-    const active = (restoredSession?.active_video ?? session?.active_video ?? null) as Record<string, any> | null;
-    const rawAdjustment = (active?.adjustment as Record<string, any> | undefined) ?? {};
-    const adjustment = String(rawAdjustment.record_id ?? "") === String(record.record_id) ? rawAdjustment : {};
+  const restoreRecordContext = async (record: NormalRecord, restoredSession: NormalSession | null | undefined, destination: StageId, markRetry: boolean): Promise<boolean> => {
+    let contextSession = restoredSession ?? undefined;
+    if (markRetry && !contextSession) {
+      setBusy(true);
+      try {
+        const response = await desktopApi.normalStartNextDroplet({
+          session_root: session?.session_root,
+          record_id: record.record_id,
+          mode: "same_video"
+        });
+        contextSession = response.session;
+        setSession(response.session);
+      } catch (error) {
+        setMessage(`恢复测量记录失败：${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    const active = (contextSession?.active_video ?? null) as Record<string, any> | null;
+    const restoredAdjustment = (active?.adjustment as Record<string, any> | undefined) ?? {};
     const recordBoundary = record.time_window as NormalBoundary | undefined;
     const activeBoundary = active?.boundary as NormalBoundary | undefined;
-    const activeMatchesRecord = String(active?.adjustment_source_record_id ?? adjustment.record_id ?? "") === String(record.record_id);
-    const nextBoundary = (activeMatchesRecord ? activeBoundary : undefined) ?? recordBoundary ?? boundary;
-    const nextMetadata = (activeMatchesRecord ? (active?.metadata as VideoMetadata | undefined) : undefined) ?? (record.metadata as VideoMetadata | undefined) ?? metadata;
-    const nextGrid = (activeMatchesRecord ? (active?.grid as NormalGrid | undefined) : undefined) ?? (record.grid as NormalGrid | undefined) ?? grid;
-    const target = (adjustment.target ?? record.target) as { target_time_s?: number; source_video_box?: VideoBox } | undefined;
-    const overrides = (adjustment.parameter_overrides ?? record.parameter_overrides) as Record<string, unknown> | undefined;
-    const nextVideoPath = activeMatchesRecord && typeof active?.path === "string" ? active.path : record.video_path ?? videoPath;
-    const nextVideoUrl = activeMatchesRecord && typeof active?.video_url === "string" ? active.video_url : videoUrl;
+    const nextBoundary = activeBoundary ?? recordBoundary ?? boundary;
+    const nextMetadata = (active?.metadata as VideoMetadata | undefined) ?? (record.metadata as VideoMetadata | undefined) ?? metadata;
+    const nextGrid = (active?.grid as NormalGrid | undefined) ?? (record.grid as NormalGrid | undefined) ?? grid;
+    const target = (restoredAdjustment.target ?? record.target) as { target_time_s?: number; source_video_box?: VideoBox } | undefined;
+    const overrides = (restoredAdjustment.parameter_overrides ?? record.parameter_overrides) as Record<string, unknown> | undefined;
+    const nextVideoPath = typeof active?.path === "string" ? active.path : record.video_path ?? videoPath;
+    const nextVideoUrl = typeof active?.video_url === "string" ? active.video_url : "";
 
     if (nextMetadata) {
       setMetadata(nextMetadata);
@@ -600,9 +634,7 @@ export function NormalWorkspace() {
     if (nextVideoPath) {
       setVideoPath(nextVideoPath);
     }
-    if (nextVideoUrl) {
-      setVideoUrl(nextVideoUrl);
-    }
+    setVideoUrl(nextVideoUrl);
     if (nextGrid) {
       setGrid(nextGrid);
     }
@@ -610,11 +642,11 @@ export function NormalWorkspace() {
     setBoundaryDirty(false);
 
     const restoredSelectionTime = clampSelectionTime(Number(target?.target_time_s ?? nextBoundary.zero_v_start_s ?? 0), nextBoundary, nextMetadata ?? metadata);
-    const restoredVoltage = adjustment.balance_voltage_V ?? record.balance_voltage_V;
+    const restoredVoltage = restoredAdjustment.balance_voltage_V ?? record.balance_voltage_V;
     setSelectionTime(restoredSelectionTime);
     setSelectionBox(target?.source_video_box ?? null);
     setBalanceVoltage(restoredVoltage ? String(restoredVoltage) : "");
-    setBalanceConfirmed(Boolean(adjustment.balance_confirmed ?? record.balance_confirmed ?? record.balance_voltage_V));
+    setBalanceConfirmed(Boolean(restoredAdjustment.balance_confirmed ?? record.balance_confirmed ?? record.balance_voltage_V));
     setParameterOverrides(
       Object.fromEntries(
         Object.entries(overrides ?? {}).flatMap(([group, value]) =>
@@ -624,14 +656,15 @@ export function NormalWorkspace() {
         )
       )
     );
-    setAdjustingRecordId(markRetry ? String(adjustment.record_id ?? record.record_id) : null);
+    setAdjustingRecordId(markRetry ? String(restoredAdjustment.record_id ?? record.record_id) : null);
     setReviewEvent(null);
     setStage(destination);
     seekVideoTo(destination === "boundary" ? Number(nextBoundary.zero_v_start_s ?? restoredSelectionTime) : restoredSelectionTime, nextMetadata ?? metadata, destination === "target");
+    return true;
   };
 
   const restoreRecordForAdjustment = (record: NormalRecord, restoredSession?: NormalSession | null) => {
-    restoreRecordContext(record, restoredSession, "boundary", true);
+    return restoreRecordContext(record, restoredSession, "boundary", true);
   };
 
   const getVideoGeometry = () => {
@@ -670,6 +703,7 @@ export function NormalWorkspace() {
     setReviewEvent(null);
     setInversion(null);
     setDragStart(point);
+    setBalanceConfirmed(false);
     setSelectionBox({ x: point.x, y: point.y, width: 1, height: 1 });
   };
 
@@ -734,8 +768,9 @@ export function NormalWorkspace() {
 
   const backToBoundary = (record?: NormalRecord | null) => {
     if (record) {
-      restoreRecordContext(record, session, "boundary", true);
-      setMessage("已恢复该记录原本的视频、0V 边界、框选、电压和参数，可在此基础上微调 0V。");
+      void restoreRecordContext(record, undefined, "boundary", true).then((restored) => {
+        if (restored) setMessage("已恢复该测量，可调整区间后重新追踪。");
+      });
       return;
     }
     setStage("boundary");
@@ -746,8 +781,9 @@ export function NormalWorkspace() {
 
   const backToTarget = (record?: NormalRecord | null) => {
     if (record) {
-      restoreRecordContext(record, session, "target", true);
-      setMessage("已恢复该记录原本的框选时间、矩形框、电压和参数；修改后会重新追踪。");
+      void restoreRecordContext(record, undefined, "target", true).then((restored) => {
+        if (restored) setMessage("已恢复该测量，请调整框选后重新追踪。");
+      });
       return;
     }
     setStage("target");
@@ -817,7 +853,15 @@ export function NormalWorkspace() {
                       src={mainVideoUrl}
                       onLoadedMetadata={(event) => {
                         setDuration(event.currentTarget.duration || metadata?.duration_s || 0);
-                        setCurrentTime(event.currentTarget.currentTime || 0);
+                        const initialTime = stage === "target"
+                          ? clampSelectionTime(selectionTime, boundary, metadata)
+                          : stage === "boundary"
+                            ? Number(boundary.zero_v_start_s || 0)
+                            : event.currentTarget.currentTime || 0;
+                        if (stage === "target" || stage === "boundary") {
+                          event.currentTarget.currentTime = initialTime;
+                        }
+                        setCurrentTime(initialTime);
                       }}
                       onTimeUpdate={(event) => {
                         const time = event.currentTarget.currentTime || 0;
@@ -932,7 +976,10 @@ export function NormalWorkspace() {
               overrides={parameterOverrides}
               onSelectionTime={(time) => setSelectionFrameTime(time)}
               onAdjustSelection={adjustSelectionTime}
-              onVoltage={setBalanceVoltage}
+              onVoltage={(value) => {
+                setBalanceVoltage(value);
+                setBalanceConfirmed(false);
+              }}
               onBalanceConfirmed={setBalanceConfirmed}
               onAdvancedOpen={setAdvancedOpen}
               onOverride={(key, value) => {
@@ -966,7 +1013,15 @@ export function NormalWorkspace() {
               onSelectRecord={setSelectedRecordId}
               onAccept={() => acceptRecord(true)}
               onReject={() => acceptRecord(false)}
-              onBackReview={() => (selectedRecord?.status === "pending_crossing_review" ? restoreRecordContext(selectedRecord, session, "review", false) : backToTarget(selectedRecord))}
+              onBackReview={() => {
+                if (selectedRecord?.status === "pending_crossing_review") {
+                  setReviewEvent(null);
+                  setStage("review");
+                  setMessage("");
+                } else {
+                  backToTarget(selectedRecord);
+                }
+              }}
               onBackBoundary={() => backToBoundary(selectedRecord)}
               onNextDrop={() => setNextDropDialogOpen(true)}
               busy={busy}

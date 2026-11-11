@@ -128,11 +128,149 @@ describe("Millikan AI Normal desktop app", () => {
       fireEvent.mouseDown(overlay, { clientX: 180, clientY: 140 });
       fireEvent.mouseMove(overlay, { clientX: 220, clientY: 180 });
       fireEvent.mouseUp(overlay, { clientX: 220, clientY: 180 });
+      await userEvent.click(screen.getByLabelText(/我确认该油滴/));
       await userEvent.click(screen.getByRole("button", { name: /确认框选并开始追踪/ }));
       await userEvent.click(await screen.findByRole("button", { name: /过线片段 1/ }));
       expect(await screen.findByLabelText("过线片段播放器")).toBeInTheDocument();
     } finally {
       cleanupRect();
+    }
+  });
+
+  it("loads the prior voltage and parameter overrides for the next droplet", async () => {
+    const cleanupRect = await reachAcceptedNormalRecord();
+    const sourceSession = (await desktopApi.normalInitialize()).session;
+    const activeVideo = {
+      state: "boundary_confirmed",
+      path: "media/videos/2u.mp4",
+      video_url: "demo-normal-video.mp4",
+      previous_balance_voltage_V: 251,
+      previous_parameter_overrides: {
+        physics: { gravity_m_s2: 9.81 },
+        grid: { measurement_distance_m: 0.002 }
+      }
+    };
+    const startNext = vi.spyOn(desktopApi, "normalStartNextDroplet").mockResolvedValue({
+      session_root: sourceSession.session_root,
+      active_video: activeVideo,
+      session: { ...sourceSession, active_video: activeVideo }
+    });
+    try {
+      await userEvent.click(screen.getByRole("button", { name: /下一颗油滴/ }));
+      await userEvent.click(await screen.findByRole("button", { name: /同一个视频/ }));
+
+      expect(startNext).toHaveBeenCalledWith(expect.objectContaining({
+        record_id: sourceSession.records.at(-1)?.record_id,
+        mode: "same_video"
+      }));
+      expect(screen.getByPlaceholderText("例如 239")).toHaveValue("251");
+      expect(screen.getByLabelText(/我确认该油滴/)).not.toBeChecked();
+
+      await userEvent.click(screen.getByRole("button", { name: "实验参数" }));
+      expect(screen.getByLabelText(/重力加速度（m\/s²）/)).toHaveValue("9.81");
+      expect(screen.getByLabelText(/测量距离（m）/)).toHaveValue("0.002");
+    } finally {
+      startNext.mockRestore();
+      cleanupRect();
+    }
+  });
+
+  it("restores a historical record through the worker without excluding it", async () => {
+    const cleanupRect = await reachAcceptedNormalRecord();
+    const sourceSession = (await desktopApi.normalInitialize()).session;
+    const record = sourceSession.records[0];
+    const activeVideo = {
+      state: "boundary_confirmed",
+      path: record.video_path,
+      video_url: "restored-historical-video.mp4",
+      metadata: { path: record.video_path, readable: true, width: 1280, height: 720, fps: 30, frame_count: 900, duration_s: 30 },
+      boundary: { zero_v_start_s: 0.8, zero_v_end_s: 5.13 },
+      grid: { valid: true, line_y_px: [120, 220, 320, 420, 520], measurement_distance_m: 0.001 }
+    };
+    const startNext = vi.spyOn(desktopApi, "normalStartNextDroplet").mockResolvedValue({
+      session_root: sourceSession.session_root,
+      active_video: activeVideo,
+      session: { ...sourceSession, active_video: activeVideo }
+    });
+    const selectRecord = vi.spyOn(desktopApi, "normalSelectRecord");
+    try {
+      await userEvent.click(screen.getByText(new RegExp(`测量记录（${sourceSession.records.length} 条）`)));
+      await userEvent.click(screen.getByText("测量 1").closest("button")!);
+      await userEvent.click(screen.getByRole("button", { name: "修改 0V" }));
+
+      expect(startNext).toHaveBeenCalledWith(expect.objectContaining({ record_id: record.record_id, mode: "same_video" }));
+      expect(selectRecord).not.toHaveBeenCalled();
+      expect(sourceSession.records[0].kept).toBe(true);
+      expect(await screen.findByRole("button", { name: "确认边界" })).toBeInTheDocument();
+      expect(document.querySelector("video")).toHaveAttribute("src", "restored-historical-video.mp4");
+    } finally {
+      startNext.mockRestore();
+      selectRecord.mockRestore();
+      cleanupRect();
+    }
+  });
+
+  it("clears balance confirmation after voltage, target, and video changes", async () => {
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalPlay = HTMLMediaElement.prototype.play;
+    const originalPause = HTMLMediaElement.prototype.pause;
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      return { x: 0, y: 0, left: 0, top: 0, right: 640, bottom: 360, width: 640, height: 360, toJSON: () => ({}) } as DOMRect;
+    };
+    HTMLMediaElement.prototype.play = () => Promise.resolve();
+    HTMLMediaElement.prototype.pause = () => undefined;
+    const openDialog = vi.spyOn(desktopApi, "openVideoDialog").mockResolvedValue("media/videos/new.mp4");
+    const inspect = vi.spyOn(desktopApi, "normalInspectVideo").mockImplementation(async ({ video_path }) => ({
+      video_path,
+      video_url: "new-demo-video.mp4",
+      metadata: { path: video_path, readable: true, width: 1280, height: 720, fps: 30, frame_count: 900, duration_s: 30 }
+    }));
+    try {
+      render(<App />);
+      await userEvent.click(await screen.findByRole("button", { name: "选择视频" }));
+      await userEvent.click(await screen.findByRole("button", { name: "开始处理" }));
+      await userEvent.click(await screen.findByRole("button", { name: "确认边界" }));
+
+      const drawBox = (left: number) => {
+        const overlay = document.querySelector(".normal-video-overlay");
+        if (!overlay) throw new Error("normal video overlay not found");
+        fireEvent.mouseDown(overlay, { clientX: left, clientY: 120 });
+        fireEvent.mouseMove(overlay, { clientX: left + 36, clientY: 156 });
+        fireEvent.mouseUp(overlay, { clientX: left + 36, clientY: 156 });
+      };
+      drawBox(120);
+      const voltage = screen.getByPlaceholderText("例如 239");
+      const confirmation = screen.getByLabelText(/我确认该油滴/);
+      await userEvent.type(voltage, "239");
+      await userEvent.click(confirmation);
+      await userEvent.clear(voltage);
+      await userEvent.type(voltage, "249");
+      expect(confirmation).not.toBeChecked();
+
+      await userEvent.click(confirmation);
+      drawBox(180);
+      expect(confirmation).not.toBeChecked();
+      await userEvent.click(confirmation);
+      await userEvent.click(screen.getByRole("button", { name: "实验参数" }));
+      const gravity = screen.getByLabelText("重力加速度（m/s²）");
+      await userEvent.clear(gravity);
+      await userEvent.type(gravity, "9.81");
+
+      await userEvent.click(screen.getByRole("button", { name: "选择视频" }));
+      expect(inspect).toHaveBeenCalledWith({ video_path: "media/videos/new.mp4" });
+      await userEvent.click(await screen.findByRole("button", { name: "开始处理" }));
+      await userEvent.click(await screen.findByRole("button", { name: "确认边界" }));
+
+      expect(screen.getByPlaceholderText("例如 239")).toHaveValue("");
+      expect(screen.getByLabelText(/我确认该油滴/)).not.toBeChecked();
+      expect(screen.getByLabelText("重力加速度（m/s²）")).toHaveValue("9.79");
+      expect(screen.queryByText("已修改")).toBeNull();
+    } finally {
+      openDialog.mockRestore();
+      inspect.mockRestore();
+      HTMLElement.prototype.getBoundingClientRect = originalRect;
+      HTMLMediaElement.prototype.play = originalPlay;
+      HTMLMediaElement.prototype.pause = originalPause;
     }
   });
 
@@ -158,6 +296,7 @@ describe("Millikan AI Normal desktop app", () => {
       fireEvent.mouseDown(overlay, { clientX: x, clientY: 130 });
       fireEvent.mouseMove(overlay, { clientX: x + 36, clientY: 170 });
       fireEvent.mouseUp(overlay, { clientX: x + 36, clientY: 170 });
+      await userEvent.click(screen.getByLabelText(/我确认该油滴/));
       await userEvent.click(screen.getByRole("button", { name: /确认框选并开始追踪/ }));
       await userEvent.click(await screen.findByRole("button", { name: /过线片段 1/ }));
       await userEvent.click(await screen.findByRole("button", { name: /同一颗油滴/ }));

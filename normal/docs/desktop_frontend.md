@@ -11,6 +11,9 @@ Electron build with a React renderer and a Python worker.
   window when it is ready to show.
 - `electron/preload.ts` exposes only the Normal renderer API.
 
+Preload channels use `normal:<operation>`; main handlers map them to dotted
+worker names such as `normal.selectTarget`.
+
 ## Development
 
 ```powershell
@@ -26,9 +29,9 @@ $env:VITE_DEV_SERVER_URL='http://127.0.0.1:5173'
 npx electron dist-electron\main.js
 ```
 
-The main process starts `normal\.venv\Scripts\python -m
-millikan_ai.desktop_worker` and sets `PYTHONPATH` to `normal\src`. Override the
-interpreter with `MILLIKAN_PYTHON`.
+The main process runs `python -m millikan_ai.desktop_worker` from `normal/`,
+sets `PYTHONPATH` to `normal/src`, and uses `normal/.venv/Scripts/python.exe`
+when present. Override the interpreter with `MILLIKAN_PYTHON`.
 
 ## Build and package
 
@@ -43,7 +46,7 @@ npm run package
   builds `dist-renderer`.
 - `npm run worker:build` runs PyInstaller and writes
   `dist-worker\millikan-normal-worker.exe`.
-- `npm run package` produces `release\密立根油滴实验-0.9.1.exe`.
+- `npm run package` produces `release\密立根油滴实验-0.9.2.exe`.
 
 ## 界面文案
 
@@ -71,4 +74,5 @@ npm run build
 ```
 
 `tests/App.test.tsx` drives the Normal workflow against the demo API. It does
-not require the Electron shell or a real video.
+not require the Electron shell or a real video. The packaged preload/IPC check
+is described in [validation](technical/validation.md).

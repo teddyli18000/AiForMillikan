@@ -10,6 +10,9 @@
   transient sessions, export, and blind inversion.
 - `src/millikan_ai/desktop_worker.py` — the only IPC entry point. It exposes
   exactly the twelve `normal.*` operations.
+- Electron channels use `normal:<operation>`; `electron/main.ts` maps them to
+  the worker's `normal.<operation>` names. Keep the colon and dot contracts
+  distinct.
 - `apps/desktop/` — Electron main/preload plus the React workspace.
 - `tests/` — Normal-only tests. Do not reintroduce Experimental ops or fixtures.
 
@@ -35,9 +38,9 @@ this project's `src/` contains only `millikan_ai/__init__.py`,
 - Stages are reversible. Boundary changes invalidate target/tracking/review/q
   candidate state; target/time/box changes invalidate tracking/review/q
   candidate state. Existing records stay immutable unless explicitly excluded.
-- Sessions are transient per launch. `normal.initialize` without an explicit
-  `session_root` must create a fresh session. The Electron shell cleans
-  implicit transient roots on exit. Export is the only retention mechanism.
+- Implicit app sessions are transient per launch. `normal.initialize` without
+  an explicit `session_root` must create a fresh session. The Electron shell
+  cleans implicit roots on exit; use export to retain a session.
 - At least three user-kept valid q records are required before blind inversion.
 - After acceptance, "next droplet" must call a worker operation: same video
   resets `active_video.state` to `boundary_confirmed`, different video clears
@@ -76,8 +79,11 @@ this project's `src/` contains only `millikan_ai/__init__.py`,
   drives the full Normal sequence on a synthetic video and checks exported
   artifacts, not physical accuracy.
 - `apps/desktop/tests/electron-smoke.mjs` must pass against `release/win-unpacked`.
-  It is the only check that exercises the real preload/IPC path; React tests use
-  the demo API and do not replace it.
+  It calls all twelve preload operations through the real preload and main
+  handlers into the packaged worker, using a generated synthetic video. It
+  covers crossing review, three kept records, exclusion, same-video and
+  different-video session changes, inversion, and export. React tests use the
+  demo API and do not replace this check.
 - Do not remove these checks from CI. They are the release acceptance loop.
 
 ## Commands

@@ -25,6 +25,11 @@ Covers direct Normal entry, second-based player controls, selection geometry,
 return/adjust, next droplet, crossing player, q trace, inversion page, and
 scientific notation.
 
+`tests/ipcRouting.test.ts` checks that all twelve `normal:<operation>` Electron
+channels map to the matching `normal.<operation>` worker names, including
+progress forwarding and export-folder handling. It mocks Electron and the
+worker client; the packaged smoke below exercises the real path.
+
 Encoding:
 
 ```powershell
@@ -60,9 +65,16 @@ the packaged worker through initialize, prepare, boundary, target, measurement,
 crossing review, acceptance, inversion, and export. It checks response contracts
 and exported files, not physical accuracy.
 
-`electron-smoke.mjs` launches the packaged application with Playwright, waits
-for the Normal workspace, and calls `normalInspectVideo` through the real
-preload/IPC path. A passing demo API test is not a substitute for this check.
+`electron-smoke.mjs` launches the packaged application with Playwright and
+calls all twelve operations through the real preload, Electron handlers, and
+packaged worker. It uses a generated synthetic video to review crossings, keep
+three records, exclude a record, check same-video continuation and clearing the
+active video while keeping records, run inversion, and export. Electron's native
+file and folder dialogs are stubbed. The smoke checks the Chinese report,
+inversion JSON, and export manifest; it does not measure physical accuracy.
+
+The smoke uses an explicit temporary session root and export folder, which it
+removes afterward; it does not exercise cleanup of implicit app sessions.
 
 ## Scientific validation is separate
 

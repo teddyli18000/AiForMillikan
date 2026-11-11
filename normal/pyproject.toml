@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "millikan-ai-normal"
-version = "0.9.1"
+version = "0.9.2"
 description = "Normal Millikan workflow backend: balance-voltage plus 0 V single-drop measurement"
 requires-python = ">=3.11"
 dependencies = [

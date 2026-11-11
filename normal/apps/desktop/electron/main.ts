@@ -94,17 +94,17 @@ function registerIpc(): void {
     trackTransientNormalSession(payload || {}, result);
     return result;
   });
-  ipcMain.handle("normal:confirmBoundary", (_event, payload) => worker.request("normal:confirmBoundary", payload));
-  ipcMain.handle("normal:selectTarget", (_event, payload) => worker.request("normal:selectTarget", payload));
+  ipcMain.handle("normal:confirmBoundary", (_event, payload) => worker.request("normal.confirmBoundary", payload));
+  ipcMain.handle("normal:selectTarget", (_event, payload) => worker.request("normal.selectTarget", payload));
   ipcMain.handle("normal:saveMeasurement", (event, payload) =>
     worker.request("normal.saveMeasurement", payload, (progress) => {
       event.sender.send("normal:progress", progress);
     })
   );
-  ipcMain.handle("normal:prepareCrossingReview", (_event, payload) => worker.request("normal:prepareCrossingReview", payload));
-  ipcMain.handle("normal:reviewCrossing", (_event, payload) => worker.request("normal:reviewCrossing", payload));
-  ipcMain.handle("normal:updateRecordSelection", (_event, payload) => worker.request("normal:updateRecordSelection", payload));
-  ipcMain.handle("normal:startNextDroplet", (_event, payload) => worker.request("normal:startNextDroplet", payload));
+  ipcMain.handle("normal:prepareCrossingReview", (_event, payload) => worker.request("normal.prepareCrossingReview", payload));
+  ipcMain.handle("normal:reviewCrossing", (_event, payload) => worker.request("normal.reviewCrossing", payload));
+  ipcMain.handle("normal:updateRecordSelection", (_event, payload) => worker.request("normal.updateRecordSelection", payload));
+  ipcMain.handle("normal:startNextDroplet", (_event, payload) => worker.request("normal.startNextDroplet", payload));
   ipcMain.handle("normal:runInversion", (event, payload) =>
     worker.request("normal.runInversion", payload || {}, (progress) => {
       event.sender.send("normal:progress", progress);
