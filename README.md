@@ -19,8 +19,8 @@ and estimating the elementary charge from accepted measurements.
 
 ## Get the app
 
-- **Download:** [Millikan AI 0.9.0 for Windows](https://github.com/teddyli18000/AiForMillikan/releases/tag/normal-v0.9.0)
-- **Verify:** the release includes `Millikan-AI-Normal-Portable-0.9.0.exe.sha256`
+- **Download:** [Millikan AI 0.9.1 for Windows](https://github.com/teddyli18000/AiForMillikan/releases/tag/normal-v0.9.1)
+- **Verify:** use the `.sha256` file provided alongside the EXE.
 - **Test video:** [open the Releases page](https://github.com/teddyli18000/AiForMillikan/releases/tag/videos) or [attached to each version](https://github.com/teddyli18000/AiForMillikan/releases/latest)
 - **Documentation:** [Technical and academic documentation](normal/docs/README.md)
 

@@ -43,7 +43,7 @@ npm run package
   builds `dist-renderer`.
 - `npm run worker:build` runs PyInstaller and writes
   `dist-worker\millikan-normal-worker.exe`.
-- `npm run package` produces `release\密立根油滴实验-0.9.0.exe`.
+- `npm run package` produces `release\密立根油滴实验-0.9.1.exe`.
 
 ## 界面文案
 

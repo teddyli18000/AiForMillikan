@@ -105,7 +105,9 @@ node tests\electron-smoke.mjs
 
 ## Versioning
 
-The app version lives in three places and must match:
-`pyproject.toml`, `apps/desktop/package.json`, and
+The app version lives in four places and must match:
+`pyproject.toml`, `src/millikan_ai/__init__.py`, `apps/desktop/package.json`, and
 `apps/desktop/package-lock.json`. `tests/test_version_consistency.py` enforces
 this.
+
+Update the root README Normal download tag and `RELEASE_NOTES.md` for each release.

@@ -1,6 +1,6 @@
 {
   "name": "millikan-ai-normal-desktop",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "main": "dist-electron/main.js",
   "description": "密立根油滴实验单滴电荷测量软件",

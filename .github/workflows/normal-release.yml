@@ -99,7 +99,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: 密立根油滴实验 ${{ github.ref_name }}
-          generate_release_notes: true
+          body_path: normal/RELEASE_NOTES.md
+          make_latest: true
           files: |
             normal/apps/desktop/release/*.exe
             normal/apps/desktop/release/*.sha256
