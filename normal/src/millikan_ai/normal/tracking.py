@@ -200,6 +200,50 @@ def is_position_near_grid(position, grid_mask, radius: int) -> bool:
     return x0 < x1 and y0 < y1 and bool(np.count_nonzero(grid_mask[y0:y1, x0:x1]))
 
 
+def line_crossing_candidate(start_frame: int, end_frame: int, related: list[int], runs: list, end, line: float, crossed: bool) -> dict[str, Any]:
+    return {
+        "start_frame": min([start_frame] + [int(runs[i][0]["source_frame"]) for i in related]),
+        "end_frame": max([end_frame] + [int(runs[i][-1]["source_frame"]) for i in related]),
+        "center_x_px": float(end["x"]) if bool(end["detected"]) else float(end["pred_x"]),
+        "center_y_px": line,
+        "grid_line_y_px": line,
+        "kind": "grid_line_crossing" if crossed else "grid_crossing_or_reacquire",
+    }
+
+
+def identity_loss_candidate(run: list, points: list, point) -> dict[str, Any]:
+    return {
+        "start_frame": int(run[0]["source_frame"]),
+        "end_frame": int(run[-1]["source_frame"]),
+        "center_x_px": float(point["x"]) if points else float(point["pred_x"]),
+        "center_y_px": float(point["y"]) if points else float(point["pred_y"]),
+        "kind": "grid_crossing_or_reacquire",
+    }
+
+
+def review_frame_record(frame_idx: int, fps: float, image_path: Path, box: dict[str, int]) -> dict[str, Any]:
+    return {
+        "frame_index": frame_idx,
+        "time_s": frame_idx / fps if fps > 0 else 0.0,
+        "image_path": str(image_path),
+        "source_video_box": box,
+    }
+
+
+def clip_result(out_path: Path, start_frame: int, end_frame: int, fps: float, box: dict[str, int], scale: int, manifest_path: Path, review_frames: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "clip_path": str(out_path),
+        "start_frame": start_frame,
+        "end_frame": end_frame,
+        "start_time_s": start_frame / fps if fps > 0 else 0.0,
+        "end_time_s": end_frame / fps if fps > 0 else 0.0,
+        "source_video_box": box,
+        "scale": scale,
+        "frames_manifest_path": str(manifest_path),
+        "review_frames": review_frames,
+    }
+
+
 def crossing_events(track: pd.DataFrame, grid: dict[str, Any], fps: float) -> list[dict[str, Any]]:
     runs: list[list[pd.Series]] = []
     current: list[pd.Series] = []
@@ -249,27 +293,14 @@ def crossing_events(track: pd.DataFrame, grid: dict[str, Any], fps: float) -> li
         if not crossed and not related:
             continue
         covered_runs.update(related)
-        candidates.append({
-            "start_frame": min([start_frame] + [int(runs[i][0]["source_frame"]) for i in related]),
-            "end_frame": max([end_frame] + [int(runs[i][-1]["source_frame"]) for i in related]),
-            "center_x_px": float(end["x"]) if bool(end["detected"]) else float(end["pred_x"]),
-            "center_y_px": line,
-            "grid_line_y_px": line,
-            "kind": "grid_line_crossing" if crossed else "grid_crossing_or_reacquire",
-        })
+        candidates.append(line_crossing_candidate(start_frame, end_frame, related, runs, end, line, crossed))
     # Loss of identity away from a known horizontal line still needs review.
     for i, run in enumerate(runs):
         if i in covered_runs:
             continue
         points = [row for row in run if math.isfinite(float(row["x"])) and math.isfinite(float(row["y"]))]
         point = points[-1] if points else run[-1]
-        candidates.append({
-            "start_frame": int(run[0]["source_frame"]),
-            "end_frame": int(run[-1]["source_frame"]),
-            "center_x_px": float(point["x"]) if points else float(point["pred_x"]),
-            "center_y_px": float(point["y"]) if points else float(point["pred_y"]),
-            "kind": "grid_crossing_or_reacquire",
-        })
+        candidates.append(identity_loss_candidate(run, points, point))
 
     events = sorted(candidates, key=lambda event: (event["start_frame"], event["end_frame"]))
     for idx, event in enumerate(events, start=1):
@@ -479,29 +510,16 @@ def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: 
         image_path = frames_dir / f"frame_{len(review_frames):04d}.jpg"
         if not cv2.imwrite(str(image_path), rendered):
             raise RuntimeError(f"无法保存身份复核画面：{image_path}")
-        review_frames.append(
-            {
-                "frame_index": frame_idx,
-                "time_s": frame_idx / fps if fps > 0 else 0.0,
-                "image_path": str(image_path),
-                "source_video_box": {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0},
-            }
-        )
+        review_frames.append(review_frame_record(
+            frame_idx, fps, image_path,
+            {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
+        ))
     cap.release()
     writer.release()
     manifest_path = frames_dir / "frames_manifest.json"
     manifest_path.write_text(json.dumps(review_frames, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {
-        "clip_path": str(out_path),
-        "start_frame": start_frame,
-        "end_frame": end_frame,
-        "start_time_s": start_frame / fps if fps > 0 else 0.0,
-        "end_time_s": end_frame / fps if fps > 0 else 0.0,
-        "source_video_box": {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0},
-        "scale": scale,
-        "frames_manifest_path": str(manifest_path),
-        "review_frames": review_frames,
-    }
+    box = {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
+    return clip_result(out_path, start_frame, end_frame, fps, box, scale, manifest_path, review_frames)
 
 
 def add_fit_window_columns(track: pd.DataFrame, zero_start: int, zero_end: int, grid: dict[str, Any]) -> pd.DataFrame:

@@ -83,6 +83,62 @@ def fit_zero_v_velocity(track_rows: list[dict[str, Any]], fps: float, scale_y_m_
     }
 
 
+def velocity_uncertainty_budget(sigma_v: float, velocity: float, sensitivity: float) -> dict[str, Any]:
+    return {
+        "included": [
+            {
+                "component": "velocity_fit_random",
+                "sigma_v_m_s": float(sigma_v) if math.isfinite(sigma_v) else None,
+                "relative_velocity": float(sigma_v / velocity) if math.isfinite(sigma_v) and velocity > 0 else None,
+                "q_velocity_sensitivity": float(sensitivity) if math.isfinite(sensitivity) else None,
+                "source": "linear-regression slope standard error propagated through q(v)",
+            },
+        ],
+        "not_included": [
+            "balance_voltage_uncertainty",
+            "measurement_distance_uncertainty",
+            "plate_distance_uncertainty",
+            "viscosity_uncertainty",
+            "pressure_uncertainty",
+            "oil_density_uncertainty",
+            "cunningham_b_uncertainty",
+        ],
+        "note": "Normal v1 reports q uncertainty from the implemented velocity-fit random term only; undefined instrument uncertainties are explicit non-included terms.",
+    }
+
+
+def charge_calculation_trace(
+    fit: dict[str, Any], velocity: float, sigma_v: float, sensitivity: float,
+    bp: float, radius: float, eta_eff: float, d: float,
+    balance_voltage_V: float, charge: float, sigma: float,
+) -> dict[str, Any]:
+    return {
+        "model": "balance_voltage_zero_v_fall",
+        "fit": {
+            "slope_px_s": fit.get("slope_px_s"),
+            "slope_sigma_px_s": fit.get("slope_sigma_px_s"),
+            "scale_y_m_per_px": fit.get("scale_y_m_per_px"),
+            "velocity_m_s": float(velocity),
+            "sigma_v_m_s": float(sigma_v) if math.isfinite(sigma_v) else None,
+            "fit_point_count": fit.get("fit_point_count"),
+            "duration_s": fit.get("duration_s"),
+            "r2": fit.get("r2"),
+        },
+        "physics": {
+            "balance_voltage_V": float(balance_voltage_V),
+            "cunningham_length_m": float(bp),
+            "radius_m": float(radius),
+            "eta_eff_Pa_s": float(eta_eff),
+            "q_velocity_sensitivity": float(sensitivity) if math.isfinite(sensitivity) else None,
+            "plate_distance_m": float(d),
+        },
+        "result": {
+            "q_C": float(abs(charge)),
+            "sigma_q_C": float(sigma) if math.isfinite(float(sigma)) else None,
+        },
+    }
+
+
 def compute_q(fit: dict[str, Any], balance_voltage_V: float, cfg: dict[str, Any]) -> dict[str, Any]:
     flags = list(fit.get("flags", [])) if not fit.get("valid") else []
     if not math.isfinite(float(balance_voltage_V)) or float(balance_voltage_V) <= 0:
@@ -108,53 +164,12 @@ def compute_q(fit: dict[str, Any], balance_voltage_V: float, cfg: dict[str, Any]
         flags.append("invalid_velocity_uncertainty")
     sensitivity = 3.0 * (radius + bp) / (2.0 * radius + bp) if radius > 0 else math.nan
     sigma = abs(charge) * sensitivity * (sigma_v / velocity) if not flags and math.isfinite(sensitivity) else math.nan
-    uncertainty_budget = {
-        "included": [
-            {
-                "component": "velocity_fit_random",
-                "sigma_v_m_s": float(sigma_v) if math.isfinite(sigma_v) else None,
-                "relative_velocity": float(sigma_v / velocity) if math.isfinite(sigma_v) and velocity > 0 else None,
-                "q_velocity_sensitivity": float(sensitivity) if math.isfinite(sensitivity) else None,
-                "source": "linear-regression slope standard error propagated through q(v)",
-            },
-        ],
-        "not_included": [
-            "balance_voltage_uncertainty",
-            "measurement_distance_uncertainty",
-            "plate_distance_uncertainty",
-            "viscosity_uncertainty",
-            "pressure_uncertainty",
-            "oil_density_uncertainty",
-            "cunningham_b_uncertainty",
-        ],
-        "note": "Normal v1 reports q uncertainty from the implemented velocity-fit random term only; undefined instrument uncertainties are explicit non-included terms.",
-    }
+    uncertainty_budget = velocity_uncertainty_budget(sigma_v, velocity, sensitivity)
     valid = all(math.isfinite(value) and value > 0 for value in [radius, abs(charge), sigma])
-    calculation_trace = {
-        "model": "balance_voltage_zero_v_fall",
-        "fit": {
-            "slope_px_s": fit.get("slope_px_s"),
-            "slope_sigma_px_s": fit.get("slope_sigma_px_s"),
-            "scale_y_m_per_px": fit.get("scale_y_m_per_px"),
-            "velocity_m_s": float(velocity),
-            "sigma_v_m_s": float(sigma_v) if math.isfinite(sigma_v) else None,
-            "fit_point_count": fit.get("fit_point_count"),
-            "duration_s": fit.get("duration_s"),
-            "r2": fit.get("r2"),
-        },
-        "physics": {
-            "balance_voltage_V": float(balance_voltage_V),
-            "cunningham_length_m": float(bp),
-            "radius_m": float(radius),
-            "eta_eff_Pa_s": float(eta_eff),
-            "q_velocity_sensitivity": float(sensitivity) if math.isfinite(sensitivity) else None,
-            "plate_distance_m": float(d),
-        },
-        "result": {
-            "q_C": float(abs(charge)),
-            "sigma_q_C": float(sigma) if math.isfinite(float(sigma)) else None,
-        },
-    }
+    calculation_trace = charge_calculation_trace(
+        fit, velocity, sigma_v, sensitivity, bp, radius, eta_eff, d,
+        balance_voltage_V, charge, sigma
+    )
     return {
         "valid": bool(valid),
         "diagnostic_only": not bool(valid),

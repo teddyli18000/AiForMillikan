@@ -122,7 +122,7 @@ export function TargetPanel(props: {
   balanceConfirmed: boolean;
   advancedOpen: boolean;
   parameterKeys: string[];
-  parameterFieldValue: (key: string) => string;
+  parameterInputValue: (key: string) => string;
   overrides: Record<string, string>;
   busy: boolean;
   onSelectionTime: (time: number) => void;
@@ -186,7 +186,7 @@ export function TargetPanel(props: {
           {props.parameterKeys.map((key) => (
             <label key={key}>
               <span>{parameterLabels[key]}</span>
-              <input value={props.parameterFieldValue(key)} onChange={(event) => props.onOverride(key, event.target.value)} />
+              <input value={props.parameterInputValue(key)} onChange={(event) => props.onOverride(key, event.target.value)} />
               {props.overrides[key] !== undefined ? <small>已修改</small> : null}
             </label>
           ))}
@@ -261,7 +261,7 @@ export function ReviewPanel(props: {
 export function ResultsPanel(props: {
   session: NormalSession | null;
   selectedRecord: NormalRecord | null;
-  isRecordAcceptable: boolean;
+  canKeepRecord: boolean;
   busy: boolean;
   onSelectRecord: (id: string) => void;
   onAccept: () => void;
@@ -296,7 +296,7 @@ export function ResultsPanel(props: {
             {record.status === "accepted" && record.kept ? (
               <button className="primary-button" disabled={props.busy} onClick={props.onNextDrop}>下一颗油滴</button>
             ) : (
-              <button className="primary-button" disabled={props.busy || !props.isRecordAcceptable} onClick={props.onAccept}><Save size={15} />确认保留</button>
+              <button className="primary-button" disabled={props.busy || !props.canKeepRecord} onClick={props.onAccept}><Save size={15} />确认保留</button>
             )}
             <button className="ghost-button" disabled={props.busy} onClick={props.onBackReview}>返回复核</button>
             <button className="ghost-button" disabled={props.busy} onClick={props.onBackBoundary}>修改 0V</button>
