@@ -8,62 +8,34 @@ import numpy as np
 SI_ELEMENTARY_CHARGE_C = 1.602176634e-19
 
 
-def run_weighted_integer_inversion(records: list[dict[str, Any]], cfg: dict[str, Any]) -> dict[str, Any]:
-    icfg = cfg["inversion"]
-    eligible = _eligible_records(records)
-    min_records = int(icfg.get("min_records", 3))
-    if len(eligible) < min_records:
-        return {
-            "reliable": False,
-            "status": "insufficient_eligible_records",
-            "num_used": len(eligible),
-            "valid_q_count": len(eligible),
-            "min_required": min_records,
-            "reference_comparison": _reference_comparison(None, None),
-            "flags": ["insufficient_eligible_records"],
-        }
+def insufficient_result(eligible: list[dict[str, Any]], icfg: dict[str, Any], min_records: int) -> dict[str, Any]:
+    return {
+        "reliable": False,
+        "status": "insufficient_eligible_records",
+        "num_used": len(eligible),
+        "valid_q_count": len(eligible),
+        "min_required": min_records,
+        "reference_comparison": _reference_comparison(None, None),
+        "flags": ["insufficient_eligible_records"],
+    }
 
+
+def charge_inputs(eligible: list[dict[str, Any]], icfg: dict[str, Any]) -> dict[str, Any]:
     q = np.array([float(row["q"]["q_C"]) for row in eligible], dtype=float)
     sigma_raw = np.array([float(row["q"]["sigma_q_C"]) for row in eligible], dtype=float)
     sigma_floor = max(0.0, float(icfg.get("sigma_floor_C", 0.0)))
     sigma = np.sqrt(sigma_raw * sigma_raw + sigma_floor * sigma_floor)
     sigma = np.maximum(sigma, np.maximum(np.nanmedian(sigma), np.nanmedian(q) * 1e-6))
-
     grid = np.linspace(float(icfg["e_min_C"]), float(icfg["e_max_C"]), int(icfg.get("grid_points", 900)))
-    candidates: dict[tuple[int, ...], dict[str, Any]] = {}
-    for initial_e in grid:
-        candidate = _iterate_candidate(
-            initial_e=float(initial_e),
-            q=q,
-            sigma=sigma,
-            max_integer=int(icfg.get("max_integer", 80)),
-            max_iterations=int(icfg.get("max_iterations", 8)),
-            interval=(float(grid[0]), float(grid[-1])),
-        )
-        key = tuple(int(value) for value in candidate["n"].tolist())
-        previous = candidates.get(key)
-        if previous is None or candidate["chi2"] < previous["chi2"]:
-            candidates[key] = candidate
+    return {"q": q, "sigma_raw": sigma_raw, "sigma": sigma, "sigma_floor": sigma_floor, "grid": grid}
 
-    ordered = sorted(candidates.values(), key=lambda row: (row["chi2"], row["weighted_rms"]))
-    best = ordered[0]
-    n_hat = best["n"].astype(int)
-    e_hat = float(best["e_C"])
-    sigma_e = _estimate_sigma_e(n_hat, sigma)
-    residual = q - n_hat * e_hat
-    residual_sigma = residual / sigma
-    flags: list[str] = []
-    if best["weighted_rms"] > float(icfg.get("max_weighted_rms", 2.5)):
-        flags.append("weighted_residual_too_large")
-    if math.gcd(*[int(value) for value in n_hat.tolist()]) > 1:
-        flags.append("integer_assignments_nonprimitive")
-    if best["boundary_hit"]:
-        flags.append("search_boundary_hit")
-    if not best["converged"]:
-        flags.append("integer_assignment_not_stable")
-    if len(eligible) == min_records:
-        flags.append("exploratory_small_sample")
 
+def inversion_result(inputs: dict[str, Any], search: dict[str, Any], eligible: list[dict[str, Any]], icfg: dict[str, Any]) -> dict[str, Any]:
+    q, sigma_raw, sigma = inputs["q"], inputs["sigma_raw"], inputs["sigma"]
+    sigma_floor, grid = inputs["sigma_floor"], inputs["grid"]
+    flags, best, ordered = search["flags"], search["best"], search["ordered"]
+    n_hat, e_hat, sigma_e = search["n_hat"], search["e_hat"], search["sigma_e"]
+    residual, residual_sigma = search["residual"], search["residual_sigma"]
     return {
         "reliable": len([flag for flag in flags if flag != "exploratory_small_sample"]) == 0,
         "status": "exploratory" if "exploratory_small_sample" in flags else ("reliable" if len(flags) == 0 else "diagnostic"),
@@ -101,6 +73,58 @@ def run_weighted_integer_inversion(records: list[dict[str, Any]], cfg: dict[str,
         },
         "flags": flags,
     }
+
+
+def run_weighted_integer_inversion(records: list[dict[str, Any]], cfg: dict[str, Any]) -> dict[str, Any]:
+    icfg = cfg["inversion"]
+    eligible = _eligible_records(records)
+    min_records = int(icfg.get("min_records", 3))
+    if len(eligible) < min_records:
+        return insufficient_result(eligible, icfg, min_records)
+
+    inputs = charge_inputs(eligible, icfg)
+    q, sigma_raw, sigma = inputs["q"], inputs["sigma_raw"], inputs["sigma"]
+    grid = inputs["grid"]
+    candidates: dict[tuple[int, ...], dict[str, Any]] = {}
+    for initial_e in grid:
+        candidate = _iterate_candidate(
+            initial_e=float(initial_e),
+            q=q,
+            sigma=sigma,
+            max_integer=int(icfg.get("max_integer", 80)),
+            max_iterations=int(icfg.get("max_iterations", 8)),
+            interval=(float(grid[0]), float(grid[-1])),
+        )
+        key = tuple(int(value) for value in candidate["n"].tolist())
+        previous = candidates.get(key)
+        if previous is None or candidate["chi2"] < previous["chi2"]:
+            candidates[key] = candidate
+
+    ordered = sorted(candidates.values(), key=lambda row: (row["chi2"], row["weighted_rms"]))
+    best = ordered[0]
+    n_hat = best["n"].astype(int)
+    e_hat = float(best["e_C"])
+    sigma_e = _estimate_sigma_e(n_hat, sigma)
+    residual = q - n_hat * e_hat
+    residual_sigma = residual / sigma
+    flags: list[str] = []
+    if best["weighted_rms"] > float(icfg.get("max_weighted_rms", 2.5)):
+        flags.append("weighted_residual_too_large")
+    if math.gcd(*[int(value) for value in n_hat.tolist()]) > 1:
+        flags.append("integer_assignments_nonprimitive")
+    if best["boundary_hit"]:
+        flags.append("search_boundary_hit")
+    if not best["converged"]:
+        flags.append("integer_assignment_not_stable")
+    if len(eligible) == min_records:
+        flags.append("exploratory_small_sample")
+
+    search = {
+        "flags": flags, "best": best, "ordered": ordered, "n_hat": n_hat,
+        "e_hat": e_hat, "sigma_e": sigma_e,
+        "residual": residual, "residual_sigma": residual_sigma,
+    }
+    return inversion_result(inputs, search, eligible, icfg)
 
 
 def _iterate_candidate(initial_e: float, q: np.ndarray, sigma: np.ndarray, max_integer: int, max_iterations: int, interval: tuple[float, float]) -> dict[str, Any]:
