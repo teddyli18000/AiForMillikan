@@ -123,7 +123,7 @@ export function inversionStatusLabel(status?: string) {
 }
 
 // 后端按 physics / grid 分组回传覆盖值，表单里却是扁平的，恢复记录时摊平一次就够了。
-export function flattenOverrideFields(overrides: Record<string, unknown> = {}) {
+export function flatParameterOverrides(overrides: Record<string, unknown> = {}) {
   return Object.fromEntries(
     Object.entries(overrides).flatMap(([group, value]) =>
       value && typeof value === "object" && !Array.isArray(value)
