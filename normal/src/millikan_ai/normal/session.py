@@ -32,37 +32,37 @@ RECORD_STATES = {
     "rejected_by_user",
 }
 
-ProgressCallback = Callable[[dict[str, Any]], None]
+ProgressEventSink = Callable[[dict[str, Any]], None]
 
 
 def initialize_session(session_root: str | None = None, run_root: str | None = None, config_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
-    cfg = normal_config(config_overrides)
+    config = normal_config(config_overrides)
     session_id = f"normal_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
-    root = Path(session_root) if session_root else Path(cfg["session"]["session_root"]) / session_id
-    run = Path(run_root or cfg["session"]["run_root"])
+    root = Path(session_root) if session_root else Path(config["session"]["session_root"]) / session_id
+    run = Path(run_root or config["session"]["run_root"])
     root.mkdir(parents=True, exist_ok=True)
     run.mkdir(parents=True, exist_ok=True)
     path = root / "normal_session.json"
     if session_root and path.exists():
-        session = _read_json(path)
+        session = read_json_file(path)
     else:
         session = {
             "schema_version": 1,
             "session_id": session_id,
             "transient": True,
-            "created_at": _now(),
-            "updated_at": _now(),
+            "created_at": utc_timestamp(),
+            "updated_at": utc_timestamp(),
             "records": [],
             "active_video": None,
             "inversion": None,
         }
-        _write_json(path, session)
+        write_json_file(path, session)
     return {
-        "session": _public_session(session, str(root)),
+        "session": session_view(session, str(root)),
         "session_file": str(path),
         "session_root": str(root),
         "run_root": str(run),
-        "config": cfg,
+        "config": config,
     }
 
 
@@ -73,37 +73,13 @@ def inspect_video_only(video_path: str) -> dict[str, Any]:
     return {"video_path": video_path, "metadata": metadata, "video_url": file_url(video_path)}
 
 
-def prepare_video(
+def _prepared_video_state(
     video_path: str,
-    session_root: str | None = None,
-    run_root: str | None = None,
-    config_overrides: dict[str, Any] | None = None,
-    progress_callback: ProgressCallback | None = None,
+    metadata: dict[str, Any],
+    suggestion: dict[str, Any],
+    grid: dict[str, Any],
 ) -> dict[str, Any]:
-    cfg = normal_config(config_overrides)
-    init = initialize_session(session_root, run_root, config_overrides)
-    session_path = Path(init["session_file"])
-    session = _read_json(session_path)
-
-    _emit(progress_callback, "inspect_metadata", "读取视频元数据", indeterminate=True)
-    metadata = inspect_video(video_path)
-    if not metadata.get("readable"):
-        raise RuntimeError(f"无法读取视频：{video_path}")
-
-    boundary = suggest_zero_v_window(video_path, cfg, _stage_emitter(progress_callback))
-    suggestion = boundary["suggestion"]
-    _emit(progress_callback, "detect_visual_changes", "检测画面变化", indeterminate=True)
-    _emit(progress_callback, "suggest_zero_v_window", "生成 0V 时间建议", indeterminate=True)
-    grid = calibrate_grid(
-        video_path,
-        cfg,
-        start_frame=int(suggestion.get("zero_v_start_frame", 0)),
-        end_frame=int(suggestion.get("zero_v_end_frame", metadata["frame_count"] - 1)),
-        progress_callback=_stage_emitter(progress_callback),
-    )
-    _emit(progress_callback, "detect_grid_lines", "识别网格线", indeterminate=True)
-
-    session["active_video"] = {
+    return {
         "state": "video_prepared",
         "path": video_path,
         "metadata": metadata,
@@ -111,55 +87,88 @@ def prepare_video(
         "boundary_suggestion": suggestion,
         "boundary": None,
         "grid": grid,
-        "prepared_at": _now(),
+        "prepared_at": utc_timestamp(),
     }
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
-    _emit(progress_callback, "ready_for_boundary_review", "等待用户确认 0V 起止时间", indeterminate=True)
+
+
+def prepare_video(
+    video_path: str,
+    session_root: str | None = None,
+    run_root: str | None = None,
+    config_overrides: dict[str, Any] | None = None,
+    progress_callback: ProgressEventSink | None = None,
+) -> dict[str, Any]:
+    config = normal_config(config_overrides)
+    session_bundle = initialize_session(session_root, run_root, config_overrides)
+    session_path = Path(session_bundle["session_file"])
+    session = read_json_file(session_path)
+
+    emit_progress(progress_callback, "inspect_metadata", "读取视频元数据", indeterminate=True)
+    metadata = inspect_video(video_path)
+    if not metadata.get("readable"):
+        raise RuntimeError(f"无法读取视频：{video_path}")
+
+    boundary = suggest_zero_v_window(video_path, config, stage_progress_adapter(progress_callback))
+    suggestion = boundary["suggestion"]
+    emit_progress(progress_callback, "detect_visual_changes", "检测画面变化", indeterminate=True)
+    emit_progress(progress_callback, "suggest_zero_v_window", "生成 0V 时间建议", indeterminate=True)
+    grid = calibrate_grid(
+        video_path,
+        config,
+        start_frame=int(suggestion.get("zero_v_start_frame", 0)),
+        end_frame=int(suggestion.get("zero_v_end_frame", metadata["frame_count"] - 1)),
+        progress_callback=stage_progress_adapter(progress_callback),
+    )
+    emit_progress(progress_callback, "detect_grid_lines", "识别网格线", indeterminate=True)
+
+    session["active_video"] = _prepared_video_state(video_path, metadata, suggestion, grid)
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
+    emit_progress(progress_callback, "ready_for_boundary_review", "等待用户确认 0V 起止时间", indeterminate=True)
     return {
-        "session_root": init["session_root"],
+        "session_root": session_bundle["session_root"],
         "video_path": video_path,
         "metadata": metadata,
         "video_url": file_url(video_path),
         "boundary": suggestion,
         "boundary_diagnostics": {"samples": boundary.get("samples", []), "operations": boundary.get("operations", [])},
         "grid": grid,
-        "session": _public_session(session, init["session_root"]),
-        "config": cfg,
+        "session": session_view(session, session_bundle["session_root"]),
+        "config": config,
     }
 
 
 def confirm_boundary(payload: dict[str, Any], config_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
-    cfg = normal_config(config_overrides)
-    init = initialize_session(payload.get("session_root"), payload.get("run_root"), config_overrides)
-    session_path = Path(init["session_file"])
-    session = _read_json(session_path)
-    active = _require_active_state(session, {"video_prepared", "boundary_confirmed"})
+    config = normal_config(config_overrides)
+    session_bundle = initialize_session(payload.get("session_root"), payload.get("run_root"), config_overrides)
+    session_path = Path(session_bundle["session_file"])
+    session = read_json_file(session_path)
+    active = active_video_for_step(session, {"video_prepared", "boundary_confirmed"})
     metadata = active["metadata"]
-    boundary = _normalize_boundary(payload["boundary"], metadata)
-    boundary["selection_window"] = _selection_window(boundary, metadata, cfg)
+    boundary = normalize_boundary_seconds(payload["boundary"], metadata)
+    boundary["selection_window"] = build_selection_window(boundary, metadata, config)
     active["boundary"] = boundary
     active["state"] = "boundary_confirmed"
-    active["boundary_confirmed_at"] = _now()
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
-    return {"session_root": init["session_root"], "active_video": active, "session": _public_session(session, init["session_root"])}
+    active["boundary_confirmed_at"] = utc_timestamp()
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
+    return {"session_root": session_bundle["session_root"], "active_video": active, "session": session_view(session, session_bundle["session_root"])}
 
 
 def select_target(payload: dict[str, Any], config_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
-    init = initialize_session(payload.get("session_root"), payload.get("run_root"), config_overrides)
-    session_path = Path(init["session_file"])
-    session = _read_json(session_path)
-    active = _require_active_state(session, {"boundary_confirmed"})
+    session_bundle = initialize_session(payload.get("session_root"), payload.get("run_root"), config_overrides)
+    session_path = Path(session_bundle["session_file"])
+    session = read_json_file(session_path)
+    active = active_video_for_step(session, {"boundary_confirmed"})
     if not bool(payload.get("balance_confirmed")):
         raise RuntimeError("请先确认油滴在所填电压下处于平衡状态。")
     voltage = float(payload.get("balance_voltage_V", math.nan))
     if not math.isfinite(voltage) or voltage <= 0:
         raise RuntimeError("平衡电压必须为正数。")
-    target = _normalize_target(payload["target"], active["metadata"])
+    target = normalize_target_box(payload["target"], active["metadata"])
     boundary = active["boundary"]
     target_frame = int(target["target_frame"])
-    window = boundary.get("selection_window") or _selection_window(boundary, active["metadata"], normal_config(config_overrides))
+    window = boundary.get("selection_window") or build_selection_window(boundary, active["metadata"], normal_config(config_overrides))
     if not (int(window["start_frame"]) <= target_frame <= int(window["end_frame"])):
         raise RuntimeError("所选画面超出零电压起点附近的允许范围，请调整时间。")
     overrides = payload.get("parameter_overrides") or {}
@@ -170,23 +179,47 @@ def select_target(payload: dict[str, Any], config_overrides: dict[str, Any] | No
     active["balance_confirmed"] = True
     active["parameter_overrides"] = overrides
     active["state"] = "target_selected"
-    active["target_selected_at"] = _now()
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
-    return {"session_root": init["session_root"], "active_video": active, "session": _public_session(session, init["session_root"])}
+    active["target_selected_at"] = utc_timestamp()
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
+    return {"session_root": session_bundle["session_root"], "active_video": active, "session": session_view(session, session_bundle["session_root"])}
 
 
-def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] | None = None, progress_callback: ProgressCallback | None = None) -> dict[str, Any]:
-    init = initialize_session(payload.get("session_root"), payload.get("run_root"), config_overrides)
-    session_path = Path(init["session_file"])
-    session = _read_json(session_path)
-    active = _require_active_state(session, {"target_selected"})
+def _measure_drop(
+    request: TrackRequest,
+    metadata: dict[str, Any],
+    grid: dict[str, Any],
+    balance_voltage_V: Any,
+    effective_config: dict[str, Any],
+    progress_callback: ProgressEventSink | None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]], str]:
+    tracking = run_tracking(request, progress_callback=stage_progress_adapter(progress_callback))
+    emit_progress(progress_callback, "fit_velocity", "拟合 0V 下落速度", indeterminate=True)
+    fit = fit_zero_v_velocity(tracking["track"], float(metadata.get("fps") or tracking["fps"] or 30.0), float(grid["scale_y_m_per_px"]), effective_config)
+    emit_progress(progress_callback, "compute_q", "计算 q 和不确定度", indeterminate=True)
+    q = compute_q(fit, float(balance_voltage_V), effective_config)
+    q_ok = bool(q.get("valid") and fit.get("valid"))
+    crossings = tracking["crossing_events"]
+    if not q_ok:
+        status = "diagnostic"
+    elif crossings:
+        status = "pending_crossing_review"
+    else:
+        status = "pending_user_confirmation"
+    return tracking, fit, q, crossings, status
+
+
+def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] | None = None, progress_callback: ProgressEventSink | None = None) -> dict[str, Any]:
+    session_bundle = initialize_session(payload.get("session_root"), payload.get("run_root"), config_overrides)
+    session_path = Path(session_bundle["session_file"])
+    session = read_json_file(session_path)
+    active = active_video_for_step(session, {"target_selected"})
     active["state"] = "tracking"
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
 
     record_id = f"rec_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
-    record_dir = Path(init["session_root"]) / "records" / record_id
+    record_dir = Path(session_bundle["session_root"]) / "records" / record_id
     record_dir.mkdir(parents=True, exist_ok=True)
     video_path = str(active["path"])
     metadata = active["metadata"]
@@ -194,13 +227,13 @@ def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] |
     grid = active["grid"]
     target = active["target"]
     overrides = active.get("parameter_overrides") or {}
-    effective_cfg = normal_config(overrides)
+    effective_config = normal_config(overrides)
 
-    _emit(progress_callback, "validate_measurement_inputs", "校验测量输入", indeterminate=True)
+    emit_progress(progress_callback, "validate_measurement_inputs", "校验测量输入", indeterminate=True)
     if not grid.get("valid"):
-        record = _diagnostic_record(record_id, video_path, boundary, target, grid, ["grid_calibration_invalid"], record_dir, active, effective_cfg)
+        record = build_diagnostic_record(record_id, video_path, boundary, target, grid, ["grid_calibration_invalid"], record_dir, active, effective_config)
     else:
-        tracking = run_tracking(
+        tracking, fit, q, crossings, status = _measure_drop(
             TrackRequest(
                 video_path=video_path,
                 target_frame=int(target["target_frame"]),
@@ -209,27 +242,19 @@ def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] |
                 source_center=(float(target["source_center"]["x"]), float(target["source_center"]["y"])),
                 grid=grid,
                 run_dir=str(record_dir),
-                config=effective_cfg,
+                config=effective_config,
             ),
-            progress_callback=_stage_emitter(progress_callback),
+            metadata,
+            grid,
+            active["balance_voltage_V"],
+            effective_config,
+            progress_callback,
         )
-        _emit(progress_callback, "fit_velocity", "拟合 0V 下落速度", indeterminate=True)
-        fit = fit_zero_v_velocity(tracking["track"], float(metadata.get("fps") or tracking["fps"] or 30.0), float(grid["scale_y_m_per_px"]), effective_cfg)
-        _emit(progress_callback, "compute_q", "计算 q 和不确定度", indeterminate=True)
-        q = compute_q(fit, float(active["balance_voltage_V"]), effective_cfg)
-        q_ok = bool(q.get("valid") and fit.get("valid"))
-        crossings = tracking["crossing_events"]
-        if not q_ok:
-            status = "diagnostic"
-        elif crossings:
-            status = "pending_crossing_review"
-        else:
-            status = "pending_user_confirmation"
         record = {
             "schema_version": 1,
             "record_id": record_id,
             "retry_of_record_id": active.get("retry_of_record_id"),
-            "created_at": _now(),
+            "created_at": utc_timestamp(),
             "video_path": video_path,
             "video_sha256_16": file_sha256(video_path)[:16] if Path(video_path).exists() else "",
             "metadata": metadata,
@@ -239,8 +264,8 @@ def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] |
             "target": target,
             "grid": grid,
             "parameter_overrides": overrides,
-            "effective_parameters": {"physics": effective_cfg["physics"], "grid": effective_cfg["grid"]},
-            "tracking": {"stats": _tracking_stats(tracking["track"]), "artifacts": _artifact_paths(tracking), "track": tracking["track"], "track_review_frames": tracking.get("track_review_frames") or []},
+            "effective_parameters": {"physics": effective_config["physics"], "grid": effective_config["grid"]},
+            "tracking": {"stats": track_point_counts(tracking["track"]), "artifacts": tracking_artifact_paths(tracking), "track": tracking["track"], "track_review_frames": tracking.get("track_review_frames") or []},
             "crossing_events": crossings,
             "fit": fit,
             "q": q,
@@ -249,22 +274,22 @@ def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] |
             "record_dir": str(record_dir),
             "recovery_suggestions": q.get("recovery_suggestions") or fit.get("recovery_suggestions") or [],
         }
-        _write_json(record_dir / "q_result.json", q)
+        write_json_file(record_dir / "q_result.json", q)
 
-    _write_json(record_dir / "record_manifest.json", record)
+    write_json_file(record_dir / "record_manifest.json", record)
     session.setdefault("records", []).append(record)
     active["last_record_id"] = record_id
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
-    return {"session_root": init["session_root"], "record": _public_record(record), "session": _public_session(session, init["session_root"])}
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
+    return {"session_root": session_bundle["session_root"], "record": record_view(record), "session": session_view(session, session_bundle["session_root"])}
 
 
 def prepare_crossing_review(payload: dict[str, Any]) -> dict[str, Any]:
-    init = initialize_session(payload.get("session_root"))
-    session_path = Path(init["session_file"])
-    session = _read_json(session_path)
-    record = _find_record(session, str(payload["record_id"]))
-    event = _find_crossing(record, str(payload["event_id"]))
+    session_bundle = initialize_session(payload.get("session_root"))
+    session_path = Path(session_bundle["session_file"])
+    session = read_json_file(session_path)
+    record = find_record_or_raise(session, str(payload["record_id"]))
+    event = find_crossing_or_raise(record, str(payload["event_id"]))
     record_dir = Path(record["record_dir"])
     clip = record_dir / "crossing_reviews" / f"{event['event_id']}.mp4"
     frames_manifest = clip.parent / f"{event['event_id']}_frames" / "frames_manifest.json"
@@ -276,107 +301,92 @@ def prepare_crossing_review(payload: dict[str, Any]) -> dict[str, Any]:
         event["review_clip_start_time_s"] = review["start_time_s"]
         event["review_clip_end_time_s"] = review["end_time_s"]
         event["review_frames_manifest_path"] = review["frames_manifest_path"]
-        event["review_frames"] = _review_frames_with_urls(review["review_frames"])
+        event["review_frames"] = review_frames_with_image_urls(review["review_frames"])
     else:
         event["review_clip_path"] = str(clip)
         event["review_clip_url"] = file_url(clip)
-        frames = _read_json(frames_manifest)
+        frames = read_json_file(frames_manifest)
         event["review_frames_manifest_path"] = str(frames_manifest)
-        event["review_frames"] = _review_frames_with_urls(frames)
+        event["review_frames"] = review_frames_with_image_urls(frames)
         if not event["review_frames"]:
             raise RuntimeError(f"未能生成身份复核画面：{frames_manifest}")
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
-    _write_json(record_dir / "record_manifest.json", record)
-    return {"session_root": init["session_root"], "record": _public_record(record), "event": event, "session": _public_session(session, init["session_root"])}
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
+    write_json_file(record_dir / "record_manifest.json", record)
+    return {"session_root": session_bundle["session_root"], "record": record_view(record), "event": event, "session": session_view(session, session_bundle["session_root"])}
 
 
-def _review_frames_with_urls(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
+def review_frames_with_image_urls(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    frames_with_urls: list[dict[str, Any]] = []
     for frame in frames:
         image_path = frame.get("image_path")
         if not image_path:
             continue
-        item = dict(frame)
-        item["image_url"] = file_url(image_path)
-        out.append(item)
-    return out
+        frame_copy = dict(frame)
+        frame_copy["image_url"] = file_url(image_path)
+        frames_with_urls.append(frame_copy)
+    return frames_with_urls
 
 
 def review_crossing(payload: dict[str, Any]) -> dict[str, Any]:
     result = str(payload.get("result") or "")
     if result not in {"same_drop", "different_drop"}:
         raise RuntimeError("请选择身份复核结果。")
-    init = initialize_session(payload.get("session_root"))
-    session_path = Path(init["session_file"])
-    session = _read_json(session_path)
-    record = _find_record(session, str(payload["record_id"]))
-    event = _find_crossing(record, str(payload["event_id"]))
+    session_bundle = initialize_session(payload.get("session_root"))
+    session_path = Path(session_bundle["session_file"])
+    session = read_json_file(session_path)
+    record = find_record_or_raise(session, str(payload["record_id"]))
+    event = find_crossing_or_raise(record, str(payload["event_id"]))
     event["review_result"] = result
-    event["reviewed_at"] = _now()
+    event["reviewed_at"] = utc_timestamp()
     if result == "different_drop":
         record["status"] = "rejected_crossing_identity"
         record["kept"] = False
         session["inversion"] = None
-        _restore_active_for_adjustment(session, record)
-    elif record.get("status") == "pending_crossing_review" and _all_crossings_reviewed_same(record):
+        reopen_video_for_adjustment(session, record)
+    elif record.get("status") == "pending_crossing_review" and crossings_all_confirmed_same(record):
         record["status"] = "pending_user_confirmation"
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
-    _write_json(Path(record["record_dir"]) / "record_manifest.json", record)
-    return {"session_root": init["session_root"], "record": _public_record(record), "session": _public_session(session, init["session_root"])}
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
+    write_json_file(Path(record["record_dir"]) / "record_manifest.json", record)
+    return {"session_root": session_bundle["session_root"], "record": record_view(record), "session": session_view(session, session_bundle["session_root"])}
 
 
 def update_record_selection(session_root: str | None, record_id: str, kept: bool) -> dict[str, Any]:
-    init = initialize_session(session_root)
-    session_path = Path(init["session_file"])
-    session = _read_json(session_path)
-    record = _find_record(session, record_id)
+    session_bundle = initialize_session(session_root)
+    session_path = Path(session_bundle["session_file"])
+    session = read_json_file(session_path)
+    record = find_record_or_raise(session, record_id)
     if kept:
         if record.get("status") == "accepted":
             record["kept"] = True
-        elif record.get("status") == "pending_user_confirmation" and _all_crossings_reviewed_same(record) and bool((record.get("q") or {}).get("valid")):
+        elif record.get("status") == "pending_user_confirmation" and crossings_all_confirmed_same(record) and bool((record.get("q") or {}).get("valid")):
             record["status"] = "accepted"
             record["kept"] = True
-            record["accepted_at"] = _now()
+            record["accepted_at"] = utc_timestamp()
         else:
             raise RuntimeError("当前测量尚未完成复核，不能保留。")
     else:
         record["status"] = "rejected_by_user"
         record["kept"] = False
-        _restore_active_for_adjustment(session, record)
+        reopen_video_for_adjustment(session, record)
     session["inversion"] = None
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
-    _write_json(Path(record["record_dir"]) / "record_manifest.json", record)
-    return {"session": _public_session(session, init["session_root"])}
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
+    write_json_file(Path(record["record_dir"]) / "record_manifest.json", record)
+    return {"session": session_view(session, session_bundle["session_root"])}
 
 
-def start_next_droplet(payload: dict[str, Any]) -> dict[str, Any]:
-    mode = str(payload.get("mode") or "")
-    if mode not in {"same_video", "different_video"}:
-        raise RuntimeError("请选择继续使用当前视频或更换视频。")
-    init = initialize_session(payload.get("session_root"))
-    session_path = Path(init["session_file"])
-    session = _read_json(session_path)
-    if mode == "different_video":
-        session["active_video"] = None
-        session["updated_at"] = _now()
-        _write_json(session_path, session)
-        return {"session_root": init["session_root"], "active_video": None, "session": _public_session(session, init["session_root"])}
-
-    record = None
-    record_id = payload.get("record_id")
-    if record_id:
-        record = _find_record(session, str(record_id))
-    active = session.get("active_video") if isinstance(session.get("active_video"), dict) else {}
-    video_path = (record or {}).get("video_path") or active.get("path")
-    metadata = (record or {}).get("metadata") or active.get("metadata")
-    boundary = (record or {}).get("time_window") or active.get("boundary")
-    grid = (record or {}).get("grid") or active.get("grid")
-    if not video_path or not isinstance(metadata, dict) or not isinstance(boundary, dict) or not isinstance(grid, dict):
-        raise RuntimeError("当前没有可继续测量的视频，请重新导入视频。")
-    session["active_video"] = {
+def _next_droplet_video_state(
+    video_path: str,
+    metadata: dict[str, Any],
+    boundary: dict[str, Any],
+    grid: dict[str, Any],
+    record: dict[str, Any] | None,
+    active: dict[str, Any],
+) -> dict[str, Any]:
+    # 优先沿用上一条记录的电压和参数，active_video 里没有才退回当前会话。
+    return {
         "state": "boundary_confirmed",
         "path": video_path,
         "metadata": metadata,
@@ -387,51 +397,90 @@ def start_next_droplet(payload: dict[str, Any]) -> dict[str, Any]:
         "previous_balance_voltage_V": (record or {}).get("balance_voltage_V") or active.get("balance_voltage_V"),
         "previous_parameter_overrides": (record or {}).get("parameter_overrides") or active.get("parameter_overrides") or {},
         "next_droplet_from_record_id": (record or {}).get("record_id"),
-        "next_droplet_started_at": _now(),
+        "next_droplet_started_at": utc_timestamp(),
     }
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
-    return {"session_root": init["session_root"], "active_video": session["active_video"], "session": _public_session(session, init["session_root"])}
 
 
-def run_inversion(session_root: str | None = None, config_overrides: dict[str, Any] | None = None, progress_callback: ProgressCallback | None = None) -> dict[str, Any]:
-    cfg = normal_config(config_overrides)
-    init = initialize_session(session_root, config_overrides=config_overrides)
-    session_path = Path(init["session_file"])
-    session = _read_json(session_path)
-    _emit(progress_callback, "run_blind_inversion", "运行盲反演", indeterminate=True)
-    inversion = run_weighted_integer_inversion(session.get("records", []), cfg)
-    inversion["created_at"] = _now()
+def start_next_droplet(payload: dict[str, Any]) -> dict[str, Any]:
+    mode = str(payload.get("mode") or "")
+    if mode not in {"same_video", "different_video"}:
+        raise RuntimeError("请选择继续使用当前视频或更换视频。")
+    session_bundle = initialize_session(payload.get("session_root"))
+    session_path = Path(session_bundle["session_file"])
+    session = read_json_file(session_path)
+    if mode == "different_video":
+        session["active_video"] = None
+        session["updated_at"] = utc_timestamp()
+        write_json_file(session_path, session)
+        return {"session_root": session_bundle["session_root"], "active_video": None, "session": session_view(session, session_bundle["session_root"])}
+
+    record = None
+    record_id = payload.get("record_id")
+    if record_id:
+        record = find_record_or_raise(session, str(record_id))
+    active = session.get("active_video") if isinstance(session.get("active_video"), dict) else {}
+    video_path = (record or {}).get("video_path") or active.get("path")
+    metadata = (record or {}).get("metadata") or active.get("metadata")
+    boundary = (record or {}).get("time_window") or active.get("boundary")
+    grid = (record or {}).get("grid") or active.get("grid")
+    if not video_path or not isinstance(metadata, dict) or not isinstance(boundary, dict) or not isinstance(grid, dict):
+        raise RuntimeError("当前没有可继续测量的视频，请重新导入视频。")
+    session["active_video"] = _next_droplet_video_state(video_path, metadata, boundary, grid, record, active)
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
+    return {"session_root": session_bundle["session_root"], "active_video": session["active_video"], "session": session_view(session, session_bundle["session_root"])}
+
+
+def run_inversion(session_root: str | None = None, config_overrides: dict[str, Any] | None = None, progress_callback: ProgressEventSink | None = None) -> dict[str, Any]:
+    config = normal_config(config_overrides)
+    session_bundle = initialize_session(session_root, config_overrides=config_overrides)
+    session_path = Path(session_bundle["session_file"])
+    session = read_json_file(session_path)
+    emit_progress(progress_callback, "run_blind_inversion", "运行盲反演", indeterminate=True)
+    inversion = run_weighted_integer_inversion(session.get("records", []), config)
+    inversion["created_at"] = utc_timestamp()
     session["inversion"] = inversion
-    session["updated_at"] = _now()
-    _write_json(session_path, session)
-    _write_json(Path(init["session_root"]) / "normal_inversion.json", inversion)
-    return {"session_root": init["session_root"], "inversion": inversion, "session": _public_session(session, init["session_root"])}
+    session["updated_at"] = utc_timestamp()
+    write_json_file(session_path, session)
+    write_json_file(Path(session_bundle["session_root"]) / "normal_inversion.json", inversion)
+    return {"session_root": session_bundle["session_root"], "inversion": inversion, "session": session_view(session, session_bundle["session_root"])}
 
 
 def export_session(session_root: str | None, export_root: str) -> dict[str, Any]:
-    init = initialize_session(session_root)
-    source = Path(init["session_root"])
-    session = _read_json(Path(init["session_file"]))
+    session_bundle = initialize_session(session_root)
+    source = Path(session_bundle["session_root"])
+    session = read_json_file(Path(session_bundle["session_file"]))
     destination = Path(export_root) / f"{session['session_id']}_export"
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True)
     if (source / "records").exists():
         shutil.copytree(source / "records", destination / "records")
-    _write_json(destination / "normal_session.json", session)
+    write_json_file(destination / "normal_session.json", session)
     if session.get("inversion"):
-        _write_json(destination / "normal_inversion.json", session["inversion"])
+        write_json_file(destination / "normal_inversion.json", session["inversion"])
     report = destination / "normal_session_report.md"
     report.write_text(render_report(session), encoding="utf-8")
-    manifest = {"schema_version": 1, "session_id": session["session_id"], "exported_at": _now(), "files": sorted(str(path.relative_to(destination)) for path in destination.rglob("*") if path.is_file())}
-    _write_json(destination / "export_manifest.json", manifest)
+    manifest = {"schema_version": 1, "session_id": session["session_id"], "exported_at": utc_timestamp(), "files": sorted(str(path.relative_to(destination)) for path in destination.rglob("*") if path.is_file())}
+    write_json_file(destination / "export_manifest.json", manifest)
     return {"destination": str(destination), "manifest": manifest, "markdown": str(report)}
 
 
 def render_report(session: dict[str, Any]) -> str:
     lines = ["# 密立根油滴实验记录", "", "| 测量序号 | 结果 | 电荷 q | 不确定度 σq | 视频 |", "| ---: | --- | ---: | ---: | --- |"]
-    status_labels = {
+    records = session.get("records", [])
+    lines.extend(_measurement_report_rows(records))
+    if records:
+        lines.extend(["", "σq 由速度拟合误差传播计算，未计仪器和物性参数误差。"])
+    inversion = session.get("inversion")
+    if inversion:
+        lines.extend(_inversion_report_lines(inversion))
+    return "\n".join(lines) + "\n"
+
+
+def _measurement_report_rows(records: list[dict[str, Any]]) -> list[str]:
+    # 报表只给人看，内部 id 和机器字段一律不带出来。
+    labels = {
         "pending_crossing_review": "待复核",
         "pending_user_confirmation": "待确认",
         "accepted": "已保留",
@@ -439,50 +488,49 @@ def render_report(session: dict[str, Any]) -> str:
         "rejected_crossing_identity": "身份复核未通过",
         "rejected_by_user": "已排除",
     }
-    for index, record in enumerate(session.get("records", []), start=1):
-        q = record.get("q", {})
+    rows = []
+    for index, record in enumerate(records, start=1):
+        charge = record.get("q", {})
         video_name = Path(str(record.get("video_path", ""))).name
-        lines.append(f"| {index} | {status_labels.get(record.get('status'), '待确认')} | {_format_charge(q.get('q_C'))} | {_format_charge(q.get('sigma_q_C'))} | {video_name} |")
-    if session.get("records"):
-        lines.extend(["", "σq 由速度拟合误差传播计算，未计仪器和物性参数误差。"])
-    inversion = session.get("inversion")
-    if inversion:
-        comparison = inversion.get("reference_comparison") or {}
-        result_labels = {
-            "reliable": "可靠候选",
-            "exploratory": "样本较少",
-            "diagnostic": "需复核",
-            "insufficient_eligible_records": "记录不足",
-        }
-        flag_labels = {
-            "insufficient_eligible_records": "可用测量记录不足",
-            "weighted_residual_too_large": "电荷与整数倍的偏差较大",
-            "integer_assignments_nonprimitive": "整数分配存在公因数",
-            "search_boundary_hit": "估计值触及搜索范围边界",
-            "integer_assignment_not_stable": "整数分配尚未稳定",
-            "exploratory_small_sample": "样本较少，结果仅供参考",
-        }
-        lines.extend(
-            [
-                "",
-                "## 元电荷结果",
-                "",
-                f"- 结果状态：{result_labels.get(inversion.get('status'), '未估计')}",
-                f"- 估计值：{_format_charge(inversion.get('e_hat_C'))}",
-                f"- 标准不确定度：{_format_charge(inversion.get('sigma_e_C'))}",
-                f"- 相对不确定度：{_format_percent(comparison.get('relative_uncertainty_percent'))}",
-                f"- 参与测量：{inversion.get('valid_q_count', '-')} 次",
-            ]
-        )
-        lines.extend(f"- 诊断：{flag_labels.get(flag, flag)}" for flag in inversion.get("flags", []))
-        percent_error = comparison.get("percent_error_vs_reference")
-        if percent_error is not None:
-            reference = _format_charge(comparison.get("reference_e_C"))
-            lines.append(f"- 与标准值的相对误差：{_format_percent(percent_error)}（标准值 {reference}）")
-    return "\n".join(lines) + "\n"
+        rows.append(f"| {index} | {labels.get(record.get('status'), '待确认')} | {format_charge_si(charge.get('q_C'))} | {format_charge_si(charge.get('sigma_q_C'))} | {video_name} |")
+    return rows
 
 
-def _format_charge(value: Any) -> str:
+def _inversion_report_lines(inversion: dict[str, Any]) -> list[str]:
+    comparison = inversion.get("reference_comparison") or {}
+    result_labels = {
+        "reliable": "可靠候选",
+        "exploratory": "样本较少",
+        "diagnostic": "需复核",
+        "insufficient_eligible_records": "记录不足",
+    }
+    flag_labels = {
+        "insufficient_eligible_records": "可用测量记录不足",
+        "weighted_residual_too_large": "电荷与整数倍的偏差较大",
+        "integer_assignments_nonprimitive": "整数分配存在公因数",
+        "search_boundary_hit": "估计值触及搜索范围边界",
+        "integer_assignment_not_stable": "整数分配尚未稳定",
+        "exploratory_small_sample": "样本较少，结果仅供参考",
+    }
+    lines = [
+        "",
+        "## 元电荷结果",
+        "",
+        f"- 结果状态：{result_labels.get(inversion.get('status'), '未估计')}",
+        f"- 估计值：{format_charge_si(inversion.get('e_hat_C'))}",
+        f"- 标准不确定度：{format_charge_si(inversion.get('sigma_e_C'))}",
+        f"- 相对不确定度：{format_percent(comparison.get('relative_uncertainty_percent'))}",
+        f"- 参与测量：{inversion.get('valid_q_count', '-')} 次",
+    ]
+    lines.extend(f"- 诊断：{flag_labels.get(flag, flag)}" for flag in inversion.get("flags", []))
+    percent_error = comparison.get("percent_error_vs_reference")
+    if percent_error is not None:
+        reference = format_charge_si(comparison.get("reference_e_C"))
+        lines.append(f"- 与标准值的相对误差：{format_percent(percent_error)}（标准值 {reference}）")
+    return lines
+
+
+def format_charge_si(value: Any) -> str:
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -492,7 +540,7 @@ def _format_charge(value: Any) -> str:
     return f"{number / 1e-19:.5g} × 10⁻¹⁹ C"
 
 
-def _format_percent(value: Any) -> str:
+def format_percent(value: Any) -> str:
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -500,7 +548,7 @@ def _format_percent(value: Any) -> str:
     return f"{number:.3g}%" if math.isfinite(number) else "-"
 
 
-def _normalize_boundary(boundary: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+def normalize_boundary_seconds(boundary: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
     fps = float(metadata.get("fps") or 30.0)
     frame_count = int(metadata.get("frame_count") or 1)
     if "zero_v_start_s" in boundary:
@@ -522,13 +570,13 @@ def _normalize_boundary(boundary: dict[str, Any], metadata: dict[str, Any]) -> d
     }
 
 
-def _selection_window(boundary: dict[str, Any], metadata: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+def build_selection_window(boundary: dict[str, Any], metadata: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     fps = float(metadata.get("fps") or 30.0)
     frame_count = int(metadata.get("frame_count") or 1)
     zero_start = int(boundary["zero_v_start_frame"])
-    scfg = cfg.get("selection", {})
-    before = float(scfg.get("before_zero_v_start_s", 0.5))
-    after = float(scfg.get("after_zero_v_start_s", 0.5))
+    selection_config = config.get("selection", {})
+    before = float(selection_config.get("before_zero_v_start_s", 0.5))
+    after = float(selection_config.get("after_zero_v_start_s", 0.5))
     start_frame = max(0, int(round(zero_start - before * fps)))
     end_frame = min(frame_count - 1, int(round(zero_start + after * fps)))
     end_frame = max(start_frame, end_frame)
@@ -541,7 +589,7 @@ def _selection_window(boundary: dict[str, Any], metadata: dict[str, Any], cfg: d
     }
 
 
-def _normalize_target(target: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+def normalize_target_box(target: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
     fps = float(metadata.get("fps") or 30.0)
     frame_count = int(metadata.get("frame_count") or 1)
     width = int(metadata.get("width") or 1)
@@ -563,7 +611,7 @@ def _normalize_target(target: dict[str, Any], metadata: dict[str, Any]) -> dict[
     }
 
 
-def _diagnostic_record(
+def build_diagnostic_record(
     record_id: str,
     video_path: str,
     boundary: dict[str, Any],
@@ -572,13 +620,13 @@ def _diagnostic_record(
     flags: list[str],
     record_dir: Path,
     active: dict[str, Any],
-    effective_cfg: dict[str, Any],
+    effective_config: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "record_id": record_id,
         "retry_of_record_id": active.get("retry_of_record_id"),
-        "created_at": _now(),
+        "created_at": utc_timestamp(),
         "video_path": video_path,
         "video_sha256_16": file_sha256(video_path)[:16] if Path(video_path).exists() else "",
         "metadata": active.get("metadata"),
@@ -588,7 +636,7 @@ def _diagnostic_record(
         "target": target,
         "grid": grid,
         "parameter_overrides": active.get("parameter_overrides") or {},
-        "effective_parameters": {"physics": effective_cfg["physics"], "grid": effective_cfg["grid"]},
+        "effective_parameters": {"physics": effective_config["physics"], "grid": effective_config["grid"]},
         "crossing_events": [],
         "fit": {"valid": False, "flags": flags},
         "q": {"valid": False, "diagnostic_only": True, "flags": flags},
@@ -599,7 +647,7 @@ def _diagnostic_record(
     }
 
 
-def _restore_active_for_adjustment(session: dict[str, Any], record: dict[str, Any]) -> None:
+def reopen_video_for_adjustment(session: dict[str, Any], record: dict[str, Any]) -> None:
     metadata = record.get("metadata") or {}
     session["active_video"] = {
         "state": "boundary_confirmed",
@@ -617,11 +665,11 @@ def _restore_active_for_adjustment(session: dict[str, Any], record: dict[str, An
             "balance_confirmed": record.get("balance_confirmed"),
             "parameter_overrides": record.get("parameter_overrides") or {},
         },
-        "restored_for_adjustment_at": _now(),
+        "restored_for_adjustment_at": utc_timestamp(),
     }
 
 
-def _tracking_stats(track: list[dict[str, Any]]) -> dict[str, int]:
+def track_point_counts(track: list[dict[str, Any]]) -> dict[str, int]:
     return {
         "total_points": len(track),
         "detected_points": sum(1 for row in track if row.get("detected")),
@@ -630,12 +678,12 @@ def _tracking_stats(track: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
-def _artifact_paths(tracking: dict[str, Any]) -> dict[str, str]:
+def tracking_artifact_paths(tracking: dict[str, Any]) -> dict[str, str]:
     return {key: value for key, value in tracking.items() if key.endswith("_csv") or key.endswith("_json") or key.endswith("_mp4")}
 
 
-def _public_session(session: dict[str, Any], session_root: str | None = None) -> dict[str, Any]:
-    records = [_public_record(record) for record in session.get("records", [])]
+def session_view(session: dict[str, Any], session_root: str | None = None) -> dict[str, Any]:
+    records = [record_view(record) for record in session.get("records", [])]
     accepted = [record for record in records if record.get("status") == "accepted" and record.get("kept")]
     return {
         "schema_version": session.get("schema_version", 1),
@@ -652,7 +700,7 @@ def _public_session(session: dict[str, Any], session_root: str | None = None) ->
     }
 
 
-def _public_record(record: dict[str, Any]) -> dict[str, Any]:
+def record_view(record: dict[str, Any]) -> dict[str, Any]:
     public = {key: value for key, value in record.items() if key not in {"record_dir"}}
     q = record.get("q") if isinstance(record.get("q"), dict) else {}
     fit = record.get("fit") if isinstance(record.get("fit"), dict) else {}
@@ -669,14 +717,14 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
             "radius_m": q.get("radius_m"),
             "fall_velocity_m_s": fit.get("velocity_m_s"),
             "artifact_urls": artifact_urls,
-            "track_review_frames": _review_frames_with_urls(tracking.get("track_review_frames") or []),
+            "track_review_frames": review_frames_with_image_urls(tracking.get("track_review_frames") or []),
             "crossings": record.get("crossing_events") or [],
         }
     )
     return public
 
 
-def _require_active_state(session: dict[str, Any], allowed: set[str]) -> dict[str, Any]:
+def active_video_for_step(session: dict[str, Any], allowed: set[str]) -> dict[str, Any]:
     active = session.get("active_video")
     if not isinstance(active, dict):
         raise RuntimeError("当前没有可操作的视频，请先导入并处理视频。")
@@ -690,36 +738,36 @@ def _require_active_state(session: dict[str, Any], allowed: set[str]) -> dict[st
     return active
 
 
-def _find_record(session: dict[str, Any], record_id: str) -> dict[str, Any]:
+def find_record_or_raise(session: dict[str, Any], record_id: str) -> dict[str, Any]:
     for record in session.get("records", []):
         if record.get("record_id") == record_id:
             return record
     raise RuntimeError(f"未找到这条测量记录：{record_id}")
 
 
-def _find_crossing(record: dict[str, Any], event_id: str) -> dict[str, Any]:
+def find_crossing_or_raise(record: dict[str, Any], event_id: str) -> dict[str, Any]:
     for event in record.get("crossing_events", []):
         if event.get("event_id") == event_id:
             return event
     raise RuntimeError(f"未找到这段轨迹复核记录：{event_id}")
 
 
-def _all_crossings_reviewed_same(record: dict[str, Any]) -> bool:
+def crossings_all_confirmed_same(record: dict[str, Any]) -> bool:
     crossings = record.get("crossing_events") or []
     return all(event.get("review_result") == "same_drop" for event in crossings)
 
 
-def _stage_emitter(callback: ProgressCallback | None) -> Callable[[str, str, int | None, int | None, str | None], None] | None:
+def stage_progress_adapter(callback: ProgressEventSink | None) -> Callable[[str, str, int | None, int | None, str | None], None] | None:
     if callback is None:
         return None
 
     def emit(stage: str, label: str, current: int | None, total: int | None, unit: str | None) -> None:
-        _emit(callback, stage, label, current=current, total=total, unit=unit)
+        emit_progress(callback, stage, label, current=current, total=total, unit=unit)
 
     return emit
 
 
-def _emit(callback: ProgressCallback | None, stage: str, label: str, current: int | None = None, total: int | None = None, unit: str | None = None, indeterminate: bool | None = None) -> None:
+def emit_progress(callback: ProgressEventSink | None, stage: str, label: str, current: int | None = None, total: int | None = None, unit: str | None = None, indeterminate: bool | None = None) -> None:
     if callback is None:
         return
     payload: dict[str, Any] = {"stage": stage, "label": label}
@@ -734,14 +782,14 @@ def _emit(callback: ProgressCallback | None, stage: str, label: str, current: in
     callback(payload)
 
 
-def _read_json(path: Path) -> Any:
+def read_json_file(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _write_json(path: Path, data: dict[str, Any]) -> None:
+def write_json_file(path: Path, content: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _now() -> str:
+def utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
