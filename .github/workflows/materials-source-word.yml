@@ -1,0 +1,60 @@
+name: Generate 1.0 source-code Word
+on:
+  push:
+    branches:
+      - materials/source-code-word-1-0
+    paths:
+      - .github/workflows/materials-source-word.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-word:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install document tools
+        run: |
+          python -m pip install python-docx
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libreoffice-writer poppler-utils fonts-noto-cjk
+      - name: Build and verify 60-page source-code Word
+        shell: bash
+        run: |
+          set -euo pipefail
+          good=false
+          for pt in 7.2 6.8 6.4 6.0 5.6; do
+            SOURCE_FONT_PT="$pt" python .ci_materials/generate_source_word.py
+            soffice -env:UserInstallation=file:///tmp/millikan-docx-profile --headless --convert-to pdf --outdir out 'out/密立根油滴实验1.0_源程序.docx'
+            pages=$(pdfinfo 'out/密立根油滴实验1.0_源程序.pdf' | awk '/^Pages:/ { print $2 }')
+            echo "Font $pt: rendered PDF pages=$pages"
+            if [ "$pages" = "60" ]; then
+              good=true
+              break
+            fi
+          done
+          test "$good" = true
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("out/密立根油滴实验1.0_源程序.manifest.json").read_text(encoding="utf-8"))
+          assert len(data["pages"]) == 60
+          assert data["front_end_offset"] <= data["back_start_offset"]
+          assert all(p["source_line_count"] >= 60 and p["nonblank_source_lines"] >= 52 for p in data["pages"])
+          print("Verified: 60 pages; 30 consecutive front and 30 consecutive back; >=52 nonblank source lines/page")
+          PY
+      - name: Upload Word and audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: 密立根油滴实验1.0-源程序-Word
+          path: |
+            out/密立根油滴实验1.0_源程序.docx
+            out/密立根油滴实验1.0_源程序.manifest.json
+          if-no-files-found: error
+          retention-days: 90
