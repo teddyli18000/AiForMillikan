@@ -187,9 +187,10 @@ export function NormalWorkspace() {
   const playerStartS = stage === "target" ? selectionWindow.start_s : 0;
   const playerEndS = stage === "target" ? selectionWindow.end_s : duration || metadata?.duration_s || 0;
   const selectedTrackFrames = selectedRecord?.track_review_frames ?? [];
-  const showingTrackFrames = Boolean((stage === "review" || stage === "results") && selectedTrackFrames.length);
-  const mainVideoUrl = showingTrackFrames ? "" : stage === "review" || stage === "results" ? selectedOverlayUrl || videoUrl : videoUrl;
-  const showingTrackOverlay = Boolean((stage === "review" || stage === "results") && selectedOverlayUrl && !showingTrackFrames);
+  const inResultsStage = stage === "review" || stage === "results";
+  const showingTrackFrames = Boolean(inResultsStage && selectedTrackFrames.length);
+  const mainVideoUrl = showingTrackFrames ? "" : inResultsStage ? selectedOverlayUrl || videoUrl : videoUrl;
+  const showingTrackOverlay = Boolean(inResultsStage && selectedOverlayUrl && !showingTrackFrames);
 
   const inspectVideo = async (path: string) => {
     if (!path) {
@@ -1782,7 +1783,7 @@ function AssignmentTable({ assignments, records }: { assignments: NonNullable<No
 }
 
 function normalizeInversionCharts(inversion: NormalInversionResult | null) {
-  const raw = (inversion?.charts ?? inversion?.plots_data ?? {}) as Record<string, any>;
+  const raw = (inversion?.charts ?? {}) as Record<string, any>;
   return {
     charge_distribution: Array.isArray(raw.charge_distribution) ? raw.charge_distribution : [],
     residuals: Array.isArray(raw.residuals) ? raw.residuals : [],

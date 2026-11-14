@@ -25,7 +25,6 @@ from millikan_ai.normal.session import (
 
 
 Json = dict[str, Any]
-_MISSING = object()
 
 
 def _configure_utf8_stdio() -> None:
@@ -37,20 +36,6 @@ def _configure_utf8_stdio() -> None:
 
 
 _configure_utf8_stdio()
-
-
-def _camel_case(key: str) -> str:
-    head, *tail = key.split("_")
-    return head + "".join(part[:1].upper() + part[1:] for part in tail)
-
-
-def _value(payload: Json, key: str, default: Any = _MISSING) -> Any:
-    for candidate in (key, _camel_case(key)):
-        if candidate in payload:
-            return payload[candidate]
-    if default is not _MISSING:
-        return default
-    raise KeyError(key)
 
 
 def _json_safe(value: Any) -> Any:
@@ -72,45 +57,40 @@ def _write_line(payload: Json) -> None:
     sys.stdout.flush()
 
 
-def _normal_config_overrides(payload: Json) -> dict[str, Any] | None:
-    value = _value(payload, "config_overrides", None)
-    return value if isinstance(value, dict) else None
-
-
 def _op_normal_initialize(payload: Json, _request_id: str) -> Json:
     return normal_initialize_session(
-        session_root=_value(payload, "session_root", None),
-        run_root=_value(payload, "run_root", None),
-        config_overrides=_normal_config_overrides(payload),
+        session_root=payload.get("session_root"),
+        run_root=payload.get("run_root"),
+        config_overrides=payload.get("config_overrides"),
     )
 
 
 def _op_normal_inspect_video(payload: Json, _request_id: str) -> Json:
-    return normal_inspect_video(str(_value(payload, "video_path")))
+    return normal_inspect_video(payload["video_path"])
 
 
 def _op_normal_prepare_video(payload: Json, _request_id: str) -> Json:
     return normal_prepare_video(
-        video_path=str(_value(payload, "video_path")),
-        session_root=_value(payload, "session_root", None),
-        run_root=_value(payload, "run_root", None),
-        config_overrides=_normal_config_overrides(payload),
+        video_path=payload["video_path"],
+        session_root=payload.get("session_root"),
+        run_root=payload.get("run_root"),
+        config_overrides=payload.get("config_overrides"),
         progress_callback=_normal_progress_emitter(_request_id, "prepare_video"),
     )
 
 
 def _op_normal_confirm_boundary(payload: Json, _request_id: str) -> Json:
-    return normal_confirm_boundary(payload, config_overrides=_normal_config_overrides(payload))
+    return normal_confirm_boundary(payload, config_overrides=payload.get("config_overrides"))
 
 
 def _op_normal_select_target(payload: Json, _request_id: str) -> Json:
-    return normal_select_target(payload, config_overrides=_normal_config_overrides(payload))
+    return normal_select_target(payload, config_overrides=payload.get("config_overrides"))
 
 
 def _op_normal_save_measurement(payload: Json, _request_id: str) -> Json:
     return normal_save_measurement(
         payload,
-        config_overrides=_normal_config_overrides(payload),
+        config_overrides=payload.get("config_overrides"),
         progress_callback=_normal_progress_emitter(_request_id, "save_measurement"),
     )
 
@@ -125,9 +105,9 @@ def _op_normal_review_crossing(payload: Json, _request_id: str) -> Json:
 
 def _op_normal_select_record(payload: Json, _request_id: str) -> Json:
     return normal_update_record_selection(
-        session_root=_value(payload, "session_root", None),
-        record_id=str(_value(payload, "record_id")),
-        kept=bool(_value(payload, "kept", _value(payload, "selected", True))),
+        session_root=payload.get("session_root"),
+        record_id=payload["record_id"],
+        kept=payload["kept"],
     )["session"]
 
 
@@ -137,16 +117,16 @@ def _op_normal_start_next_droplet(payload: Json, _request_id: str) -> Json:
 
 def _op_normal_run_inversion(payload: Json, _request_id: str) -> Json:
     return normal_run_inversion(
-        session_root=_value(payload, "session_root", None),
-        config_overrides=_normal_config_overrides(payload),
+        session_root=payload.get("session_root"),
+        config_overrides=payload.get("config_overrides"),
         progress_callback=_normal_progress_emitter(_request_id, "run_inversion"),
     )
 
 
 def _op_normal_export(payload: Json, _request_id: str) -> Json:
     return normal_export_session(
-        session_root=_value(payload, "session_root", None),
-        export_root=str(_value(payload, "export_root")),
+        session_root=payload.get("session_root"),
+        export_root=payload["export_root"],
     )
 
 
@@ -165,8 +145,8 @@ def _normal_progress_emitter(request_id: str, operation: str) -> Callable[[Json]
                 "payload": {
                     "request_id": request_id,
                     "operation": operation,
-                    "stage": payload.get("stage") or payload.get("phase") or "unknown",
-                    "label": str(payload.get("label") or payload.get("stage") or "处理中"),
+                    "stage": payload["stage"],
+                    "label": payload["label"],
                     "current": current,
                     "total": total,
                     "unit": payload.get("unit"),

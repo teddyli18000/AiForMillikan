@@ -168,7 +168,7 @@ def select_target(payload: dict[str, Any], config_overrides: dict[str, Any] | No
     active["retry_of_record_id"] = payload.get("retry_of_record_id")
     active["balance_voltage_V"] = voltage
     active["balance_confirmed"] = True
-    active["parameter_overrides"] = overrides if isinstance(overrides, dict) else {}
+    active["parameter_overrides"] = overrides
     active["state"] = "target_selected"
     active["target_selected_at"] = _now()
     session["updated_at"] = _now()
@@ -194,7 +194,7 @@ def save_measurement(payload: dict[str, Any], config_overrides: dict[str, Any] |
     grid = active["grid"]
     target = active["target"]
     overrides = active.get("parameter_overrides") or {}
-    effective_cfg = normal_config(overrides if isinstance(overrides, dict) else None)
+    effective_cfg = normal_config(overrides)
 
     _emit(progress_callback, "validate_measurement_inputs", "校验测量输入", indeterminate=True)
     if not grid.get("valid"):
@@ -282,7 +282,7 @@ def prepare_crossing_review(payload: dict[str, Any]) -> dict[str, Any]:
         event["review_clip_url"] = file_url(clip)
         frames = _read_json(frames_manifest)
         event["review_frames_manifest_path"] = str(frames_manifest)
-        event["review_frames"] = _review_frames_with_urls(frames if isinstance(frames, list) else [])
+        event["review_frames"] = _review_frames_with_urls(frames)
         if not event["review_frames"]:
             raise RuntimeError(f"未能生成身份复核画面：{frames_manifest}")
     session["updated_at"] = _now()
@@ -471,7 +471,7 @@ def render_report(session: dict[str, Any]) -> str:
                 f"- 估计值：{_format_charge(inversion.get('e_hat_C'))}",
                 f"- 标准不确定度：{_format_charge(inversion.get('sigma_e_C'))}",
                 f"- 相对不确定度：{_format_percent(comparison.get('relative_uncertainty_percent'))}",
-                f"- 参与测量：{inversion.get('valid_q_count', inversion.get('num_used', '-'))} 次",
+                f"- 参与测量：{inversion.get('valid_q_count', '-')} 次",
             ]
         )
         lines.extend(f"- 诊断：{flag_labels.get(flag, flag)}" for flag in inversion.get("flags", []))
@@ -637,7 +637,6 @@ def _artifact_paths(tracking: dict[str, Any]) -> dict[str, str]:
 def _public_session(session: dict[str, Any], session_root: str | None = None) -> dict[str, Any]:
     records = [_public_record(record) for record in session.get("records", [])]
     accepted = [record for record in records if record.get("status") == "accepted" and record.get("kept")]
-    q_ready = [record for record in records if record.get("q_valid")]
     return {
         "schema_version": session.get("schema_version", 1),
         "session_id": session.get("session_id"),
@@ -646,7 +645,7 @@ def _public_session(session: dict[str, Any], session_root: str | None = None) ->
         "created_at": session.get("created_at"),
         "updated_at": session.get("updated_at"),
         "records": records,
-        "counts": {"total": len(records), "q_ready": len(q_ready), "valid": len(accepted), "kept_valid": len(accepted), "selected_valid": len(accepted)},
+        "counts": {"total": len(records), "kept_valid": len(accepted)},
         "eligible_for_inversion": len(accepted) >= 3,
         "inversion": session.get("inversion"),
         "active_video": session.get("active_video"),
@@ -669,8 +668,6 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
             "sigma_q_C": q.get("sigma_q_C"),
             "radius_m": q.get("radius_m"),
             "fall_velocity_m_s": fit.get("velocity_m_s"),
-            "flags": list(dict.fromkeys([*(fit.get("flags") or []), *(q.get("flags") or [])])),
-            "artifacts": artifacts,
             "artifact_urls": artifact_urls,
             "track_review_frames": _review_frames_with_urls(tracking.get("track_review_frames") or []),
             "crossings": record.get("crossing_events") or [],
@@ -702,7 +699,7 @@ def _find_record(session: dict[str, Any], record_id: str) -> dict[str, Any]:
 
 def _find_crossing(record: dict[str, Any], event_id: str) -> dict[str, Any]:
     for event in record.get("crossing_events", []):
-        if event.get("event_id") == event_id or event.get("id") == event_id:
+        if event.get("event_id") == event_id:
             return event
     raise RuntimeError(f"未找到这段轨迹复核记录：{event_id}")
 
@@ -737,7 +734,7 @@ def _emit(callback: ProgressCallback | None, stage: str, label: str, current: in
     callback(payload)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 

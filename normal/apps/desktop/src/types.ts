@@ -85,8 +85,6 @@ export type NormalRecord = {
   radius_m?: number | null;
   fall_velocity_m_s?: number | null;
   balance_voltage_V?: number | null;
-  flags?: string[];
-  artifacts?: Record<string, string>;
   artifact_urls?: Record<string, string>;
   track_review_frames?: Array<{
     frame_index: number;
@@ -106,10 +104,7 @@ export type NormalSession = {
   active_video?: Record<string, unknown> | null;
   counts?: {
     total?: number;
-    q_ready?: number;
-    valid?: number;
     kept_valid?: number;
-    selected_valid?: number;
   };
   inversion?: NormalInversionResult | null;
   [key: string]: unknown;
@@ -222,7 +217,6 @@ export type NormalInversionResult = {
     }>;
     [key: string]: unknown;
   };
-  plots_data?: Record<string, unknown>;
   flags?: string[];
   [key: string]: unknown;
 };
