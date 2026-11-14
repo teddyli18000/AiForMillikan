@@ -63,7 +63,7 @@ def run_tracking(request: TrackRequest, progress_callback: ProgressCallback | No
     run_dir.mkdir(parents=True, exist_ok=True)
     start = max(0, int(request.target_frame))
     end = max(start, int(request.zero_v_end_frame))
-    frames, fps = _read_frames(request.video_path, start, end, progress_callback)
+    frames, fps = read_frame_range(request.video_path, start, end, progress_callback)
     grid_mask = None
     if bool(request.config["tracking"].get("grid_mask_for_tracking_enabled", True)):
         grid_mask = build_static_grid_mask(request.video_path, start_frame=start, max_frames=end - start + 1)
@@ -71,7 +71,7 @@ def run_tracking(request: TrackRequest, progress_callback: ProgressCallback | No
     track = track_single_drop_frames(frames, local_initial, start, request.config["tracking"], grid_mask, progress_callback)
     if not track.empty:
         track["time_s"] = track["source_frame"].astype(float) / float(fps)
-    track = _mark_fit_window(track, request.zero_v_start_frame, request.zero_v_end_frame, request.grid)
+    track = add_fit_window_columns(track, request.zero_v_start_frame, request.zero_v_end_frame, request.grid)
     crossings = crossing_events(track, request.grid, fps)
     track_csv = run_dir / "track.csv"
     events_json = run_dir / "crossing_events.json"
@@ -90,64 +90,64 @@ def run_tracking(request: TrackRequest, progress_callback: ProgressCallback | No
         "visualization_layers_json": str(layers_json),
         "overlay_mp4": str(overlay_mp4),
         "track_review_frames": track_review_frames,
-        "track": _records(track),
+        "track": track_rows_as_json(track),
         "crossing_events": crossings,
         "visualization_layers": layers,
         "fps": float(fps),
     }
 
 
-def track_single_drop_frames(frames: list, initial_position: np.ndarray, source_start_frame: int, cfg: dict[str, Any], grid_mask=None, progress_callback: ProgressCallback | None = None) -> pd.DataFrame:
-    rows: list[dict[str, Any]] = []
+def track_single_drop_frames(frames: list, initial_position: np.ndarray, source_start_frame: int, tracking_options: dict[str, Any], grid_mask=None, progress_callback: ProgressCallback | None = None) -> pd.DataFrame:
+    track_rows: list[dict[str, Any]] = []
     search_center = initial_position.astype(float)
     last_detected = initial_position.astype(float)
     last_detected_frame = 0
     velocity = np.array([0.0, 0.0], dtype=float)
     missed = 0
     for frame_id, frame in enumerate(frames):
-        gray = _preprocess(frame)
+        gray = to_gray_blurred(frame)
         source_frame = int(source_start_frame) + int(frame_id)
         if frame_id == 0:
-            rows.append(_row(frame_id, source_frame, initial_position, initial_position, "tracking", 0, False, math.nan, "manual_target"))
+            track_rows.append(make_track_point(frame_id, source_frame, initial_position, initial_position, "tracking", 0, False, math.nan, "manual_target"))
             if progress_callback is not None:
                 progress_callback("track_frames", "正在逐帧追踪油滴", frame_id + 1, len(frames), "frames")
             continue
         predicted = search_center + velocity
-        near_grid = is_position_near_grid(predicted, grid_mask, int(cfg.get("grid_occlusion_radius_px", 0)))
+        near_grid = is_position_near_grid(predicted, grid_mask, int(tracking_options.get("grid_occlusion_radius_px", 0)))
         chosen = None
-        if not (near_grid and bool(cfg.get("skip_detection_on_grid", True))):
-            features = locate_features_near_position(gray, predicted, float(cfg.get("local_search_radius_px", 45.0)), cfg, grid_mask)
-            chosen = choose_nearest_feature(features, predicted, float(cfg.get("max_accept_distance_px", 30.0)))
+        if not (near_grid and bool(tracking_options.get("skip_detection_on_grid", True))):
+            features = locate_features_near_position(gray, predicted, float(tracking_options.get("local_search_radius_px", 45.0)), tracking_options, grid_mask)
+            chosen = choose_nearest_feature(features, predicted, float(tracking_options.get("max_accept_distance_px", 30.0)))
         if chosen is None:
             missed += 1
             search_center = predicted.copy()
-            rows.append(_row(frame_id, source_frame, np.array([math.nan, math.nan]), predicted, "missing", missed, near_grid, math.nan, "grid" if near_grid else "not_found"))
+            track_rows.append(make_track_point(frame_id, source_frame, np.array([math.nan, math.nan]), predicted, "missing", missed, near_grid, math.nan, "grid" if near_grid else "not_found"))
             if progress_callback is not None:
                 progress_callback("track_frames", "正在逐帧追踪油滴", frame_id + 1, len(frames), "frames")
-            if missed > int(cfg.get("memory_frames", 5)):
+            if missed > int(tracking_options.get("memory_frames", 5)):
                 break
             continue
         current = np.array([float(chosen["x"]), float(chosen["y"])], dtype=float)
         frame_gap = max(1, frame_id - last_detected_frame)
         velocity = (current - last_detected) / frame_gap
         state = "reacquired" if missed else "tracking"
-        rows.append(_row(frame_id, source_frame, current, predicted, state, 0, near_grid, float(chosen.get("mass", math.nan)), ""))
+        track_rows.append(make_track_point(frame_id, source_frame, current, predicted, state, 0, near_grid, float(chosen.get("mass", math.nan)), ""))
         search_center = current.copy()
         last_detected = current.copy()
         last_detected_frame = frame_id
         missed = 0
         if progress_callback is not None:
             progress_callback("track_frames", "正在逐帧追踪油滴", frame_id + 1, len(frames), "frames")
-    return pd.DataFrame(rows)
+    return pd.DataFrame(track_rows)
 
 
-def locate_features_near_position(gray, center, radius: float, cfg: dict[str, Any], grid_mask=None) -> pd.DataFrame:
+def locate_features_near_position(gray, center, radius: float, tracking_options: dict[str, Any], grid_mask=None) -> pd.DataFrame:
     h, w = gray.shape[:2]
     cx, cy = float(center[0]), float(center[1])
     x0, y0 = max(0, int(round(cx - radius))), max(0, int(round(cy - radius)))
     x1, y1 = min(w, int(round(cx + radius + 1))), min(h, int(round(cy + radius + 1)))
     crop = gray[y0:y1, x0:x1].copy()
-    diameter = _ensure_odd(int(cfg.get("diameter", 5)))
+    diameter = ensure_odd_kernel_size(int(tracking_options.get("diameter", 5)))
     if crop.shape[0] < diameter + 2 or crop.shape[1] < diameter + 2:
         return pd.DataFrame()
     reject_mask = None
@@ -159,9 +159,9 @@ def locate_features_near_position(gray, center, radius: float, cfg: dict[str, An
     features = tp.locate(
         crop,
         diameter=diameter,
-        minmass=float(cfg.get("minmass", 80.0)),
-        invert=bool(cfg.get("invert", False)),
-        topn=int(cfg.get("local_topn", 20)),
+        minmass=float(tracking_options.get("minmass", 80.0)),
+        invert=bool(tracking_options.get("invert", False)),
+        topn=int(tracking_options.get("local_topn", 20)),
         characterize=False,
     )
     if features is None or len(features) == 0:
@@ -217,7 +217,7 @@ def crossing_events(track: pd.DataFrame, grid: dict[str, Any], fps: float) -> li
     detected = track[track["detected"].astype(bool)] if not track.empty else track
     encounters: list[tuple[pd.Series, pd.Series, float, bool]] = []
     for line in grid.get("grid_lines_y") or grid.get("line_y_px") or []:
-        if not _is_finite_number(line):
+        if not is_finite_grid_line(line):
             continue
         line = float(line)
         anchor = None
@@ -297,7 +297,7 @@ def visualization_layers(track: pd.DataFrame, crossings: list[dict[str, Any]], r
         },
         "zero_v_window": {"start_frame": request.zero_v_start_frame, "end_frame": request.zero_v_end_frame},
         "target": {"x": request.source_center[0], "y": request.source_center[1], "frame": request.target_frame},
-        "track": _records(track),
+        "track": track_rows_as_json(track),
         "crossing_events": crossings,
     }
 
@@ -363,23 +363,23 @@ def _draw_track_review_overlay(frame, row, points: list[tuple[int, int]], grid: 
         cv2.arrowedLine(frame, (28, 32), (28, 122), (53, 201, 255), 2, tipLength=0.18)
         labels.extend([("水平方向", (124, 22), (255, 201, 53), 18), ("竖直向下", (38, 104), (255, 201, 53), 18)])
         for y in grid.get("grid_lines_y", []) or []:
-            if _is_finite_number(y):
+            if is_finite_grid_line(y):
                 y_i = int(round(float(y)))
                 if 0 <= y_i < height:
                     cv2.line(frame, (0, y_i), (width - 1, y_i), (255, 170, 50), 1)
         top = grid.get("second_line_y") or grid.get("effective_top_px")
         bottom = grid.get("penultimate_line_y") or grid.get("effective_bottom_px")
         for y, color in [(top, (53, 201, 255)), (bottom, (255, 185, 72))]:
-            if _is_finite_number(y):
+            if is_finite_grid_line(y):
                 y_i = int(round(float(y)))
                 if 0 <= y_i < height:
                     cv2.line(frame, (0, y_i), (width - 1, y_i), color, 2)
 
     if row is not None:
         detected = bool(row.detected)
-        x = row.x if detected and _is_finite_number(row.x) else row.pred_x
-        y = row.y if detected and _is_finite_number(row.y) else row.pred_y
-        if _is_finite_number(x) and _is_finite_number(y):
+        x = row.x if detected and is_finite_grid_line(row.x) else row.pred_x
+        y = row.y if detected and is_finite_grid_line(row.y) else row.pred_y
+        if is_finite_grid_line(x) and is_finite_grid_line(y):
             origin = (int(round(float(x))), int(round(float(y))))
             color = (0, 255, 0) if detected else (0, 255, 255)
             label = "目标油滴" if detected else "未检出"
@@ -504,22 +504,22 @@ def make_crossing_review_clip(video_path: str, event: dict[str, Any], out_path: 
     }
 
 
-def _mark_fit_window(track: pd.DataFrame, zero_start: int, zero_end: int, grid: dict[str, Any]) -> pd.DataFrame:
-    out = track.copy()
+def add_fit_window_columns(track: pd.DataFrame, zero_start: int, zero_end: int, grid: dict[str, Any]) -> pd.DataFrame:
+    marked = track.copy()
     penultimate = grid.get("penultimate_line_y")
     legal = []
     out_of_region = False
-    for _, row in out.iterrows():
+    for _, row in marked.iterrows():
         if row.get("state") in {"tracking", "reacquired"} and penultimate is not None and float(row["y"]) > float(penultimate):
             out_of_region = True
         legal.append(not out_of_region)
-    out["legal_region"] = legal
-    out["in_zero_v_window"] = (out["source_frame"] >= int(zero_start)) & (out["source_frame"] <= int(zero_end))
-    out["use_for_fit"] = out["legal_region"] & out["in_zero_v_window"] & out["state"].isin(["tracking", "reacquired"])
-    return out
+    marked["legal_region"] = legal
+    marked["in_zero_v_window"] = (marked["source_frame"] >= int(zero_start)) & (marked["source_frame"] <= int(zero_end))
+    marked["use_for_fit"] = marked["legal_region"] & marked["in_zero_v_window"] & marked["state"].isin(["tracking", "reacquired"])
+    return marked
 
 
-def _read_frames(video_path: str, start: int, end: int, progress_callback: ProgressCallback | None = None) -> tuple[list, float]:
+def read_frame_range(video_path: str, start: int, end: int, progress_callback: ProgressCallback | None = None) -> tuple[list, float]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"无法打开视频：{video_path}")
@@ -540,13 +540,20 @@ def _read_frames(video_path: str, start: int, end: int, progress_callback: Progr
     return frames, fps
 
 
-def _preprocess(frame) -> np.ndarray:
+def to_gray_blurred(frame) -> np.ndarray:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     return cv2.GaussianBlur(gray, (3, 3), 0)
 
 
+def _tophat_seed_threshold(tophat: np.ndarray) -> float:
+    # 亮网格种子的下限：非零响应的高分位，但不能低于最小响应，否则噪声也会被当成线。
+    nonzero = tophat[tophat > 0]
+    percentile = float(np.percentile(nonzero, float(GRID_TOPHAT_PERCENTILE))) if nonzero.size else 0.0
+    return max(float(GRID_MIN_TOPHAT_RESPONSE), percentile)
+
+
 def build_static_grid_mask(video_path: str, start_frame: int = 0, max_frames: int | None = None) -> np.ndarray | None:
-    samples = _read_grid_sample_frames(video_path, start_frame, max_frames)
+    samples = read_grid_sample_frames(video_path, start_frame, max_frames)
     if not samples:
         return None
     first_shape = samples[0].shape
@@ -557,13 +564,11 @@ def build_static_grid_mask(video_path: str, start_frame: int = 0, max_frames: in
     gray = cv2.cvtColor(background_bgr, cv2.COLOR_BGR2GRAY)
     gray_eq = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
     gray_blur = cv2.GaussianBlur(gray_eq, (3, 3), 0)
-    tophat_kernel_size = _ensure_odd(GRID_TOPHAT_KERNEL)
-    adaptive_block_size = _ensure_odd(GRID_ADAPTIVE_BLOCK_SIZE)
+    tophat_kernel_size = ensure_odd_kernel_size(GRID_TOPHAT_KERNEL)
+    adaptive_block_size = ensure_odd_kernel_size(GRID_ADAPTIVE_BLOCK_SIZE)
     tophat_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (tophat_kernel_size, tophat_kernel_size))
     tophat = cv2.morphologyEx(gray_blur, cv2.MORPH_TOPHAT, tophat_kernel)
-    nz = tophat[tophat > 0]
-    percentile_threshold = float(np.percentile(nz, float(GRID_TOPHAT_PERCENTILE))) if nz.size else 0.0
-    tophat_threshold = max(float(GRID_MIN_TOPHAT_RESPONSE), percentile_threshold)
+    tophat_threshold = _tophat_seed_threshold(tophat)
     bright_seed_tophat = np.where(tophat >= tophat_threshold, 255, 0).astype(np.uint8)
     bright_seed_adaptive = cv2.adaptiveThreshold(
         gray_blur,
@@ -615,7 +620,7 @@ def build_static_grid_mask(video_path: str, start_frame: int = 0, max_frames: in
     return grid_mask
 
 
-def _read_grid_sample_frames(video_path: str, start_frame: int, max_frames: int | None) -> list[np.ndarray]:
+def read_grid_sample_frames(video_path: str, start_frame: int, max_frames: int | None) -> list[np.ndarray]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return []
@@ -635,7 +640,7 @@ def _read_grid_sample_frames(video_path: str, start_frame: int, max_frames: int 
     return samples
 
 
-def _row(frame, source_frame, pos, pred, state, missed, blocked, mass, reason) -> dict[str, Any]:
+def make_track_point(frame, source_frame, pos, pred, state, missed, blocked, mass, reason) -> dict[str, Any]:
     return {
         "frame_idx": int(frame),
         "source_frame": int(source_frame),
@@ -653,17 +658,17 @@ def _row(frame, source_frame, pos, pred, state, missed, blocked, mass, reason) -
     }
 
 
-def _ensure_odd(value: int) -> int:
-    value = max(3, int(value))
-    return value if value % 2 else value + 1
+def ensure_odd_kernel_size(kernel_size: int) -> int:
+    kernel_size = max(3, int(kernel_size))
+    return kernel_size if kernel_size % 2 else kernel_size + 1
 
 
-def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
+def track_rows_as_json(df: pd.DataFrame) -> list[dict[str, Any]]:
     return json.loads(df.replace({np.nan: None}).to_json(orient="records"))
 
 
-def _is_finite_number(value: Any) -> bool:
+def is_finite_grid_line(number: Any) -> bool:
     try:
-        return math.isfinite(float(value))
+        return math.isfinite(float(number))
     except (TypeError, ValueError):
         return False
