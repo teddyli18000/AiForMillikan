@@ -88,12 +88,16 @@ jobs:
           MILLIKAN_SMOKE_VIDEO: ${{ github.workspace }}\media\videos\2u.mp4
         run: node tests/electron-smoke.mjs
 
-      - name: Generate SHA256 checksum
+      - name: Prepare public download and SHA256
         shell: pwsh
         run: |
           $exe = Get-ChildItem normal/apps/desktop/release/*.exe | Select-Object -First 1
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe.FullName).Hash.ToLower()
-          "$hash  $($exe.Name)" | Out-File -Encoding utf8 -FilePath "$($exe.FullName).sha256"
+          $version = "${{ github.ref_name }}" -replace '^normal-v', ''
+          $publicName = "Millikan-AI-$version-Windows.exe"
+          $publicPath = Join-Path $exe.DirectoryName $publicName
+          Copy-Item -LiteralPath $exe.FullName -Destination $publicPath
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $publicPath).Hash.ToLower()
+          "$hash  $publicName" | Out-File -Encoding utf8NoBOM -FilePath "$publicPath.sha256"
 
       - name: Resolve display version
         id: meta
@@ -110,5 +114,5 @@ jobs:
           body_path: normal/RELEASE_NOTES.md
           make_latest: true
           files: |
-            normal/apps/desktop/release/*.exe
-            normal/apps/desktop/release/*.sha256
+            normal/apps/desktop/release/Millikan-AI-*-Windows.exe
+            normal/apps/desktop/release/Millikan-AI-*-Windows.exe.sha256
