@@ -19,7 +19,7 @@ and estimating the elementary charge from accepted measurements.
 
 - **Download:** [Windows 1.0](https://github.com/teddyli18000/AiForMillikan/releases/tag/normal-v1.0.0)
 - **Verify:** use the `.sha256` file provided alongside the EXE.
-- **Test video:** [open the Releases page](https://github.com/teddyli18000/AiForMillikan/releases/tag/videos) or [attached to each version](https://github.com/teddyli18000/AiForMillikan/releases/latest)
+- **Test video:** [download from the video collection](https://github.com/teddyli18000/AiForMillikan/releases/tag/videos)
 - **Documentation:** [Technical and academic documentation](normal/docs/README.md)
 
 The portable EXE is unsigned, so Windows SmartScreen may ask for confirmation.
