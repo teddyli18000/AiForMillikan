@@ -1,4 +1,4 @@
-# Normal 工作流与状态机
+# 工作流与状态机
 
 ## 用户流程
 
@@ -12,7 +12,7 @@ flowchart TD
     F --> G{"至少 3 条 accepted q?"}
     G -- 否 --> H["下一颗：同视频或新视频"]
     H --> D
-    G -- 是 --> I["6. Normal 盲反演"]
+    G -- 是 --> I["6. 元电荷盲反演"]
 ```
 
 ## Worker 职责
@@ -27,7 +27,7 @@ flowchart TD
 - `normal.reviewCrossing`：只接受 `same_drop` 或 `different_drop`。
 - `normal.updateRecordSelection`：用户明确接受或排除记录。
 - `normal.startNextDroplet`：在 backend 重置同视频或新视频状态。
-- `normal.runInversion`：只使用符合条件的 accepted Normal records。
+- `normal.runInversion`：只使用符合条件的 accepted 记录。
 
 ## 两套状态
 

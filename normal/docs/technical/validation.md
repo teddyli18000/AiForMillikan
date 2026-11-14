@@ -1,4 +1,4 @@
-# Normal Validation
+# Validation
 
 ## Automated tests
 
@@ -11,7 +11,7 @@ cd normal
 
 Covers grid detection, boundary seconds semantics, selection window, target
 frame, local tracking, crossing blocking, q calculation, uncertainty
-propagation, Normal inversion, session state, and version consistency.
+propagation, blind inversion, session state, and version consistency.
 
 Frontend:
 
@@ -21,7 +21,7 @@ npm test
 npm run build
 ```
 
-Covers direct Normal entry, second-based player controls, selection geometry,
+Covers direct app entry, second-based player controls, selection geometry,
 return/adjust, next droplet, crossing player, q trace, inversion page, and
 scientific notation.
 

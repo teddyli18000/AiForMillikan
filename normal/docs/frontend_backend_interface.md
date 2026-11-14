@@ -1,6 +1,6 @@
-# Normal 前后端接口
+# 前后端接口
 
-本文定义 Normal 桌面界面、Electron IPC 与 Python worker 之间的接口。worker 位于 `normal/src/millikan_ai/desktop_worker.py`，只接收下表中的十二个 `normal.*` 操作。
+本文定义桌面界面、Electron IPC 与 Python worker 之间的接口。worker 位于 `normal/src/millikan_ai/desktop_worker.py`，只接收下表中的十二个 `normal.*` 操作。
 
 ## 传输与路由
 
@@ -84,7 +84,7 @@ q 由平衡电压与零电压下落速度计算；`sigma_q_C` 由速度拟合误
 
 反演结果包含 `status`、`e_hat_C`、`sigma_e_C`、`valid_q_count`、`flags`、`assignments`、`candidates`、`charts` 与 `reference_comparison`。记录不足时返回 `insufficient_eligible_records`。正好三条记录时标记为探索性结果。
 
-`reference_comparison` 用于结果展示，不参与候选搜索、排序或整数分配。Normal 当前没有连续基线模型，不得声称模型胜出。
+`reference_comparison` 用于结果展示，不参与候选搜索、排序或整数分配。当前没有连续基线模型，不得声称模型胜出。
 
 保留或排除记录、过线身份复核未通过后，清除已有反演结果；界面和导出报告须使用重新计算的结果。
 

@@ -14,9 +14,9 @@
 
 任何叠加证据都使用原视频像素坐标，不能按整个 DOM 元素尺寸直接缩放。
 
-## Normal 单滴 Trackpy
+## 单滴 Trackpy
 
-Normal 内部复制并封装了队友验证的局部单滴思路，不直接 import 外部项目。当前关键参数来自 `DEFAULT_NORMAL_CONFIG`：
+本应用内部复制并封装了队友验证的局部单滴思路，不直接 import 外部项目。当前关键参数来自 `DEFAULT_NORMAL_CONFIG`：
 
 | 参数 | 1.0 默认值 |
 |---|---:|

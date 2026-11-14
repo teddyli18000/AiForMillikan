@@ -95,10 +95,18 @@ jobs:
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe.FullName).Hash.ToLower()
           "$hash  $($exe.Name)" | Out-File -Encoding utf8 -FilePath "$($exe.FullName).sha256"
 
+      - name: Resolve display version
+        id: meta
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^normal-v', ''
+          $version = $version -replace '\.0$', ''
+          "version=$version" | Out-File -Append -Encoding utf8NoBOM $env:GITHUB_OUTPUT
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: 密立根油滴实验 ${{ github.ref_name }}
+          name: 密立根油滴实验 ${{ steps.meta.outputs.version }}
           body_path: normal/RELEASE_NOTES.md
           make_latest: true
           files: |

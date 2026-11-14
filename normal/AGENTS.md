@@ -85,7 +85,7 @@ this project's `src/` contains only `millikan_ai/__init__.py`,
   handlers into the packaged worker, using a generated synthetic video. It
   covers crossing review, three kept records, exclusion, same-video and
   different-video session changes, inversion, and export. React tests use the
-  demo API and do not replace this check.
+  test double in `vitest.setup.ts` and do not replace this check.
 - Do not remove these checks from CI. They are the release acceptance loop.
 
 ## Commands

@@ -1,4 +1,4 @@
-# Normal 不确定度
+# 不确定度
 
 ## 线性回归斜率不确定度
 
@@ -64,7 +64,7 @@ S_{q,v}
 
 ## 当前 uncertainty budget
 
-Normal 1.0 明确纳入：
+1.0 明确纳入：
 
 - `velocity_fit_random`：0 V 线性回归斜率随机不确定度。
 
@@ -82,7 +82,7 @@ Normal 1.0 明确纳入：
 
 ## 反演中的数值 floor
 
-Normal 反演可以使用：
+反演可以使用：
 
 \[
 \sigma_{\mathrm{eff},i}^2

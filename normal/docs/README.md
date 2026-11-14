@@ -1,13 +1,13 @@
-# Normal Documentation
+# Millikan AI Documentation
 
-Current contracts and physics notes for the Normal app. Experimental material
+Current contracts and physics notes for the app. Experimental material
 lives in `experimental/docs/`.
 
 ## Technical
 
 - [Architecture](technical/architecture.md): renderer, Electron main, Python
   worker, and transient session.
-- [Normal workflow](technical/normal-workflow.md): stages, state machine,
+- [Measurement workflow](technical/normal-workflow.md): stages, state machine,
   session and record status.
 - [Tracking and review](technical/tracking-and-review.md): selection box, video
   coordinates, Trackpy, crossing events, and trajectory evidence.
