@@ -12,12 +12,12 @@ import type { WorkspaceDesk } from "./workspaceDesk";
 import type { VideoControls } from "./videoControls";
 import type { RecordRestore } from "./recordRestore";
 
-function makeStageActions(desk: WorkspaceDesk, video: VideoControls, restore: RecordRestore) {
+function makeStageActions(desk: WorkspaceDesk, video: VideoControls) {
   const { setStage, session, setSession, setDefaultParameters, metadata, setMetadata } = desk;
   const { videoPath, videoUrl, setVideoUrl, boundary, setBoundary, boundaryEdited } = desk;
-  const { setBoundaryEdited, grid, setGrid, selectionTime, setSelectionTime, selectionBox } = desk;
+  const { setBoundaryEdited, setGrid, selectionTime, setSelectionTime, selectionBox } = desk;
   const { setSelectionBox, balanceVoltage, balanceConfirmed, setSelectedRecordId, retrySourceRecordId, setRetrySourceRecordId } = desk;
-  const { setCurrentCrossing, setInversion, setProgress, setBusy, message, setMessage } = desk;
+  const { setCurrentCrossing, setInversion, setProgress, setBusy, setMessage } = desk;
 
   const startPrepare = async () => {
     if (!videoPath) {
@@ -121,8 +121,7 @@ function makeStageActions(desk: WorkspaceDesk, video: VideoControls, restore: Re
 
 function makeReviewActions(desk: WorkspaceDesk, restore: RecordRestore) {
   const { setStage, session, setSession, setSelectedRecordId, currentCrossing, setCurrentCrossing } = desk;
-  const { setInversion, setProgress, setBusy, message, setMessage, selectedRecord } = desk;
-  const { crossings } = desk;
+  const { setInversion, setProgress, setBusy, setMessage, selectedRecord } = desk;
 
   const prepareCrossingReview = async (event: NormalCrossingEvent) => {
     if (!selectedRecord) return;
@@ -204,8 +203,8 @@ function makeReviewActions(desk: WorkspaceDesk, restore: RecordRestore) {
 }
 
 function makeResultActions(desk: WorkspaceDesk) {
-  const { setStage, session, setSession, inversion, setInversion, setProgress } = desk;
-  const { setBusy, message, setMessage } = desk;
+  const { setStage, session, setSession, setInversion, setProgress } = desk;
+  const { setBusy, setMessage } = desk;
 
   const runInversion = async () => {
     setBusy(true);
@@ -237,7 +236,7 @@ function makeResultActions(desk: WorkspaceDesk) {
 
 export function useMeasurementActions(desk: WorkspaceDesk, video: VideoControls, restore: RecordRestore) {
   return {
-    ...makeStageActions(desk, video, restore),
+    ...makeStageActions(desk, video),
     ...makeReviewActions(desk, restore),
     ...makeResultActions(desk)
   };

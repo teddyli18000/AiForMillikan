@@ -20,7 +20,7 @@ function makeRecordRestore(desk: WorkspaceDesk, video: VideoControls) {
   const { setStage, session, setSession, metadata, setMetadata, videoPath } = desk;
   const { setVideoPath, setVideoUrl, boundary, setBoundary, setBoundaryEdited, grid } = desk;
   const { setGrid, selectionTime, setSelectionTime, setSelectionBox, setBalanceVoltage, setBalanceConfirmed } = desk;
-  const { setOverrideFields, setRetrySourceRecordId, setCurrentCrossing, setBusy, message, setMessage } = desk;
+  const { setOverrideFields, setRetrySourceRecordId, setCurrentCrossing, setBusy, setMessage } = desk;
   const { setDuration } = desk;
 
   const loadRecordForEditing = async (record: NormalRecord, restoredSession: NormalSession | null | undefined, destination: MeasurementStage, markRetry: boolean): Promise<boolean> => {
@@ -123,7 +123,7 @@ function makeNextDroplet(desk: WorkspaceDesk, video: VideoControls) {
   const { setVideoPath, videoUrl, setVideoUrl, boundary, setBoundary, setBoundaryEdited } = desk;
   const { grid, setGrid, selectionTime, setSelectionTime, setSelectionBox, setSelectionAnchor } = desk;
   const { setBalanceVoltage, setBalanceConfirmed, setOverrideFields, setSelectedRecordId, setRetrySourceRecordId, setCurrentCrossing } = desk;
-  const { setInversion, setProgress, setBusy, message, setMessage, setCurrentTime } = desk;
+  const { setInversion, setProgress, setBusy, setMessage, setCurrentTime } = desk;
   const { setDuration, setNextDropDialogOpen, selectedRecord } = desk;
 
   const startFreshDroplet = () => {

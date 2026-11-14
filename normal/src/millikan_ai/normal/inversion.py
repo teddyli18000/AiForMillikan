@@ -8,7 +8,7 @@ import numpy as np
 SI_ELEMENTARY_CHARGE_C = 1.602176634e-19
 
 
-def insufficient_result(eligible: list[dict[str, Any]], icfg: dict[str, Any], min_records: int) -> dict[str, Any]:
+def insufficient_result(eligible: list[dict[str, Any]], min_records: int) -> dict[str, Any]:
     return {
         "reliable": False,
         "status": "insufficient_eligible_records",
@@ -80,7 +80,7 @@ def run_weighted_integer_inversion(records: list[dict[str, Any]], cfg: dict[str,
     eligible = _eligible_records(records)
     min_records = int(icfg.get("min_records", 3))
     if len(eligible) < min_records:
-        return insufficient_result(eligible, icfg, min_records)
+        return insufficient_result(eligible, min_records)
 
     inputs = charge_inputs(eligible, icfg)
     q, sigma_raw, sigma = inputs["q"], inputs["sigma_raw"], inputs["sigma"]

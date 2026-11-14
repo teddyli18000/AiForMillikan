@@ -6,7 +6,6 @@ import type {
   NormalGrid,
   NormalInversionResult,
   NormalProgressEvent,
-  NormalRecord,
   NormalSession,
   VideoMetadata
 } from "../../types";
@@ -197,7 +196,7 @@ export function NormalWorkspace() {
   const {
     inspectVideo, openVideo, onDrop, startPrepare, confirmBoundary, selectTargetAndTrack,
     prepareCrossingReview, submitCrossingReview, acceptRecord, runInversion, exportSession,
-    seekVideoTo, jumpTo, playerJumpTo, togglePlay, setSelectionFrameTime, adjustBoundary,
+    jumpTo, playerJumpTo, togglePlay, setSelectionFrameTime, adjustBoundary,
     adjustSelectionTime, onSelectionDown, onSelectionMove, endSelection, videoBoxStyle,
     parameterInputValue, noteBoundaryEdit, nextDropSameVideo,
     nextDropDifferentVideo, backToBoundary, backToTarget, onLoadedMetadata, onTimeUpdate

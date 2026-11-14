@@ -15,10 +15,10 @@ import { desktopApi } from "../../lib/desktopApi";
 import type { WorkspaceDesk } from "./workspaceDesk";
 
 function makeVideoImport(desk: WorkspaceDesk) {
-  const { setStage, metadata, setMetadata, setVideoPath, setVideoUrl, setBoundary } = desk;
+  const { setStage, setMetadata, setVideoPath, setVideoUrl, setBoundary } = desk;
   const { setBoundaryEdited, setGrid, setSelectionBox, setBalanceVoltage, setBalanceConfirmed, setOverrideFields } = desk;
   const { setSelectedRecordId, setRetrySourceRecordId, setCurrentCrossing, setInversion, setProgress, setBusy } = desk;
-  const { message, setMessage, setCurrentTime, setDuration } = desk;
+  const { setMessage, setCurrentTime, setDuration } = desk;
 
   const inspectVideo = async (path: string) => {
     if (!path) {
@@ -80,7 +80,7 @@ function makeVideoImport(desk: WorkspaceDesk) {
 function makePlaybackControls(desk: WorkspaceDesk) {
   const { videoRef, stage, metadata, boundary, setBoundary, setBoundaryEdited } = desk;
   const { selectionTime, setSelectionTime, setSelectedRecordId, setCurrentCrossing, setInversion, setMessage } = desk;
-  const { currentTime, setCurrentTime, duration } = desk;
+  const { setCurrentTime, duration } = desk;
 
   const seekVideoTo = (time: number, metadataOverride?: VideoMetadata | null, pause = false) => {
     const safeDuration = metadataOverride?.duration_s || duration || metadata?.duration_s || Number.POSITIVE_INFINITY;
@@ -221,7 +221,7 @@ function makeSelectionDrag(desk: WorkspaceDesk) {
 }
 
 function makeParameterInputs(desk: WorkspaceDesk) {
-  const { defaultParameters, setBoundary, setBoundaryEdited, grid, overrideFields, setSelectedRecordId } = desk;
+  const { defaultParameters, setBoundary, setBoundaryEdited, overrideFields, setSelectedRecordId } = desk;
   const { setCurrentCrossing, setInversion } = desk;
 
   const overridesForWorker = () => {
@@ -262,8 +262,8 @@ function makeParameterInputs(desk: WorkspaceDesk) {
 }
 
 function makeVideoElementHandlers(desk: WorkspaceDesk) {
-  const { stage, metadata, boundary, selectionTime, setSelectionTime, currentTime } = desk;
-  const { setCurrentTime, duration, setDuration } = desk;
+  const { stage, metadata, boundary, selectionTime, setSelectionTime } = desk;
+  const { setCurrentTime, setDuration } = desk;
 
 
   const onLoadedMetadata = (event: SyntheticEvent<HTMLVideoElement>) => {
