@@ -1,15 +1,15 @@
-# Normal Architecture
+# Architecture
 
-The Normal app is a Windows portable Electron application with a project-local
+The app is a Windows portable Electron application with a project-local
 Python worker. It measures one droplet at a time and keeps every consequential
 step inspectable.
 
 ```mermaid
 flowchart LR
     UI["Electron + React renderer"] --> IPC["Electron IPC"]
-    IPC --> W["Normal Python worker"]
+    IPC --> W["Python worker"]
     W --> N["millikan_ai.normal"]
-    N --> S["Transient Normal session"]
+    N --> S["Transient session"]
     N --> R["Records, review frames, exports"]
 ```
 
@@ -26,9 +26,9 @@ It never reads arbitrary local files directly and never recomputes physics.
 `apps/desktop/electron/` owns:
 
 - file dialogs and drag-and-drop path resolution;
-- Normal-only IPC dispatch;
+- IPC dispatch for this app;
 - starting the Python worker;
-- forwarding Normal progress events;
+- forwarding progress events;
 - maximum-width window on startup;
 - deleting implicit transient session roots on exit.
 

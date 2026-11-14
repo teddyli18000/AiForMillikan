@@ -25,3 +25,4 @@ def test_python_and_desktop_versions_match_release() -> None:
     assert package["version"] == version
     assert package_lock["version"] == version
     assert package_lock["packages"][""]["version"] == version
+    assert package["build"]["portable"]["artifactName"] == "密立根油滴实验-${version}.exe"

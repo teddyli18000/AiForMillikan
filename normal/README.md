@@ -1,17 +1,12 @@
-# Millikan AI Normal
+# Millikan AI
 
-**Version 0.9.3** — the mainline human-in-the-loop measurement app for the
-Millikan oil-drop experiment.
+**Version 1.0** — desktop app for the Millikan oil-drop experiment.
 
-Normal follows the traditional balance-voltage plus `0 V` falling method and
-keeps every consequential decision visible. The app suggests where to look,
-tracks one selected droplet, asks the experimenter to review ambiguous grid
-crossings, calculates a single-drop charge with an explicit uncertainty trace,
-and performs a blind integer-residual search after at least three accepted
-measurements.
-
-The AI value proposition is intelligent assistance with inspectable evidence,
-not an unreviewed automatic answer.
+The app follows the traditional balance-voltage plus `0 V` falling method and
+keeps every consequential decision visible. It suggests where to look, tracks
+one selected droplet, asks the experimenter to review ambiguous grid crossings,
+calculates a single-drop charge with an explicit uncertainty trace, and performs
+a blind integer-residual search after at least three accepted measurements.
 
 ![q calculation evidence](../media/screenshots/q-calculation.png)
 
@@ -24,7 +19,7 @@ not an unreviewed automatic answer.
 4. Track the droplet locally with Trackpy and review the full trajectory.
 5. Review every crossing event with backend-generated review frames.
 6. Accept or reject the q record and inspect the calculation chain.
-7. After three accepted q records, run the Normal blind inversion.
+7. After three accepted q records, run the blind inversion.
 8. Export the transient session before closing the app.
 
 ![tracking review](../media/screenshots/tracking-review.png)
@@ -35,9 +30,9 @@ not an unreviewed automatic answer.
 ```
 normal/
 ├── apps/desktop/           # Electron + React renderer and main process
-├── src/millikan_ai/        # Normal Python worker and millikan_ai.normal package
-├── tests/                  # Normal-only Python tests
-├── docs/                   # Normal contracts and physics notes
+├── src/millikan_ai/        # Python worker and millikan_ai.normal package
+├── tests/                  # Python tests for this app
+├── docs/                   # Contracts and physics notes
 ├── pyproject.toml
 └── AGENTS.md
 ```
@@ -58,11 +53,11 @@ npm run worker:build
 npx electron-builder --win portable
 ```
 
-The portable artifact is `密立根油滴实验-0.9.3.exe`.
+The portable artifact is `密立根油滴实验-1.0.0.exe`.
 
 ## Scientific boundaries
 
-- One droplet at a time. Multi-drop statistics are not a Normal feature.
+- One droplet at a time. Multi-drop statistics are not part of this app.
 - q comes from the balance-voltage plus `0 V` falling method, with uncertainty
   propagated from the linear-regression slope and q(v).
 - The blind inversion reports `e_hat_C`, `sigma_e_C`, candidate solutions,
@@ -74,7 +69,7 @@ The portable artifact is `密立根油滴实验-0.9.3.exe`.
 ## Documentation
 
 - [Frontend/backend contract](docs/frontend_backend_interface.md)
-- [Normal workflow](docs/technical/normal-workflow.md)
+- [Measurement workflow](docs/technical/normal-workflow.md)
 - [Tracking and review](docs/technical/tracking-and-review.md)
 - [Architecture](docs/technical/architecture.md)
 - [Academic notes](docs/academic/)

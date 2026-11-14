@@ -1,4 +1,4 @@
-# Normal Encoding, Build, and Release
+# Encoding, Build, and Release
 
 ## UTF-8 contract
 
@@ -38,7 +38,7 @@ npx electron-builder --win portable
 1. Encoding scan, full Python suite, frontend suite, TypeScript build.
 2. Build the worker and package the portable EXE.
 3. Start the packaged worker and verify Chinese progress/error bytes.
-4. Launch the portable EXE and walk the Normal workflow.
+4. Launch the portable EXE and walk the measurement workflow.
 5. Check exported Markdown/JSON/CSV encoding.
 6. Generate the SHA256 file.
 7. Create tag `normal-vX.Y.Z` and let `normal-release.yml` publish the Release.

@@ -1,11 +1,11 @@
 # Millikan AI
 
-**Desktop software for the Millikan oil-drop experiment.**
+**Desktop software for the Millikan oil-drop experiment. Version 1.0.**
 
 **Presented by Xinchen Lee & Minghao Yao**
 
-[![Release](https://img.shields.io/github/v/release/teddyli18000/AiForMillikan?style=flat-square&label=release)](https://github.com/teddyli18000/AiForMillikan/releases/latest)
-[![Windows](https://img.shields.io/badge/platform-Windows-2563eb?style=flat-square)](https://github.com/teddyli18000/AiForMillikan/releases/tag/normal-v0.9.3)
+[![Release](https://img.shields.io/badge/release-1.0-black?style=flat-square)](https://github.com/teddyli18000/AiForMillikan/releases/latest)
+[![Windows](https://img.shields.io/badge/platform-Windows-2563eb?style=flat-square)](https://github.com/teddyli18000/AiForMillikan/releases/tag/normal-v1.0.0)
 [![Electron](https://img.shields.io/badge/desktop-Electron-111827?style=flat-square)](normal/apps/desktop)
 [![Python](https://img.shields.io/badge/worker-Python-3776ab?style=flat-square)](normal/src/millikan_ai)
 
@@ -15,13 +15,11 @@ and estimating the elementary charge from accepted measurements.
 
 ![Measurement workspace](media/screenshots/normal-workspace.png)
 
-*Screenshots use built-in demo data.*
-
 ## Get the app
 
-- **Download:** [Windows 0.9.3](https://github.com/teddyli18000/AiForMillikan/releases/tag/normal-v0.9.3)
+- **Download:** [Windows 1.0](https://github.com/teddyli18000/AiForMillikan/releases/tag/normal-v1.0.0)
 - **Verify:** use the `.sha256` file provided alongside the EXE.
-- **Test video:** [open the Releases page](https://github.com/teddyli18000/AiForMillikan/releases/tag/videos) or [attached to each version](https://github.com/teddyli18000/AiForMillikan/releases/latest)
+- **Test video:** [download from the video collection](https://github.com/teddyli18000/AiForMillikan/releases/tag/videos)
 - **Documentation:** [Technical and academic documentation](normal/docs/README.md)
 
 The portable EXE is unsigned, so Windows SmartScreen may ask for confirmation.
@@ -61,9 +59,9 @@ candidate elementary charge. Results from three drops are exploratory.
 
 ## Applications
 
-| Route | Purpose | Status |
+| Application | Purpose | Status |
 | --- | --- | --- |
-| **Normal** | One user-selected droplet at a time; human review; transient session; blind inversion | Recommended |
+| **Millikan AI 1.0** | One user-selected droplet at a time; human review; transient session; blind inversion | Stable |
 | **Experimental** | Automatic multi-drop and multi-platform research pipeline | Experimental |
 
 Each application has its own frontend, worker, and tests.
@@ -87,7 +85,7 @@ The diagram summarizes major changes during development.
 
 ## Run from source
 
-Each application has its own setup and build instructions: [Normal](normal/README.md)
+Each application has its own setup and build instructions: [Millikan AI](normal/README.md)
 and [Experimental](experimental/README.md).
 
 ## Contributors
@@ -98,8 +96,6 @@ and [Experimental](experimental/README.md).
 - [Minghao Yao](https://github.com/teddyli18000/AiForMillikan/graphs/contributors) —
   experimental data and video collection, plus the local Trackpy tracking
   prototype used to validate the main single-droplet tracking direction.
-
-<!-- Replace the teammate contributors link with a personal profile when available. -->
 
 ## Academic method
 

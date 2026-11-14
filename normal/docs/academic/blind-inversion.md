@@ -2,7 +2,7 @@
 
 ## 输入
 
-Normal 只使用满足以下条件的记录：
+本应用只使用满足以下条件的记录：
 
 - `record.status == accepted`
 - `record.kept == true`
@@ -72,7 +72,7 @@ SI 精确定义值 \(1.602176634\times10^{-19}\ \mathrm{C}\) 只用于显示百�
 
 ## 不能宣称的内容
 
-Normal 1.0 没有拟合真实 continuous baseline，因此不会输出：
+1.0 没有拟合真实 continuous baseline，因此不会输出：
 
 ```text
 quantized_favored
