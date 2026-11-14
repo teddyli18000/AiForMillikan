@@ -1,0 +1,42 @@
+name: Publish Millikan AI 1.0 (one-time)
+on:
+  push:
+    paths:
+      - ".github/workflows/publish-millikan-1-0-once.yml"
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout release source and notes
+        uses: actions/checkout@v4
+      - name: Download CI-validated portable binary
+        uses: actions/download-artifact@v4
+        with:
+          name: millikan-ai-normal-portable
+          run-id: 43613005642
+          github-token: ${{ github.token }}
+          path: release
+      - name: Verify EXE and generate SHA256
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'release/密立根油滴实验-1.0.0.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "Millikan AI 1.0 EXE not found" }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLower()
+          "$hash  密立根油滴实验-1.0.0.exe" | Out-File -Encoding utf8NoBOM "$exe.sha256"
+      - name: Publish official 1.0 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: normal-v1.0.0
+          target_commitish: 6c5d7eb2744948f3019f18892fa4e90c1714da08
+          name: 密立根油滴实验 1.0
+          make_latest: true
+          fail_on_unmatched_files: true
+          body_path: normal/RELEASE_NOTES.md
+          files: |
+            release/密立根油滴实验-1.0.0.exe
+            release/密立根油滴实验-1.0.0.exe.sha256
